@@ -282,6 +282,14 @@ def _appearance(low: str) -> DirectCommand | None:
         "otomatik medyayı aç": ("auto_media", True),
         "kendi kendine müzik aç": ("auto_media", True),
         "otomatik medyayı kapat": ("auto_media", False),
+        "duygusal tepkileri aç": ("companion_reactions", True),
+        "duygusal tepkileri kapat": ("companion_reactions", False),
+        "açılış brifingini aç": ("briefing_on_startup", True),
+        "açılış brifingini kapat": ("briefing_on_startup", False),
+        "medya tuşlarını aç": ("media_keys", True),
+        "medya tuşlarını kapat": ("media_keys", False),
+        "denetim kaydını aç": ("audit_log", True),
+        "denetim kaydını kapat": ("audit_log", False),
     }
     if low in settings:
         key, value = settings[low]
@@ -523,6 +531,68 @@ def parse_direct_command(
     match = re.fullmatch(r"([\w-]+)\s*(?:numaralı\s*)?notu sil", low)
     if match:
         return _cmd("note", action="delete", id=match.group(1))
+    if low in {"günaydın brifingi", "sabah brifingi", "brifing", "bugün planım ne"}:
+        return _cmd("briefing", action="morning")
+    if low in {"gün sonu özeti", "bugün ne yaptım", "günlük özet"}:
+        return _cmd("briefing", action="summary")
+    if low in {
+        "haftalık plan",
+        "bu hafta odaklanmam gerekenler",
+        "bu hafta ne yapmalıyım",
+    }:
+        return _cmd("briefing", action="weekly")
+    if low in {"modun nasıl", "nasıl hissediyorsun", "ruh halin nasıl"}:
+        return _cmd("companion", action="mood")
+    if low in {"kahve ver", "kahve iç"}:
+        return _cmd("companion", action="coffee")
+    if low in {"kurabiye ver", "kurabiye"}:
+        return _cmd("companion", action="cookie")
+    if low in {"ödül ver", "seni ödüllendiriyorum"}:
+        return _cmd("companion", action="reward")
+    if low in {"seni özledim", "özledim"}:
+        return _cmd("companion", action="miss")
+    if low in {"bağlılık seviyesi", "arkadaşlık seviyesi"}:
+        return _cmd("companion", action="affection")
+    if low in {"izinleri göster", "izin merkezi", "izinlerim"}:
+        return _cmd("permissions", action="list")
+    if low in {"son işlemleri göster", "denetim kaydı", "son işlemler"}:
+        return _cmd("permissions", action="audit")
+    if low in {"denetim kaydını temizle", "son işlemleri temizle"}:
+        return _cmd("permissions", action="clear_audit")
+    if low in {"verilerimi dışa aktar", "veriyi dışa aktar", "yedek al"}:
+        return _cmd("export_data")
+    for pattern, scope in (
+        (r"notlarımda\s+(.+?)\s+ara", "notes"),
+        (r"hafızamda\s+(.+?)\s+ara", "memories"),
+        (r"görevlerimde\s+(.+?)\s+ara", "tasks"),
+        (r"anlamsal ara\s+(.+)", "all"),
+        (r"yerel ara\s+(.+)", "all"),
+    ):
+        match = re.fullmatch(pattern, low)
+        if match:
+            return _cmd("local_search", query=match.group(1)[:200], scope=scope)
+    if low in {"spotify duraklat", "müziği duraklat", "duraklat", "çal/duraklat"}:
+        return _cmd("media_control", action="play_pause")
+    if low in {"sonraki şarkı", "sonraki parça", "şarkıyı değiştir"}:
+        return _cmd("media_control", action="next")
+    if low in {"önceki şarkı", "önceki parça"}:
+        return _cmd("media_control", action="previous")
+    if low in {"müziği durdur", "spotify durdur"}:
+        return _cmd("media_control", action="stop")
+    if low in {"şu an ne çalıyor", "çalan şarkı", "hangi şarkı çalıyor"}:
+        return _cmd("media_control", action="now_playing")
+    if low in {"sayı oyunu", "sayı oyunu başlat", "sayı tahmin oyunu"}:
+        return _cmd("number_game", action="start")
+    match = re.fullmatch(r"sayı tahminim\s*(\d{1,3})", low)
+    if match:
+        return _cmd("number_game", action="guess", guess=int(match.group(1)))
+    if low in {"sayı oyununu bitir", "sayı oyunu iptal"}:
+        return _cmd("number_game", action="stop")
+    match = re.fullmatch(
+        r"(?:son komutları|bunu) rutin(?: olarak)? kaydet\s*[:=-]?\s*(.+)", low
+    )
+    if match:
+        return _cmd("routine", action="save_recent", name=match.group(1)[:60])
     if low in {"müzik aç", "spotify aç", "spotifyda müzik aç", "biraz müzik aç"}:
         return _cmd(
             "media", "Spotify'da bir şeyler açıyorum senpai~ 🎧", action="music"

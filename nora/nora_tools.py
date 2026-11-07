@@ -367,6 +367,69 @@ class NoraTools(QObject):
         )
         return result.replace("Bağlantıyı", "YouTube video aramasını") + " 🍿"
 
+    def media_control(self, action: str) -> str:
+        """Send OS media keys; works with Spotify desktop without OAuth."""
+        if self.store is not None and not self.store.preference("media_keys", True):
+            return "Medya tuşları ayarlardan kapalı senpai. 'medya tuşlarını aç' diyebilirsin. 🎧"
+        action = str(action).strip()
+        if action == "now_playing":
+            return self.spotify_now_playing()
+        windows_vk = {
+            "play_pause": 0xB3,
+            "next": 0xB0,
+            "previous": 0xB1,
+            "stop": 0xB2,
+        }
+        unix_keys = {
+            "play_pause": "playpause",
+            "next": "nexttrack",
+            "previous": "prevtrack",
+            "stop": "stop",
+        }
+        if action not in windows_vk:
+            return "Bu medya kontrolünü bilmiyorum senpai."
+        try:
+            if sys.platform == "win32":
+                import ctypes
+
+                vk = windows_vk[action]
+                ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+                ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
+            else:
+                import pyautogui
+
+                pyautogui.press(unix_keys[action])
+        except Exception as exc:
+            logger.warning("Medya tuşu gönderilemedi: %s", type(exc).__name__)
+            return "Medya tuşunu gönderemedim senpai. Sistem kısayol izinlerini kontrol et. 🎧"
+        labels = {
+            "play_pause": "çal/duraklat",
+            "next": "sonraki parça",
+            "previous": "önceki parça",
+            "stop": "durdur",
+        }
+        return f"Medya tuşunu gönderdim: {labels[action]}. Spotify/desktop oynatıcı buna yanıt vermeli. 🎧"
+
+    def spotify_now_playing(self) -> str:
+        try:
+            import pygetwindow as gw
+
+            titles = [str(title) for title in gw.getAllTitles() if title]
+        except Exception:
+            titles = []
+        for title in titles:
+            low = title.lower()
+            if "spotify" in low and low not in {
+                "spotify",
+                "spotify premium",
+                "spotify free",
+            }:
+                return f"Spotify pencere başlığı: {title[:200]} 🎧"
+        return (
+            "Çalan şarkıyı güvenilir biçimde okuyamadım senpai. Spotify pencere başlığı boş görünüyor; "
+            "kesin şarkı bilgisi için Spotify API/OAuth entegrasyonu gerekir. 🎧"
+        )
+
     # ------------------------------------------------------------------- volume
     def set_volume(self, level: int | float) -> str:
         try:

@@ -545,3 +545,53 @@ def test_drag_discomfort_and_pretty_landing(qapp):
         pet._tick()
     assert pet.state == PetState.IDLE
     pet.shutdown()
+
+
+def test_v18_local_companion_briefing_search_and_recent_routine(qapp, monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    app.show_chat()
+    app._send_message("kahve ver")
+    assert app.store.companion_state["affection"] > 20
+    app._send_message("not al: kahve çekirdeği al")
+    assert process_until(qapp, lambda: not app._busy)
+    app._execute_command({"command": "local_search", "query": "kahve", "scope": "all"})
+    app._execute_command({"command": "briefing", "action": "morning"})
+    app._execute_command({"command": "permissions", "action": "list"})
+    app._execute_command({"command": "number_game", "action": "start"})
+    assert app.number_game.answer
+    app._execute_command({"command": "pet_action", "action": "sit"})
+    app._execute_command({"command": "routine", "action": "save_recent", "name": "son"})
+    assert app.store.routine("son")
+    assert app.store.audit_log
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_media_control_command_runs_through_tool_worker(qapp, monkeypatch):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    calls = []
+    monkeypatch.setattr(
+        app.tools, "media_control", lambda action: calls.append(action) or "tamam"
+    )
+    app._execute_command({"command": "media_control", "action": "next"})
+    assert process_until(qapp, lambda: not app._busy)
+    assert calls == ["next"]
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_companion_reactions_can_be_disabled(qapp):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    app.store.set_preference("companion_reactions", False)
+    before = app.store.companion_state["affection"]
+    app._execute_command({"command": "companion", "action": "coffee"})
+    assert app.store.companion_state["affection"] == before
+    app.shutdown()
+    qapp.processEvents()

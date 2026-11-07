@@ -80,6 +80,13 @@ KOMUTLAR (JSON alan adlarını aynen kullan):
 {"command":"speech_test"}  // sesli yanıt durumunu ve ses motorunu test et
 {"command":"stt_test"}  // mikrofon/ses tanıma testi; komut çalıştırmadan transkripti göster
 {"command":"media","action":"music","query":"lofi hip hop"}  // video için action:"video"; Spotify/YouTube açar
+{"command":"media_control","action":"play_pause"}  // next/previous/stop/now_playing
+{"command":"briefing","action":"morning"}  // summary/weekly
+{"command":"companion","action":"coffee"}  // mood/cookie/reward/miss/affection
+{"command":"local_search","query":"kahve","scope":"all"}
+{"command":"permissions","action":"list"}  // audit/clear_audit
+{"command":"export_data"}
+{"command":"number_game","action":"start"}  // guess requires guess:1-100
 {"command":"clipboard_help","action":"translate","target_language":"İngilizce"}
 {"command":"screen_text","prompt":"Ekrandaki hatayı açıkla"}
 {"command":"find_files","query":"rapor","directory":"downloads","extension":"pdf"}
@@ -331,6 +338,7 @@ def normalize_command(command: Any) -> dict[str, Any]:
         "undo_files",
         "speech_test",
         "stt_test",
+        "export_data",
     }:
         pass
     elif name in {"screenshot", "camera"}:
@@ -508,7 +516,7 @@ def normalize_command(command: Any) -> dict[str, Any]:
             raise CommandError("Hedef tek bir güvenli klasör adı olmalı.")
     elif name == "routine":
         action = command.get("action", "list")
-        if action not in {"add", "list", "delete", "run"}:
+        if action not in {"add", "list", "delete", "run", "save_recent"}:
             raise CommandError("Geçersiz rutin işlemi.")
         out["action"] = action
         if action != "list":
@@ -543,6 +551,42 @@ def normalize_command(command: Any) -> dict[str, Any]:
         out["action"] = action
         if action == "answer":
             out["answer"] = _text(command, "answer", 40)
+    elif name == "briefing":
+        action = command.get("action", "morning")
+        if action not in {"morning", "summary", "weekly"}:
+            raise CommandError("Brifing morning/summary/weekly olmalı.")
+        out["action"] = action
+    elif name == "companion":
+        action = command.get("action", "mood")
+        if action not in {"mood", "coffee", "cookie", "reward", "miss", "affection"}:
+            raise CommandError("Geçersiz companion işlemi.")
+        out["action"] = action
+    elif name == "permissions":
+        action = command.get("action", "list")
+        if action not in {"list", "audit", "clear_audit"}:
+            raise CommandError("İzin işlemi list/audit/clear_audit olmalı.")
+        out["action"] = action
+    elif name == "local_search":
+        out["query"] = _text(command, "query", 200)
+        scope = command.get("scope", "all")
+        if scope not in {"all", "notes", "memories", "tasks"}:
+            raise CommandError("Arama kapsamı all/notes/memories/tasks olmalı.")
+        out["scope"] = scope
+        out["limit"] = (
+            int(_number(command, "limit", 1, 20)) if "limit" in command else 8
+        )
+    elif name == "media_control":
+        action = command.get("action", "play_pause")
+        if action not in {"play_pause", "next", "previous", "stop", "now_playing"}:
+            raise CommandError("Medya kontrolü geçersiz.")
+        out["action"] = action
+    elif name == "number_game":
+        action = command.get("action", "start")
+        if action not in {"start", "guess", "stop"}:
+            raise CommandError("Sayı oyunu start/guess/stop olmalı.")
+        out["action"] = action
+        if action == "guess":
+            out["guess"] = int(_number(command, "guess", 1, 100))
     elif name == "media":
         action = command.get("action", "music")
         if action not in {"music", "video"}:
@@ -596,6 +640,10 @@ SETTINGS_KEYS = {
     "auto_camera_watch",
     "auto_media",
     "autonomy_minutes",
+    "companion_reactions",
+    "briefing_on_startup",
+    "media_keys",
+    "audit_log",
     "tts",
     "proactive",
     "quiet_hours",
@@ -652,6 +700,7 @@ SAFE_ROUTINE_COMMANDS = {
     "memory",
     "settings",
     "stt_backend",
+    "media",
 }
 
 

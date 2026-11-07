@@ -39,6 +39,10 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "auto_camera_watch": False,
     "auto_media": False,
     "autonomy_minutes": 10,
+    "companion_reactions": True,
+    "briefing_on_startup": False,
+    "media_keys": True,
+    "audit_log": True,
     "tts": True,
     "proactive": True,
     "quiet_hours": True,
@@ -129,11 +133,12 @@ class NoraStore:
                 "routines",
                 "events",
                 "layouts",
+                "companion",
+                "audit",
             ):
-                value = raw.get(key, {} if key in {"preferences", "memories"} else [])
-                if not isinstance(
-                    value, dict if key in {"preferences", "memories"} else list
-                ):
+                is_dict = key in {"preferences", "memories", "companion"}
+                value = raw.get(key, {} if is_dict else [])
+                if not isinstance(value, dict if is_dict else list):
                     raise ValueError("Bozuk veri alanı")
                 self._data[key] = value
             snapshot = raw.get("mode_snapshot", {})
@@ -317,6 +322,10 @@ class NoraStore:
             if item is None:
                 return False
             item["done"] = bool(done)
+            if done:
+                item["completed_at"] = _stamp(now_local())
+            else:
+                item.pop("completed_at", None)
             self._save()
             return True
 
@@ -572,6 +581,59 @@ class NoraStore:
             except (ValueError, KeyError, TypeError):
                 continue
         return sorted(result, key=lambda item: item["_start"])
+
+    @property
+    def companion_state(self) -> dict[str, Any]:
+        with self._lock:
+            state = dict(self._data.get("companion", {}))
+        state.setdefault("affection", 20)
+        state.setdefault("mood", "happy")
+        state.setdefault("last_event", "")
+        state.setdefault("updated_at", "")
+        return state
+
+    def record_companion(
+        self, event: str, *, affection_delta: int = 0, mood: str | None = None
+    ) -> dict[str, Any]:
+        event = _text(event, 40)
+        if mood is not None:
+            mood = _text(mood, 20)
+        with self._lock:
+            state = self._data.setdefault("companion", {})
+            affection = int(state.get("affection", 20)) + int(affection_delta)
+            state["affection"] = max(0, min(100, affection))
+            if mood:
+                state["mood"] = mood
+            state["last_event"] = event
+            state["updated_at"] = _stamp(now_local())
+            self._save()
+            return dict(state)
+
+    @property
+    def audit_log(self) -> list[dict[str, str]]:
+        with self._lock:
+            return copy.deepcopy(self._data.get("audit", []))
+
+    def add_audit(self, kind: str, detail: str = "") -> None:
+        if not self.preference("audit_log"):
+            return
+        kind = _text(kind, 40)
+        detail = str(detail or "")[:120]
+        with self._lock:
+            items = self._data.setdefault("audit", [])
+            items.append({"at": _stamp(now_local()), "kind": kind, "detail": detail})
+            del items[:-200]
+            self._save()
+
+    def clear_audit(self) -> None:
+        with self._lock:
+            self._data["audit"] = []
+            self._save()
+
+    def export_data(self) -> dict[str, Any]:
+        """Explicit user-requested local export; no microphone/audio is included."""
+        with self._lock:
+            return copy.deepcopy(self._data)
 
     @property
     def mode_snapshot(self) -> dict[str, bool]:

@@ -94,6 +94,19 @@ class NoraSettingsDialog(QDialog):
         self._check(form, "animations", "Dekoratif animasyonlar", prefs)
         self._check(form, "autonomous", "Kendiliğinden dolaşabilsin", prefs)
         self._check(form, "pet_reactions", "Okşama tepkileri", prefs)
+        self._check(form, "companion_reactions", "Duygusal companion tepkileri", prefs)
+        self.fields["companion_reactions"].setToolTip(
+            "Kahve/kurabiye/ödül gibi etkileşimlerde ruh hali ve bağlılık puanı değişir. Tamamen yereldir."
+        )
+        self._check(form, "briefing_on_startup", "Açılışta sabah brifingi", prefs)
+        self._check(form, "media_keys", "Medya tuşlarıyla oynatıcı kontrolü", prefs)
+        self.fields["media_keys"].setToolTip(
+            "Spotify OAuth yerine işletim sistemi medya tuşlarını kullanır; çalan şarkı adı için API gerekmez."
+        )
+        self._check(form, "audit_log", "Yerel denetim kaydı", prefs)
+        self.fields["audit_log"].setToolTip(
+            "Son 200 komutu yalnızca cihazında tutar; izin merkezinden görebilir veya temizleyebilirsin."
+        )
         self._combo(
             form,
             "double_click_action",

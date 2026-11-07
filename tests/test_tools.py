@@ -204,3 +204,32 @@ def test_volume_clamps_and_uses_linux_backend(qapp, monkeypatch):
     assert "%100" in tools.set_volume(150)
     assert calls[-1][-1] == "100%"
     tools.close()
+
+
+def test_media_control_respects_preference_and_uses_os_keys(qapp, monkeypatch):
+    from nora.nora_store import NoraStore
+
+    store = NoraStore()
+    tools = NoraTools(store=store)
+    store.set_preference("media_keys", False)
+    assert "kapalı" in tools.media_control("next")
+    store.set_preference("media_keys", True)
+    calls = []
+    monkeypatch.setattr("nora.nora_tools.sys.platform", "linux")
+    fake = SimpleNamespace(press=lambda key: calls.append(key))
+    monkeypatch.setitem(sys.modules, "pyautogui", fake)
+    assert "sonraki" in tools.media_control("next")
+    assert calls == ["nexttrack"]
+    assert "bilmiyorum" in tools.media_control("invalid")
+    tools.close()
+
+
+def test_spotify_now_playing_is_honest_without_api(qapp, monkeypatch):
+    tools = NoraTools()
+    fake = SimpleNamespace(getAllTitles=lambda: ["Spotify", "Spotify Premium"])
+    monkeypatch.setitem(sys.modules, "pygetwindow", fake)
+    assert "OAuth" in tools.spotify_now_playing()
+    fake = SimpleNamespace(getAllTitles=lambda: ["Artist - Song · Spotify"])
+    monkeypatch.setitem(sys.modules, "pygetwindow", fake)
+    assert "Artist - Song" in tools.spotify_now_playing()
+    tools.close()

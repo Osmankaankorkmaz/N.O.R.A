@@ -60,3 +60,23 @@ def test_opt_in_wellbeing_routine(qapp, tmp_path):
     engine._check()
     assert received and "Su molası" in received[0]
     engine.stop()
+
+
+def test_number_game_hints_bounds_and_scoring():
+    from nora.nora_activities import NumberGame
+
+    game = NumberGame(random.Random(7))
+    assert "1-100" in game.start()
+    answer = game.answer
+    assert "Önce" in NumberGame().guess(5)
+    low = game.guess(1)
+    assert "Daha büyük" in low or answer == 1
+    if answer != 1:
+        high = game.guess(100)
+        assert "Daha küçük" in high
+    result = game.guess(answer)
+    assert "Doğru" in result and game.score >= 1
+    assert "Önce" in game.guess(5)
+    game.start()
+    assert "bitti" in game.stop()
+    assert game.answer == 0

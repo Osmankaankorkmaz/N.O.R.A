@@ -533,3 +533,63 @@ def test_push_to_talk_records_until_release_and_transcribes(qapp, monkeypatch):
     assert started == [11] and stopped == [11]
     assert voice.last_capture_info["mode"] == "push_to_talk"
     voice.close()
+
+
+def test_read_mic_chunk_supports_speechrecognition_size_only_stream():
+    class SizeOnlyStream:
+        def __init__(self):
+            self.calls = []
+
+        def read(self, size):
+            self.calls.append(size)
+            return b"\x00\x01" * size
+
+    stream = SizeOnlyStream()
+    assert NoraVoice._read_mic_chunk(stream, 4) == b"\x00\x01" * 4
+    assert stream.calls == [4]
+
+
+def test_wake_session_works_with_size_only_microphone_stream(qapp, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    class Decoder:
+        def start_utt(self):
+            pass
+
+        def end_utt(self):
+            pass
+
+        def process_raw(self, data, no_search, full_utt):
+            assert type(data) is bytes
+            voice._wake_stop.set()
+
+        def hyp(self):
+            return None
+
+        def get_in_speech(self):
+            return False
+
+    class Stream:
+        def read(self, size):
+            return bytearray(b"\x00\x10" * size)
+
+    class Mic:
+        CHUNK = 32
+
+        def __init__(self, sample_rate=16000, device_index=None):
+            self.stream = Stream()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setitem(
+        sys.modules, "speech_recognition", SimpleNamespace(Microphone=Mic)
+    )
+    voice = NoraVoice(tts_enabled=False)
+    monkeypatch.setattr(voice, "_make_wake_decoder", lambda: Decoder())
+    assert voice._local_wake_session() is False
+    voice.close()

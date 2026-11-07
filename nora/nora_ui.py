@@ -31,17 +31,21 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from .nora_activities import ModeManager, ReminderScheduler, WordGame
+from .nora_activities import ModeManager, NumberGame, ReminderScheduler, WordGame
+from .nora_briefing import daily_summary, morning_briefing, weekly_plan
 from .nora_brain import ChatReply, NoraBrain
 from .nora_calendar import format_events, format_free_slots, read_ics
 from .nora_commands import normalize_text, parse_direct_command, parse_direct_sequence
+from .nora_companion import mood_summary, reaction_details
 from .nora_desktop import DesktopLayouts
 from .nora_files import NoraFiles
 from .nora_hotkeys import DEFAULT_PTT_KEY, PushToTalkHotkey
 from .nora_local_ai import LocalOCR, LocalSpeech
+from .nora_local_search import format_results, search_store
 from .nora_personality import (
     EMOTIONS,
     CommandError,
+    SAFE_ROUTINE_COMMANDS,
     normalize_command,
     startup_greeting,
 )
@@ -222,6 +226,7 @@ class NoraApp(QWidget):
         self._last_city = ""
         self._pending_commands: deque[dict[str, Any]] = deque(maxlen=24)
         self._last_repeatable: dict[str, Any] | None = None
+        self._recent_commands: deque[dict[str, Any]] = deque(maxlen=8)
         self.data_dir = (
             Path(self.options.data_dir).expanduser()
             if self.options.data_dir is not None
@@ -239,6 +244,7 @@ class NoraApp(QWidget):
         self.reminders = ReminderScheduler(self.store, parent=self)
         self.modes = ModeManager(self.store)
         self.game = WordGame()
+        self.number_game = NumberGame()
         self.settings_dialog: NoraSettingsDialog | None = None
 
         wake = (
@@ -577,6 +583,44 @@ class NoraApp(QWidget):
                 "🎮 Kelime oyunu",
                 lambda: self._execute_command({"command": "game", "action": "start"}),
             ),
+            (
+                "🔢 Sayı tahmin oyunu",
+                lambda: self._execute_command(
+                    {"command": "number_game", "action": "start"}
+                ),
+            ),
+            (
+                "🌅 Sabah brifingi",
+                lambda: self._execute_command(
+                    {"command": "briefing", "action": "morning"}
+                ),
+            ),
+            (
+                "🌙 Gün sonu özeti",
+                lambda: self._execute_command(
+                    {"command": "briefing", "action": "summary"}
+                ),
+            ),
+            (
+                "🗓️ Haftalık plan",
+                lambda: self._execute_command(
+                    {"command": "briefing", "action": "weekly"}
+                ),
+            ),
+            ("🔎 Yerel ara", self._local_search_dialog),
+            (
+                "🔐 İzin merkezi",
+                lambda: self._execute_command(
+                    {"command": "permissions", "action": "list"}
+                ),
+            ),
+            (
+                "🧾 Son işlemler",
+                lambda: self._execute_command(
+                    {"command": "permissions", "action": "audit"}
+                ),
+            ),
+            ("📦 Veriyi dışa aktar", self._export_data),
         ):
             features.addAction(label, slot)
         clipboard = features.addMenu("📋 Pano yardımı (onaylı)")
@@ -619,6 +663,36 @@ class NoraApp(QWidget):
             "🍿 Video aç",
             lambda: self._execute_command({"command": "media", "action": "video"}),
         )
+        media_controls = features.addMenu("🎧 Medya kontrolü")
+        media_controls.setStyleSheet(self._menu_style())
+        for label, action in (
+            ("⏯️ Çal/Duraklat", "play_pause"),
+            ("⏭️ Sonraki", "next"),
+            ("⏮️ Önceki", "previous"),
+            ("⏹️ Durdur", "stop"),
+            ("🎵 Şu an ne çalıyor?", "now_playing"),
+        ):
+            media_controls.addAction(
+                label,
+                lambda a=action: self._execute_command(
+                    {"command": "media_control", "action": a}
+                ),
+            )
+        companion = features.addMenu("💜 Companion")
+        companion.setStyleSheet(self._menu_style())
+        for label, action in (
+            ("Modun nasıl?", "mood"),
+            ("☕ Kahve ver", "coffee"),
+            ("🍪 Kurabiye ver", "cookie"),
+            ("🏆 Ödül ver", "reward"),
+            ("🥺 Seni özledim", "miss"),
+        ):
+            companion.addAction(
+                label,
+                lambda a=action: self._execute_command(
+                    {"command": "companion", "action": a}
+                ),
+            )
         features.addSeparator()
         features.addAction("🎤 Yerel ses modelini indir", self._download_local_model)
         features.addAction("🔊 Konuşma sesi seç", self._select_output_voice)
@@ -1233,6 +1307,13 @@ class NoraApp(QWidget):
                 "game",
                 "stt_test",
                 "media",
+                "briefing",
+                "companion",
+                "permissions",
+                "export_data",
+                "local_search",
+                "media_control",
+                "number_game",
             }
             for item in requested
         )
@@ -1304,6 +1385,8 @@ class NoraApp(QWidget):
             self.add_message(f"Hımm, bu komutu çalıştıramam: {exc}", "bot")
             return
         name = cmd["command"]
+        self._remember_command(cmd)
+        self.store.add_audit("command", json.dumps(cmd, ensure_ascii=False)[:240])
         if name in {"pet_action", "move_monitor"}:
             self._last_repeatable = dict(cmd)
             if name == "pet_action":
@@ -1327,6 +1410,23 @@ class NoraApp(QWidget):
             self._start_listening(recognition_test=True)
         elif name == "media":
             self._media_command(cmd)
+        elif name == "briefing":
+            self._briefing_command(cmd)
+        elif name == "companion":
+            self._companion_command(cmd)
+        elif name == "permissions":
+            self._permissions_command(cmd)
+        elif name == "export_data":
+            self._export_data()
+        elif name == "local_search":
+            self._local_search_command(cmd)
+        elif name == "media_control":
+            self._run_tool(
+                lambda: self.tools.media_control(cmd["action"]),
+                "Medya kontrol ediliyor…",
+            )
+        elif name == "number_game":
+            self._number_game_command(cmd)
         elif name == "settings":
             if cmd["action"] == "list":
                 prefs = self.store.preferences
@@ -1493,6 +1593,137 @@ class NoraApp(QWidget):
             self.add_message(self.tools.lock_screen(), "bot")
 
     # ------------------------------------------------------- personal features
+    def _remember_command(self, cmd: dict[str, Any]) -> None:
+        if cmd["command"] in SAFE_ROUTINE_COMMANDS and cmd["command"] != "routine":
+            self._recent_commands.append(dict(cmd))
+
+    def _briefing_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd.get("action", "morning")
+        result = (
+            morning_briefing(self.store)
+            if action == "morning"
+            else daily_summary(self.store)
+            if action == "summary"
+            else weekly_plan(self.store)
+        )
+        self._report(result, speak=False)
+
+    def _companion_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd.get("action", "mood")
+        if action in {"mood", "affection"}:
+            self._report(
+                mood_summary(
+                    self.store.companion_state,
+                    self.store.preference("address", "senpai"),
+                ),
+                speak=False,
+            )
+            return
+        if not self.store.preference("companion_reactions", True):
+            self._report(
+                "Duygusal companion tepkileri kapalı senpai. 'duygusal tepkileri aç' diyebilirsin. 💜",
+                speak=False,
+            )
+            return
+        event = "pet" if action == "reward" else action
+        line, emotion, delta = reaction_details(event)
+        state = self.store.record_companion(event, affection_delta=delta, mood=emotion)
+        self.pet.set_emotion(emotion)
+        suffix = (
+            f" (bağlılık {state['affection']}/100)" if action == "affection" else ""
+        )
+        self._report(line + suffix)
+
+    def _permissions_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd.get("action", "list")
+        if action == "audit":
+            entries = self.store.audit_log
+            result = (
+                "Son işlemler 🧾\n"
+                + "\n".join(
+                    f"• {item['at']} · {item['detail']}" for item in entries[-12:]
+                )
+                if entries
+                else "Denetim kaydı boş."
+            )
+            self._report(result, speak=False)
+        elif action == "clear_audit":
+            if self._confirm(
+                "Denetim kaydını temizle",
+                "Yerel denetim kaydını silmemi onaylıyor musun?",
+            ):
+                self.store.clear_audit()
+                self._report("Denetim kaydını temizledim. 🧾")
+        else:
+            prefs = self.store.preferences
+            keys = (
+                "wake_word",
+                "continuous_conversation",
+                "push_to_talk",
+                "auto_screen_watch",
+                "auto_camera_watch",
+                "auto_media",
+                "media_keys",
+                "companion_reactions",
+                "briefing_on_startup",
+                "audit_log",
+            )
+            result = "İzin merkezi 🔐\n" + "\n".join(
+                f"• {key}: {'açık' if prefs.get(key) else 'kapalı'}" for key in keys
+            )
+            result += "\nNot: Kamera/ekran otonomisi varsayılan kapalıdır; açmak için açık onayın gerekir."
+            self._report(result, speak=False)
+
+    def _export_data(self) -> None:
+        self.show_chat()
+        path, _ = QFileDialog.getSaveFileName(
+            self.chat_window,
+            "Nora verisini dışa aktar",
+            "nora-export.json",
+            "JSON (*.json)",
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(
+                json.dumps(self.store.export_data(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self._report(f"Verilerini dışa aktardım: {path} 📦")
+        except OSError as exc:
+            self._report(f"Dışa aktaramadım senpai: {exc}")
+
+    def _local_search_command(self, cmd: dict[str, Any]) -> None:
+        results = search_store(
+            self.store,
+            cmd["query"],
+            scope=cmd.get("scope", "all"),
+            limit=cmd.get("limit", 8),
+        )
+        self._report(format_results(cmd["query"], results), speak=False)
+
+    def _local_search_dialog(self) -> None:
+        self.show_chat()
+        query, ok = QInputDialog.getText(
+            self.chat_window, "Yerel ara", "Not/hafıza/görevlerde ne arayım?"
+        )
+        if ok and query.strip():
+            self._execute_command(
+                {"command": "local_search", "query": query.strip(), "scope": "all"}
+            )
+
+    def _number_game_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd["action"]
+        result = (
+            self.number_game.start()
+            if action == "start"
+            else self.number_game.stop()
+            if action == "stop"
+            else self.number_game.guess(cmd.get("guess", 0))
+        )
+        self.show_chat()
+        self._report(result)
+
     def _report(self, text: str, *, speak: bool = True, bubble: bool = True) -> None:
         self.add_message(str(text), "bot", speak=speak)
         if bubble:
@@ -1697,7 +1928,15 @@ class NoraApp(QWidget):
 
     def _routine_command(self, cmd: dict[str, Any]) -> None:
         try:
-            if cmd["action"] == "add":
+            if cmd["action"] == "save_recent":
+                steps = [dict(item) for item in self._recent_commands][-8:]
+                if not steps:
+                    raise ValueError(
+                        "Kaydedilecek güvenli son komut yok. Önce birkaç komut çalıştır senpai."
+                    )
+                self.store.save_routine(cmd["name"], steps)
+                result = f"Son {len(steps)} güvenli komutu '{cmd['name']}' rutini olarak kaydettim. 🔁"
+            elif cmd["action"] == "add":
                 self.store.save_routine(cmd["name"], cmd["steps"])
                 result = f"'{cmd['name']}' rutinini kaydettim. Çalıştırmadan önce adım özetini ve onayını gösteririm. 🔁"
             elif cmd["action"] == "list":
@@ -2474,6 +2713,10 @@ class NoraApp(QWidget):
             self.add_message(
                 "Heh, şu an çevrimdışı temel komut modundayım. Serbest sohbet için GROQ_API_KEY ayarla senpai. 🐾",
                 "bot",
+            )
+        if self.store.preference("briefing_on_startup"):
+            QTimer.singleShot(
+                1800, lambda: self._briefing_command({"action": "morning"})
             )
         if self.tray.isVisible():
             mic = (

@@ -208,3 +208,37 @@ def test_live_mode_and_media_commands():
     assert parse_direct_command("spotifyda lofi aç").command["query"] == "lofi"
     assert parse_direct_command("video aç").command["action"] == "video"
     assert normalize_command({"command": "media", "action": "video"})["query"]
+
+
+def test_v18_direct_phrases():
+    examples = {
+        "günaydın brifingi": ("briefing", {"action": "morning"}),
+        "gün sonu özeti": ("briefing", {"action": "summary"}),
+        "haftalık plan": ("briefing", {"action": "weekly"}),
+        "kahve ver": ("companion", {"action": "coffee"}),
+        "modun nasıl": ("companion", {"action": "mood"}),
+        "izinleri göster": ("permissions", {"action": "list"}),
+        "verilerimi dışa aktar": ("export_data", {}),
+        "sonraki şarkı": ("media_control", {"action": "next"}),
+        "şu an ne çalıyor": ("media_control", {"action": "now_playing"}),
+        "sayı oyunu başlat": ("number_game", {"action": "start"}),
+        "sayı tahminim 42": ("number_game", {"action": "guess", "guess": 42}),
+        "notlarımda kahve ara": (
+            "local_search",
+            {"query": "kahve", "scope": "notes", "limit": 8},
+        ),
+        "son komutları rutin kaydet: sabah": (
+            "routine",
+            {"action": "save_recent", "name": "sabah"},
+        ),
+    }
+    for text, (name, fields) in examples.items():
+        direct = parse_direct_command(text)
+        assert direct is not None, text
+        command = normalize_command(direct.command)
+        assert command["command"] == name
+        for key, value in fields.items():
+            assert command[key] == value
+    assert parse_direct_command("sayı tahminim 999").command["guess"] == 999
+    with pytest.raises(CommandError):
+        normalize_command({"command": "number_game", "action": "guess", "guess": 101})

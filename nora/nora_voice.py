@@ -817,7 +817,7 @@ class NoraVoice(QObject):
                 while not stop_event.is_set() and not self._closed:
                     if time.monotonic() - started > 30:
                         break
-                    raw = stream.read(chunk, exception_on_overflow=False)
+                    raw = self._read_mic_chunk(stream, chunk)
                     if raw:
                         frames.extend(bytes(raw))
             if self._closed:
@@ -913,6 +913,18 @@ class NoraVoice(QObject):
         decoder.activate_search("nora_wake")
         return decoder
 
+    @staticmethod
+    def _read_mic_chunk(stream: Any, chunk: int) -> Any:
+        """Compatible with SpeechRecognition MicrophoneStream.read(size) and PyAudio.read."""
+        try:
+            return stream.read(chunk, exception_on_overflow=False)
+        except TypeError as exc:
+            # SpeechRecognition's wrapper already passes exception_on_overflow
+            # to PyAudio internally and only accepts the positional size arg.
+            if "exception_on_overflow" not in str(exc):
+                raise
+            return stream.read(chunk)
+
     def _wake_hyp_detected(self, decoder: Any) -> bool:
         hyp = decoder.hyp()
         return bool(hyp and self._is_wake_hypothesis(getattr(hyp, "hypstr", "")))
@@ -933,7 +945,7 @@ class NoraVoice(QObject):
                 while not self._wake_stop.is_set():
                     if self._closed or self.is_speaking or self._listening:
                         return False
-                    raw = stream.read(chunk, exception_on_overflow=False)
+                    raw = self._read_mic_chunk(stream, chunk)
                     if not raw:
                         return False
                     # Some PortAudio/PyAudio builds return bytearray/memoryview.

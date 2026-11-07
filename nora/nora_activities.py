@@ -177,3 +177,53 @@ class WordGame:
         return (
             f"Oyun bitti. Skorun {self.score} senpai. İstediğin zaman yine oynarız. 💜"
         )
+
+
+class NumberGame:
+    """A tiny 1-100 guessing game; local, deterministic-friendly, no telemetry."""
+
+    def __init__(self, rng: random.Random | None = None) -> None:
+        self.rng = rng or random.Random()
+        self.answer = 0
+        self.attempts = 0
+        self.score = 0
+        self.low = 1
+        self.high = 100
+
+    def start(self) -> str:
+        self.answer = self.rng.randint(1, 100)
+        self.attempts = 0
+        self.low, self.high = 1, 100
+        return (
+            "Sayı tahmin oyunu başladı! 1-100 arası bir sayı tuttum. 🔢\n"
+            "'sayı tahminim 42' diye tahmin et; 'sayı oyununu bitir' ile çıkabilirsin."
+        )
+
+    def guess(self, guess: int) -> str:
+        if not self.answer:
+            return "Önce 'sayı oyunu başlat' de senpai."
+        try:
+            value = int(guess)
+        except (TypeError, ValueError):
+            return "1-100 arası bir sayı söyle senpai."
+        if not 1 <= value <= 100:
+            return "Sayı 1 ile 100 arasında olmalı senpai."
+        self.attempts += 1
+        if value == self.answer:
+            gained = max(1, 8 - self.attempts)
+            self.score += gained
+            answer, self.answer = self.answer, 0
+            return (
+                f"Doğru! Sayı {answer} idi. {self.attempts}. denemede buldun; +{gained} puan. "
+                f"Toplam skor: {self.score}. Yeni tur için 'sayı oyunu başlat'. 🎉"
+            )
+        if value < self.answer:
+            self.low = max(self.low, value + 1)
+            return f"Daha büyük söyle. Aralık: {self.low}-{self.high} 🔺"
+        self.high = min(self.high, value - 1)
+        return f"Daha küçük söyle. Aralık: {self.low}-{self.high} 🔻"
+
+    def stop(self) -> str:
+        answer, self.answer = self.answer, 0
+        reveal = f" Tutuğum sayı {answer} idi." if answer else ""
+        return f"Sayı oyunu bitti.{reveal} Skorun {self.score} senpai. 💜"
