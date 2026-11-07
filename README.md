@@ -1,13 +1,14 @@
 # Nora 💕 · Anime Kız Masaüstü Asistanı
 
-Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakter; büyük kafalı, pembe yanaklı, kedi kulaklı sevimli bir **8-bit piksel chibi** olarak tamamı **QPainter ile kod içinde çizilir**; harici sprite veya resim dosyası kullanılmaz.
+Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakter; **beyaz wolfcut saçlı, kırmızı gözlü, siyah elbiseli ve kırmızı ayakkabılı** sevimli bir **8-bit piksel chibi** olarak tamamı **QPainter ile kod içinde çizilir**; çalışma zamanında harici sprite veya resim dosyası kullanılmaz.
 
 > **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
 
 ## Neler yapabilir?
 
 ### Karakter ve ses
-- 120×150 şeffaf, always-on-top pet; 40×50 mantıksal ızgarada 3×3 keskin pikseller, keskin kenarlı 8-bit görünüm ve aynı tarzda tepsi ikonu. Yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme; piksel kalp, yıldız, nota ve uyku efektleri.
+- 120×150 şeffaf, always-on-top pet; 40×50 mantıksal ızgarada 3×3 keskin pikseller, keskin kenarlı 8-bit görünüm ve aynı tarzda tepsi ikonu. Varsayılan görünüm: beyaz wolfcut, kırmızı göz, siyah elbise, kırmızı ayakkabı. Yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme; piksel kalp, yıldız, nota ve uyku efektleri.
+- Tüm poz/duygu PNG’leri ve animasyon GIF’leri `docs/character/` altında: 16 poz, 8 duygu, 22 animasyon, aksesuar/kıyafet varyantları ve `index.html` galerisi. Üretici: `python tools/export_character.py`. Bunlar önizleme/doc çıktısıdır; uygulama çizimi yine QPainter’dır.
 - **Komutla hareket:** “ikinci monitöre geç”, “uyu”, “uyan”, “dolaş”, “dur”, “zıpla”, “dans et”, “otur”. Bu komutlar Groq/internet olmadan çalışır.
 - “Uyu” ve “dolaş” siz değiştirene kadar sürer. “Zıpla ve uyu” gibi en fazla dört açık hareket komutu arka arkaya çalışabilir.
 - Çoklu monitör algılama, numaralı/sonraki/ana monitöre geçme, kenarlara yapışma ve görev çubuğu üstünde oturma.
@@ -47,7 +48,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 | `hatırlatıcılar` / `hatırlatıcı ID iptal` | Listeleme/iptal |
 | `görev ekle: raporu bitir` / `görevler` | Görev ekleme/listeleme |
 | `1 numaralı görevi tamamla` / `1 numaralı notu görevlere çevir` | Görev yönetimi |
-| `gözlük tak` / `kulaklık tak` / `gece kıyafeti` | 8-bit QPainter görünümü |
+| `gözlük tak` / `kulaklık tak` / `siyah elbise` / `beyaz saç` | 8-bit QPainter görünümü |
 | `saç rengi #202b52` / `tatlı mod` / `bana Kaan diye hitap et` | Görünüm/kişilik |
 | `panoyu özetle` / `panoyu İngilizce çevir` | Onaylı pano yardımı |
 | `ekrandaki yazıları oku` | Yerel OCR; analiz gönderimi ayrıca onaylı |
@@ -117,7 +118,7 @@ Ekran kaydı, kamera, mikrofon ve erişilebilirlik izinlerini Sistem Ayarları�
 
 ## Ayarlar ve veri
 
-Sağ tık → **Özellikler → Ayarlar** panelinden kişilik, hitap, kıyafet, saç, aksesuar, animasyon, ses, Whisper, odak süresi ve su/mola aralıkları değiştirilebilir. Çift tıklama sohbet, oyun veya baş okşama olabilir.
+Sağ tık → **Özellikler → Ayarlar** panelinden kişilik, hitap, kıyafet, wolfcut saç rengi, aksesuar, animasyon, ses, Whisper, odak süresi ve su/mola aralıkları değiştirilebilir. Kırmızı göz ve kırmızı ayakkabı tüm kıyafetlerde sabittir; varsayılan elbise siyahtır. Eski fabrika mor saç ayarı bir kez beyaz wolfcut’a taşınır, özel seçilmiş diğer saç renkleri korunur. Çift tıklama sohbet, oyun veya baş okşama olabilir.
 
 Kalıcı veriler varsayılan olarak:
 - Windows: `%LOCALAPPDATA%\Nora\state.json`
@@ -198,6 +199,10 @@ nora/
   nora_settings_dialog.py # ayar paneli
   nora_proactive.py       # düşük frekanslı proaktif konuşma
   nora_ui.py              # sohbet/tray/worker entegrasyonu
+tools/
+  export_character.py     # QPainter çiziminden PNG/GIF galerisi üretir
+docs/
+  character/              # tüm poz, duygu, aksesuar, kıyafet ve animasyon çıktıları
 tests/
 requirements.txt
 requirements-local.txt
@@ -212,7 +217,7 @@ python -m pip install -r requirements-dev.txt
 python -m pip install -r requirements-local.txt  # yerel özellik testleri için
 python -m pytest -q
 python -m compileall -q nora main.py tests
-ruff check nora tests main.py
+ruff check nora tests tools main.py
 ```
 
-Bu sürümde **194 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm pozlar, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Bu sürümde **198 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

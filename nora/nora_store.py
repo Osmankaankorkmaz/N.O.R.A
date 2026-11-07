@@ -38,7 +38,8 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "hydration_minutes": 0,
     "break_minutes": 0,
     "outfit": "classic",
-    "hair_color": "#33204d",
+    "hair_color": "#f5f3f0",
+    "appearance_version": 2,
     "accessory": "none",
     "animations": True,
     "autonomous": True,
@@ -139,6 +140,13 @@ class NoraStore:
                     self._data["preferences"][key] = value
                 except (ValueError, TypeError):
                     logger.warning("Geçersiz kayıtlı tercih yok sayıldı: %s", key)
+            # One-time migration from the old factory purple hair to the
+            # requested white wolfcut. Other explicit hair colors are kept.
+            saved = self._data["preferences"]
+            if "appearance_version" not in saved:
+                if str(saved.get("hair_color", "")).lower() == "#33204d":
+                    saved["hair_color"] = "#f5f3f0"
+                saved["appearance_version"] = 2
         except Exception as exc:
             self.load_warning = "Kayıtlı veriler okunamadı; eski dosya korunuyor."
             logger.warning("Nora veri okuma hatası: %s", type(exc).__name__)
@@ -164,6 +172,7 @@ class NoraStore:
                 "speech_rate": (100, 260),
                 "speech_volume": (0, 1),
                 "focus_minutes": (5, 120),
+                "appearance_version": (1, 2),
                 "hydration_minutes": (0, 240),
                 "break_minutes": (0, 180),
             }

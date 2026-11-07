@@ -1126,7 +1126,7 @@ class NoraApp(QWidget):
                     "\n".join(
                         f"{key}: {value}"
                         for key, value in prefs.items()
-                        if key not in {"voice_id"}
+                        if key not in {"voice_id", "appearance_version"}
                     ),
                     speak=False,
                 )

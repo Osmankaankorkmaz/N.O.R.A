@@ -146,3 +146,18 @@ def test_direct_speech_controls_and_test():
     assert parse_direct_command("neden konuşmuyorsun").command == {
         "command": "speech_test"
     }
+
+
+def test_requested_black_dress_and_white_wolfcut_commands():
+    assert parse_direct_command("siyah elbise").command == {
+        "command": "settings",
+        "action": "set",
+        "key": "outfit",
+        "value": "classic",
+    }
+    assert parse_direct_command("beyaz saç").command == {
+        "command": "settings",
+        "action": "set",
+        "key": "hair_color",
+        "value": "#f5f3f0",
+    }

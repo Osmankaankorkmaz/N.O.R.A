@@ -141,7 +141,7 @@ class NoraPet(QWidget):
         self._affection_frames = 0
         self._appearance = {
             "outfit": "classic",
-            "hair_color": "#33204d",
+            "hair_color": "#f5f3f0",
             "accessory": "none",
         }
         self._pixel_artist = PixelCharacter()

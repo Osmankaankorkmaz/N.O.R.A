@@ -60,7 +60,7 @@ class NoraSettingsDialog(QDialog):
             "outfit",
             "Kıyafet",
             (
-                ("classic", "Klasik mor"),
+                ("classic", "Siyah elbise"),
                 ("casual", "Günlük pembe"),
                 ("night", "Gece mavisi"),
             ),
@@ -69,8 +69,9 @@ class NoraSettingsDialog(QDialog):
         self._combo(
             form,
             "hair_color",
-            "Saç rengi",
+            "Saç rengi (wolfcut)",
             (
+                ("#f5f3f0", "Beyaz wolfcut"),
                 ("#33204d", "Mor"),
                 ("#202b52", "Gece mavisi"),
                 ("#4a2c32", "Kestane"),
