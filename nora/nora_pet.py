@@ -1,30 +1,22 @@
-"""A 120×150 transparent desktop pet, drawn entirely with QPainter.
+"""A 120×150 transparent 8-bit-style desktop pet, drawn with QPainter.
 
 The character has a small physics/behaviour loop, weighted idle choices,
 multi-monitor awareness, sticky screen edges and a separate speech bubble so
-the bubble does not shrink the character.  No sprite or image files are used.
+the bubble does not shrink the character.  Artwork is generated on a crisp
+40×50 logical pixel grid; no sprite or image files are used.
 """
 
 from __future__ import annotations
 
-import math
 import random
 from collections import deque
 from enum import Enum, auto
 
-from PyQt5.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import (
-    QBrush,
-    QColor,
-    QFont,
-    QLinearGradient,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QPolygonF,
-    QRadialGradient,
-)
+from PyQt5.QtCore import QPoint, QRectF, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import QApplication, QWidget
+
+from .nora_pixel_art import PixelCharacter
 
 
 class PetState(Enum):
@@ -152,7 +144,7 @@ class NoraPet(QWidget):
             "hair_color": "#33204d",
             "accessory": "none",
         }
-        self._mouth = 0.0
+        self._pixel_artist = PixelCharacter()
         self._blink_left = 0
         self._next_blink = self.rng.randint(100, 200)
         self._drag_offset = QPoint()
@@ -288,7 +280,6 @@ class NoraPet(QWidget):
             if self._next_blink <= 0:
                 self._blink_left = 6
                 self._next_blink = self.rng.randint(100, 200)
-        self._mouth += ((0.8 if self._talking else 0.0) - self._mouth) * 0.35
         self._floor_y = self._current_floor()
 
         if self.state != PetState.DRAG:
@@ -670,515 +661,20 @@ class NoraPet(QWidget):
     # ------------------------------------------------------------------ drawing
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        breath = math.sin(self._frame * 0.055)
-        tail = math.sin(self._frame * (0.22 if self._affection_frames else 0.12))
-        wind = math.sin(self._frame * 0.045) * 2.2
-        walk = (
-            math.sin(self._frame * 0.32)
-            if self.state in (PetState.WALK_LEFT, PetState.WALK_RIGHT, PetState.DANCE)
-            else 0.0
+        # The renderer snaps every rectangle to a 3×3 grid.  Smoothing or
+        # fractional transforms here would blur the deliberately retro art.
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
+        self._pixel_artist.draw(
+            painter,
+            state=self.state.name,
+            emotion=self.emotion,
+            frame=self._frame,
+            appearance=self._appearance,
+            talking=self._talking,
+            listening=self._listening,
+            blinking=self._blink_left > 0,
+            affection=self._affection_frames > 0,
+            grounded=self._grounded,
+            animations=self._animations,
         )
-        bob = breath * 1.1 if self._grounded else 0.0
-        if self.state in (PetState.SIT, PetState.SLEEP):
-            bob += 5
-        if self.state == PetState.DANCE:
-            bob += math.sin(self._frame * 0.32) * 3
-            painter.translate(math.sin(self._frame * 0.16) * 2, 0)
-
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 42))
-        painter.drawEllipse(QRectF(29, 140, 62, 7))
-        painter.save()
-        painter.translate(0, bob)
-        self._draw_tail(painter, tail)
-        self._draw_back_hair(painter, wind)
-        self._draw_legs(painter, walk)
-        self._draw_body(painter)
-        self._draw_arms(painter, walk)
-        if self._listening or self.state == PetState.LISTENING:
-            painter.save()
-            painter.translate(60, 55)
-            painter.rotate(-6.5)
-            painter.translate(-60, -55)
-        self._draw_ears(painter)
-        self._draw_head(painter)
-        self._draw_face(painter)
-        self._draw_front_hair(painter, wind)
-        self._draw_star_clip(painter)
-        self._draw_accessory(painter)
-        if self._listening or self.state == PetState.LISTENING:
-            painter.restore()
-            self._draw_listening_hand(painter)
-        painter.restore()
-        self._draw_effects(painter)
-
-    def _draw_tail(self, p: QPainter, tail: float) -> None:
-        path = QPainterPath(QPointF(76, 112))
-        path.cubicTo(104, 121, 120, 91 + tail * 7, 106, 71 + tail * 9)
-        path.cubicTo(99, 60 + tail * 8, 90, 68 + tail * 6, 98, 78 + tail * 6)
-        gradient = QLinearGradient(76, 112, 108, 66)
-        gradient.setColorAt(0, QColor("#241332"))
-        gradient.setColorAt(0.6, QColor("#4a2a66"))
-        gradient.setColorAt(1, QColor("#7c4dff"))
-        p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QBrush(gradient), 9, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.drawPath(path)
-        p.setPen(QPen(QColor(190, 140, 255, 110), 2.2, Qt.SolidLine, Qt.RoundCap))
-        p.drawPath(path)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#b388ff"))
-        p.drawEllipse(QRectF(94, 72 + tail * 6, 8, 8))
-
-    def _draw_back_hair(self, p: QPainter, wind: float) -> None:
-        path = QPainterPath(QPointF(31, 30))
-        path.cubicTo(11, 47, 17 + wind, 90, 23 + wind, 118)
-        path.quadTo(31, 112, 39, 109)
-        path.lineTo(60, 120)
-        path.lineTo(81, 109)
-        path.quadTo(89, 112, 97 - wind, 118)
-        path.cubicTo(105 - wind, 82, 109, 43, 88, 28)
-        path.cubicTo(70, 11, 45, 13, 31, 30)
-        gradient = QLinearGradient(20, 18, 96, 120)
-        gradient.setColorAt(0, QColor("#170b22"))
-        gradient.setColorAt(0.45, QColor(self._appearance["hair_color"]))
-        gradient.setColorAt(0.75, QColor("#4a2a66"))
-        gradient.setColorAt(1, QColor("#160c20"))
-        p.setPen(QPen(QColor("#120818"), 1))
-        p.setBrush(QBrush(gradient))
-        p.drawPath(path)
-        p.setBrush(Qt.NoBrush)
-        for x, alpha in ((27, 70), (36, 48), (84, 65), (93, 45)):
-            strand = QPainterPath(QPointF(x, 42))
-            strand.cubicTo(x - 4 + wind * 0.4, 66, x + 2, 91, x + wind, 111)
-            p.setPen(QPen(QColor(162, 108, 224, alpha), 1.1, Qt.SolidLine, Qt.RoundCap))
-            p.drawPath(strand)
-
-    def _draw_legs(self, p: QPainter, walk: float) -> None:
-        skin = QColor("#f8cfbd")
-        p.setPen(QPen(skin, 7, Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
-        if self.state == PetState.SIT:
-            left = QPainterPath(QPointF(50, 112))
-            left.quadTo(39, 126, 53, 131)
-            right = QPainterPath(QPointF(69, 112))
-            right.quadTo(81, 126, 67, 131)
-            p.drawPath(left)
-            p.drawPath(right)
-            feet = [(48, 128), (62, 128)]
-            socks = []
-        else:
-            swing = walk * 5
-            p.drawLine(QPointF(50, 113), QPointF(48 + swing, 136))
-            p.drawLine(QPointF(69, 113), QPointF(71 - swing, 136))
-            feet = [(40 + swing, 134), (63 - swing, 134)]
-            socks = [(44 + swing, 124, 9, 12), (66 - swing, 124, 9, 12)]
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#2a1740"))
-        for rect in socks:
-            p.drawRoundedRect(QRectF(*rect), 3, 3)
-        p.setPen(QPen(QColor("#160c20"), 1))
-        p.setBrush(QColor("#3b2055"))
-        for x, y in feet:
-            p.drawEllipse(QRectF(x, y, 16, 7))
-            p.setPen(QPen(QColor("#b388ff"), 0.8))
-            p.drawLine(QPointF(x + 3, y + 2), QPointF(x + 12, y + 2))
-            p.setPen(QPen(QColor("#160c20"), 1))
-
-    def _draw_body(self, p: QPainter) -> None:
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#f8cfbd"))
-        p.drawEllipse(QRectF(54, 72, 12, 15))
-        dress = QPainterPath(QPointF(44, 82))
-        dress.quadTo(60, 78, 75, 82)
-        dress.lineTo(85, 118)
-        dress.quadTo(60, 125, 34, 118)
-        dress.closeSubpath()
-        gradient = QLinearGradient(42, 80, 80, 124)
-        palette = {
-            "classic": ("#b58aff", "#7c4dff", "#4a2a80"),
-            "casual": ("#ffd1df", "#ef739e", "#91445f"),
-            "night": ("#8ca9ff", "#3c559b", "#202b52"),
-        }.get(self._appearance["outfit"], ("#b58aff", "#7c4dff", "#4a2a80"))
-        for position, color in zip((0, 0.35, 0.8), palette):
-            gradient.setColorAt(position, QColor(color))
-        gradient.setColorAt(1, QColor("#2c1742"))
-        p.setPen(QPen(QColor("#241332"), 1.2))
-        p.setBrush(QBrush(gradient))
-        p.drawPath(dress)
-        p.setPen(QPen(QColor(255, 255, 255, 70), 1))
-        p.setBrush(Qt.NoBrush)
-        hem = QPainterPath(QPointF(37, 117))
-        hem.quadTo(60, 123, 82, 117)
-        p.drawPath(hem)
-        p.setPen(QPen(QColor(30, 15, 50, 110), 1))
-        for x in (48, 60, 72):
-            p.drawLine(QPointF(x, 96), QPointF(x + (x - 60) * 0.14, 118))
-        # White collar + golden bow with a tiny cat bell.
-        collar = QPainterPath(QPointF(52, 81))
-        collar.quadTo(60, 88, 68, 81)
-        collar.lineTo(60, 90)
-        collar.closeSubpath()
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#fff4fb"))
-        p.drawPath(collar)
-        bow = QPainterPath(QPointF(60, 86))
-        bow.lineTo(49, 80)
-        bow.quadTo(47, 86, 50, 92)
-        bow.closeSubpath()
-        bow.moveTo(60, 86)
-        bow.lineTo(71, 80)
-        bow.quadTo(73, 86, 70, 92)
-        bow.closeSubpath()
-        p.setPen(QPen(QColor("#c99721"), 0.8))
-        p.setBrush(QColor("#ffd166"))
-        p.drawPath(bow)
-        p.drawEllipse(QRectF(57, 83, 6, 6))
-        p.setPen(QPen(QColor("#9c6b12"), 0.7))
-        p.drawLine(QPointF(58.5, 87), QPointF(61.5, 87))
-
-    def _draw_arms(self, p: QPainter, walk: float) -> None:
-        skin = QLinearGradient(0, 80, 0, 112)
-        skin.setColorAt(0, QColor("#ffe0d0"))
-        skin.setColorAt(1, QColor("#f3bda9"))
-        swing = walk * 5
-        if self.state == PetState.DANCE:
-            p.setPen(QPen(QBrush(skin), 7, Qt.SolidLine, Qt.RoundCap))
-            p.setBrush(Qt.NoBrush)
-            for start, end in (
-                ((43, 87), (25, 67 + walk * 7)),
-                ((76, 87), (95, 67 - walk * 7)),
-            ):
-                p.drawLine(QPointF(*start), QPointF(*end))
-            return
-        if self._listening or self.state == PetState.LISTENING:
-            p.setPen(QPen(QBrush(skin), 7, Qt.SolidLine, Qt.RoundCap))
-            p.setBrush(Qt.NoBrush)
-            p.drawLine(QPointF(43, 88), QPointF(30, 106))
-            arm = QPainterPath(QPointF(76, 88))
-            arm.cubicTo(94, 84, 100, 68, 91, 53)
-            p.drawPath(arm)
-            return
-        p.setPen(QPen(QBrush(skin), 7, Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
-        p.drawLine(QPointF(43, 87), QPointF(33 + swing, 108))
-        if (
-            self.state == PetState.WAVE
-            or self.emotion == "happy"
-            and self.state == PetState.IDLE
-        ):
-            wave = math.sin(self._frame * 0.3) * 4
-            path = QPainterPath(QPointF(76, 87))
-            path.quadTo(91, 80, 94, 64 + wave)
-            p.drawPath(path)
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor("#f8cfbd"))
-            p.drawEllipse(QRectF(90, 60 + wave, 9, 9))
-        else:
-            p.drawLine(QPointF(76, 87), QPointF(86 - swing, 108))
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#fff4fb"))
-        p.drawEllipse(QRectF(29 + swing, 104, 8, 4))
-        if not (
-            self.state == PetState.WAVE
-            or self.emotion == "happy"
-            and self.state == PetState.IDLE
-        ):
-            p.drawEllipse(QRectF(82 - swing, 104, 8, 4))
-
-    def _draw_listening_hand(self, p: QPainter) -> None:
-        skin = QLinearGradient(84, 42, 98, 62)
-        skin.setColorAt(0, QColor("#ffe0d0"))
-        skin.setColorAt(1, QColor("#f3bda9"))
-        p.setPen(QPen(QColor("#d99c89"), 0.8))
-        p.setBrush(QBrush(skin))
-        cup = QPainterPath(QPointF(87, 60))
-        cup.quadTo(82, 49, 89, 42)
-        cup.quadTo(98, 41, 99, 51)
-        cup.quadTo(98, 61, 87, 60)
-        p.drawPath(cup)
-        p.setPen(QPen(QColor("#d99c89"), 0.7, Qt.SolidLine, Qt.RoundCap))
-        for dx in (0, 3, 6):
-            p.drawLine(QPointF(89 + dx, 45), QPointF(90 + dx, 52))
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#fff4fb"))
-        p.drawEllipse(QRectF(85, 60, 9, 4))
-
-    def _draw_ears(self, p: QPainter) -> None:
-        twitch = math.sin(self._frame * 0.35) * 2 if self._listening else 0.0
-        for outer, inner, fluff in (
-            (
-                [(30, 32), (33, 6), (51, 26)],
-                [(34, 27), (35, 13), (45, 25)],
-                [(36, 24), (38, 18), (41, 24)],
-            ),
-            (
-                [(69, 26), (87, 6 + twitch), (91, 33)],
-                [(75, 25), (85, 13 + twitch), (87, 28)],
-                [(79, 24), (82, 18 + twitch), (85, 25)],
-            ),
-        ):
-            p.setPen(QPen(QColor("#160c20"), 1.2))
-            p.setBrush(QColor("#2c1742"))
-            p.drawPolygon(QPolygonF([QPointF(*point) for point in outer]))
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor("#e98ab4"))
-            p.drawPolygon(QPolygonF([QPointF(*point) for point in inner]))
-            p.setPen(QPen(QColor(255, 235, 245, 170), 0.9, Qt.SolidLine, Qt.RoundCap))
-            p.setBrush(Qt.NoBrush)
-            tuft = QPainterPath(QPointF(*fluff[0]))
-            tuft.lineTo(QPointF(*fluff[1]))
-            tuft.lineTo(QPointF(*fluff[2]))
-            p.drawPath(tuft)
-
-    def _draw_head(self, p: QPainter) -> None:
-        gradient = QRadialGradient(52, 42, 44, 49, 38)
-        gradient.setColorAt(0, QColor("#ffe9dd"))
-        gradient.setColorAt(0.72, QColor("#f9d0bd"))
-        gradient.setColorAt(1, QColor("#eeb59f"))
-        head = QPainterPath(QPointF(30, 48))
-        head.cubicTo(30, 25, 90, 25, 90, 48)
-        head.cubicTo(90, 69, 76, 84, 60, 84)
-        head.cubicTo(44, 84, 30, 69, 30, 48)
-        p.setPen(QPen(QColor("#d99c89"), 0.8))
-        p.setBrush(QBrush(gradient))
-        p.drawPath(head)
-
-    def _draw_face(self, p: QPainter) -> None:
-        closed = self._blink_left > 0 or self.state == PetState.SLEEP
-        surprised = self.emotion == "surprised" or self.state == PetState.SURPRISED
-        love = self.emotion == "love"
-        angry = self.emotion == "angry"
-        listening = self._listening or self.state == PetState.LISTENING
-        # Brows give the face a little more expression.
-        p.setPen(QPen(QColor("#4a2b58"), 1.1, Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
-        for x, tilt in ((45, -1), (75, 1)):
-            brow = QPainterPath(QPointF(x - 6, 40 + (tilt if angry else 0)))
-            brow.quadTo(
-                x, 37 - (2 if listening else 0), x + 6, 40 - (tilt if angry else 0)
-            )
-            p.drawPath(brow)
-        for x in (45, 75):
-            if closed or self.state == PetState.YAWN:
-                p.setPen(QPen(QColor("#3a204c"), 2, Qt.SolidLine, Qt.RoundCap))
-                path = QPainterPath(QPointF(x - 6, 53))
-                path.quadTo(x, 57 if self.state == PetState.SLEEP else 51, x + 6, 53)
-                p.drawPath(path)
-                continue
-            h, w = (20, 16) if surprised else (17, 15)
-            p.setPen(QPen(QColor("#3a204c"), 0.9))
-            p.setBrush(QColor("#fffdfd"))
-            p.drawEllipse(QRectF(x - w / 2, 52 - h / 2, w, h))
-            iris = QRadialGradient(x, 51, 6.5)
-            if love:
-                iris.setColorAt(0, QColor("#ffc1da"))
-                iris.setColorAt(0.6, QColor("#ff5c99"))
-                iris.setColorAt(1, QColor("#c2185b"))
-            elif angry:
-                iris.setColorAt(0, QColor("#ffbf9a"))
-                iris.setColorAt(0.6, QColor("#ff7043"))
-                iris.setColorAt(1, QColor("#bf360c"))
-            else:
-                iris.setColorAt(0, QColor("#f3b6ff"))
-                iris.setColorAt(0.55, QColor("#c13b8a"))
-                iris.setColorAt(1, QColor("#5b1a78"))
-            p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(iris))
-            p.drawEllipse(QRectF(x - 5.2, 46, 10.4, 12.5))
-            p.setBrush(QColor("#1a0d24"))
-            p.drawEllipse(QRectF(x - 1.9, 48, 3.8, 7.2))
-            p.setBrush(QColor("#ffffff"))
-            p.drawEllipse(QRectF(x - 3.4, 46.3, 3.4, 3.4))
-            p.drawEllipse(QRectF(x + 1.8, 53, 1.7, 1.7))
-            p.setPen(QPen(QColor("#241332"), 2.1, Qt.SolidLine, Qt.RoundCap))
-            p.setBrush(Qt.NoBrush)
-            lash = QPainterPath(QPointF(x - 8, 47))
-            lash.quadTo(x, 39.5, x + 8, 47)
-            p.drawPath(lash)
-            p.setPen(QPen(QColor("#241332"), 1.1, Qt.SolidLine, Qt.RoundCap))
-            p.drawLine(
-                QPointF(x + (7 if x > 60 else -7), 46),
-                QPointF(x + (10 if x > 60 else -10), 43),
-            )
-            if angry:
-                p.setPen(QPen(QColor("#3a204c"), 1.4, Qt.SolidLine, Qt.RoundCap))
-                p.drawLine(QPointF(x - 7, 40), QPointF(x + 5, 43 if x < 60 else 40))
-        for x in (32, 76):
-            blush = QRadialGradient(x + 6, 64, 7)
-            blush.setColorAt(0, QColor(255, 105, 150, 120 if love else 62))
-            blush.setColorAt(1, QColor(255, 105, 150, 0))
-            p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(blush))
-            p.drawEllipse(QRectF(x, 60, 13, 8))
-        p.setPen(QPen(QColor("#d99c89"), 0.8))
-        p.drawPoint(QPointF(60, 62))
-        p.setPen(QPen(QColor("#9c4665"), 1.4, Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
-        if self.state == PetState.YAWN:
-            p.setBrush(QColor("#9c4665"))
-            p.drawEllipse(QRectF(55, 66, 10, 12))
-        elif self._mouth > 0.15 and self.state != PetState.SLEEP:
-            p.setBrush(QColor("#e8799d"))
-            p.drawEllipse(QRectF(56, 68, 8, 3 + self._mouth * 6))
-        elif surprised:
-            p.setBrush(QColor("#d87191"))
-            p.drawEllipse(QRectF(57, 67, 6, 8))
-        elif listening:
-            smile = QPainterPath(QPointF(56, 69))
-            smile.quadTo(60, 72, 64, 69)
-            p.drawPath(smile)
-        elif angry or self.emotion == "sad":
-            path = QPainterPath(QPointF(55, 72))
-            path.quadTo(60, 67, 65, 72)
-            p.drawPath(path)
-        else:
-            path = QPainterPath(QPointF(54, 68))
-            path.quadTo(57, 72, 60, 68)
-            path.quadTo(63, 72, 66, 68)
-            p.drawPath(path)
-
-    def _draw_front_hair(self, p: QPainter, wind: float) -> None:
-        gradient = QLinearGradient(30, 18, 86, 50)
-        gradient.setColorAt(0, QColor("#170b22"))
-        gradient.setColorAt(0.45, QColor("#3a2256"))
-        gradient.setColorAt(0.72, QColor("#563073"))
-        gradient.setColorAt(1, QColor("#241332"))
-        p.setPen(QPen(QColor("#120818"), 0.8))
-        p.setBrush(QBrush(gradient))
-        cap = QPainterPath(QPointF(29, 35))
-        cap.cubicTo(28, 13, 89, 11, 92, 35)
-        cap.lineTo(84, 40)
-        cap.quadTo(60, 27, 36, 40)
-        cap.closeSubpath()
-        p.drawPath(cap)
-        for i, x in enumerate((34, 44, 54, 64, 74)):
-            sway = wind * (0.6 + i * 0.12)
-            bang = QPainterPath(QPointF(x, 25))
-            bang.quadTo(x + 5 + sway, 32, x + 2 + sway, 43 - (i % 2) * 3)
-            bang.quadTo(x + 11, 35, x + 12, 26)
-            bang.closeSubpath()
-            p.drawPath(bang)
-        left = QPainterPath(QPointF(30, 32))
-        left.cubicTo(21, 52, 24 + wind, 77, 30 + wind, 90)
-        left.lineTo(38, 82)
-        left.cubicTo(34, 61, 38, 43, 39, 30)
-        left.closeSubpath()
-        right = QPainterPath(QPointF(89, 32))
-        right.cubicTo(99, 52, 96 - wind, 77, 90 - wind, 90)
-        right.lineTo(82, 82)
-        right.cubicTo(86, 61, 82, 43, 81, 30)
-        right.closeSubpath()
-        p.drawPath(left)
-        p.drawPath(right)
-        p.setPen(QPen(QColor(200, 155, 255, 105), 1.2, Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
-        highlight = QPainterPath(QPointF(38, 25))
-        highlight.quadTo(58, 16, 80, 26)
-        p.drawPath(highlight)
-        shine = QPainterPath(QPointF(42, 29))
-        shine.quadTo(50, 25, 58, 28)
-        p.setPen(QPen(QColor(255, 255, 255, 55), 1, Qt.SolidLine, Qt.RoundCap))
-        p.drawPath(shine)
-
-    def _draw_star_clip(self, p: QPainter) -> None:
-        points = []
-        for i in range(10):
-            angle = -math.pi / 2 + i * math.pi / 5
-            radius = 5.5 if i % 2 == 0 else 2.5
-            points.append(
-                QPointF(34 + math.cos(angle) * radius, 35 + math.sin(angle) * radius)
-            )
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 209, 102, 55))
-        p.drawEllipse(QRectF(27, 28, 14, 14))
-        p.setPen(QPen(QColor("#c99721"), 0.7))
-        p.setBrush(QColor("#ffd166"))
-        p.drawPolygon(QPolygonF(points))
-
-    def _draw_accessory(self, p: QPainter) -> None:
-        accessory = self._appearance["accessory"]
-        if accessory == "headphones":
-            p.setPen(QPen(QColor("#202039"), 4))
-            p.setBrush(Qt.NoBrush)
-            p.drawArc(QRectF(27, 24, 66, 54), 0, 180 * 16)
-            p.setPen(QPen(QColor("#b388ff"), 1))
-            p.setBrush(QColor("#443060"))
-            p.drawRoundedRect(QRectF(24, 46, 9, 20), 4, 4)
-            p.drawRoundedRect(QRectF(87, 46, 9, 20), 4, 4)
-        elif accessory == "glasses":
-            p.setPen(QPen(QColor("#382441"), 1.6))
-            p.setBrush(QColor(200, 225, 255, 22))
-            p.drawRoundedRect(QRectF(35, 44, 21, 17), 5, 5)
-            p.drawRoundedRect(QRectF(64, 44, 21, 17), 5, 5)
-            p.drawLine(QPointF(56, 50), QPointF(64, 50))
-        elif accessory == "ribbon":
-            p.setPen(QPen(QColor("#b83268"), 1))
-            p.setBrush(QColor("#ff7eae"))
-            ribbon = QPainterPath(QPointF(83, 28))
-            ribbon.lineTo(72, 20)
-            ribbon.lineTo(73, 34)
-            ribbon.closeSubpath()
-            ribbon.moveTo(83, 28)
-            ribbon.lineTo(94, 20)
-            ribbon.lineTo(93, 34)
-            ribbon.closeSubpath()
-            p.drawPath(ribbon)
-            p.setBrush(QColor("#ffd166"))
-            p.drawEllipse(QRectF(80, 25, 6, 6))
-
-    def _draw_effects(self, p: QPainter) -> None:
-        if self._listening or self.state == PetState.LISTENING:
-            pulse = (math.sin(self._frame * 0.18) + 1) / 2
-            p.setBrush(Qt.NoBrush)
-            for i, radius in enumerate((6, 10, 14)):
-                alpha = int(210 - i * 50 - pulse * 35)
-                p.setPen(
-                    QPen(
-                        QColor(255, 107, 157, max(50, alpha)),
-                        1.6,
-                        Qt.SolidLine,
-                        Qt.RoundCap,
-                    )
-                )
-                p.drawArc(
-                    QRectF(100 - radius, 49 - radius, radius * 2, radius * 2),
-                    -55 * 16,
-                    110 * 16,
-                )
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor("#ff6b9d"))
-            p.drawEllipse(QRectF(98, 47, 4, 4))
-        p.setPen(Qt.NoPen)
-        if self.state == PetState.DANCE:
-            p.setPen(QPen(QColor("#b388ff"), 1.5))
-            p.setFont(QFont("Segoe UI Symbol", 12))
-            p.drawText(QPointF(12, 45 + math.sin(self._frame * 0.1) * 5), "♪")
-            p.drawText(QPointF(98, 28 + math.cos(self._frame * 0.1) * 5), "♫")
-        if (
-            self.emotion == "love"
-            or self.state == PetState.LOVE
-            or self._affection_frames
-        ):
-            p.setBrush(QColor("#ff4f8b"))
-            p.setFont(QFont("Segoe UI Symbol", 10))
-            for i in range(3):
-                x = 12 + i * 42 + math.sin(self._frame * 0.08 + i * 2) * 5
-                y = 20 + math.cos(self._frame * 0.07 + i) * 7
-                p.drawText(QPointF(x, y), "♥")
-        elif self.emotion == "angry" or self.state == PetState.ANGRY:
-            p.setPen(QPen(QColor("#ff7043"), 2, Qt.SolidLine, Qt.RoundCap))
-            for x, y in ((14, 24), (99, 32), (94, 13)):
-                p.drawLine(QPointF(x - 3, y - 3), QPointF(x + 3, y + 3))
-                p.drawLine(QPointF(x + 3, y - 3), QPointF(x - 3, y + 3))
-        if self.state == PetState.SLEEP or self.emotion == "sleepy":
-            p.setPen(Qt.NoPen)
-            p.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            for i in range(3):
-                phase = (self._frame + i * 24) % 90
-                alpha = int(220 * (1 - phase / 100))
-                p.setPen(QColor(179, 136, 255, max(40, alpha)))
-                p.drawText(
-                    QPointF(91 + i * 5, 34 - phase * 0.28), "z" if i == 0 else "Z"
-                )

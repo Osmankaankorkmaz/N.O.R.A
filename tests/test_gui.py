@@ -222,7 +222,7 @@ def test_memory_tasks_and_reminders_persist_across_app_restart(qapp, tmp_path):
     reopened.shutdown()
 
 
-def test_settings_dialog_applies_vector_appearance_and_persona(qapp, tmp_path):
+def test_settings_dialog_applies_pixel_appearance_and_persona(qapp, tmp_path):
     from nora.nora_settings_dialog import NoraSettingsDialog
     from nora.nora_store import NoraStore
 
@@ -384,4 +384,17 @@ def test_tts_indicator_and_mode_restore_are_visible(qapp, monkeypatch):
     app._activate_mode("normal")
     assert app.voice.tts_enabled is True
     assert app.speaker_indicator.text() == "🔊"
+    app.shutdown()
+
+
+def test_tray_icon_refreshes_with_pixel_appearance(qapp, tmp_path):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    before = app.tray.icon().pixmap(64, 64).toImage()
+    app._apply_settings({"hair_color": "#202b52", "outfit": "casual"})
+    after = app.tray.icon().pixmap(64, 64).toImage()
+    assert not after.isNull() and after != before
     app.shutdown()

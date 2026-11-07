@@ -1,13 +1,13 @@
 # Nora 💕 · Anime Kız Masaüstü Asistanı
 
-Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakterin tamamı **QPainter ile kod içinde çizilir**; harici sprite veya resim dosyası kullanılmaz.
+Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakter; büyük kafalı, pembe yanaklı, kedi kulaklı sevimli bir **8-bit piksel chibi** olarak tamamı **QPainter ile kod içinde çizilir**; harici sprite veya resim dosyası kullanılmaz.
 
 > **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
 
 ## Neler yapabilir?
 
 ### Karakter ve ses
-- 120×150 şeffaf, always-on-top pet; yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme ve duygu efektleri.
+- 120×150 şeffaf, always-on-top pet; 40×50 mantıksal ızgarada 3×3 keskin pikseller, keskin kenarlı 8-bit görünüm ve aynı tarzda tepsi ikonu. Yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme; piksel kalp, yıldız, nota ve uyku efektleri.
 - **Komutla hareket:** “ikinci monitöre geç”, “uyu”, “uyan”, “dolaş”, “dur”, “zıpla”, “dans et”, “otur”. Bu komutlar Groq/internet olmadan çalışır.
 - “Uyu” ve “dolaş” siz değiştirene kadar sürer. “Zıpla ve uyu” gibi en fazla dört açık hareket komutu arka arkaya çalışabilir.
 - Çoklu monitör algılama, numaralı/sonraki/ana monitöre geçme, kenarlara yapışma ve görev çubuğu üstünde oturma.
@@ -47,7 +47,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 | `hatırlatıcılar` / `hatırlatıcı ID iptal` | Listeleme/iptal |
 | `görev ekle: raporu bitir` / `görevler` | Görev ekleme/listeleme |
 | `1 numaralı görevi tamamla` / `1 numaralı notu görevlere çevir` | Görev yönetimi |
-| `gözlük tak` / `kulaklık tak` / `gece kıyafeti` | QPainter görünümü |
+| `gözlük tak` / `kulaklık tak` / `gece kıyafeti` | 8-bit QPainter görünümü |
 | `saç rengi #202b52` / `tatlı mod` / `bana Kaan diye hitap et` | Görünüm/kişilik |
 | `panoyu özetle` / `panoyu İngilizce çevir` | Onaylı pano yardımı |
 | `ekrandaki yazıları oku` | Yerel OCR; analiz gönderimi ayrıca onaylı |
@@ -186,7 +186,8 @@ nora/
   nora_commands.py        # internetsiz Türkçe komut çözümleme
   nora_brain.py           # Groq chat/vision/metin yardımı
   nora_voice.py           # yerel wake, Google/Whisper STT, TTS
-  nora_pet.py             # QPainter karakter, fizik, hareket, baloncuk
+  nora_pet.py             # 8-bit karakter, fizik, hareket, baloncuk
+  nora_pixel_art.py       # QPainter piksel çizimi, paletler, tepsi ikonu
   nora_tools.py           # sistem/ekran/kamera/uygulama/not araçları
   nora_store.py           # atomik kalıcı yerel veri
   nora_activities.py      # hatırlatıcı zamanlayıcı, modlar, kelime oyunu
@@ -214,4 +215,4 @@ python -m compileall -q nora main.py tests
 ruff check nora tests main.py
 ```
 
-Bu sürümde **173 test** geçmiştir; offscreen GUI, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Bu sürümde **194 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm pozlar, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

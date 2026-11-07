@@ -11,8 +11,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt5.QtCore import QEvent, QPoint, Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtGui import QFont, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -45,6 +45,7 @@ from .nora_personality import (
     startup_greeting,
 )
 from .nora_pet import NoraPet
+from .nora_pixel_art import PixelCharacter
 from .nora_proactive import ProactiveEngine
 from .nora_settings_dialog import NoraSettingsDialog
 from .nora_store import NoraStore, default_data_dir, now_local, parse_datetime
@@ -448,32 +449,9 @@ class NoraApp(QWidget):
     def _tray_icon(self) -> QIcon:
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.transparent)
-        p = QPainter(pixmap)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#ff6b9d"))
-        p.drawEllipse(2, 2, 60, 60)
-        p.setBrush(QColor("#3b2055"))
-        ears = QPainterPath()
-        ears.moveTo(14, 25)
-        ears.lineTo(16, 9)
-        ears.lineTo(28, 21)
-        ears.moveTo(36, 21)
-        ears.lineTo(48, 9)
-        ears.lineTo(50, 25)
-        p.drawPath(ears)
-        p.drawEllipse(12, 17, 40, 36)
-        p.setBrush(QColor("#ffe0d0"))
-        p.drawEllipse(17, 24, 30, 27)
-        p.setBrush(QColor("#3b2055"))
-        p.drawEllipse(22, 33, 5, 7)
-        p.drawEllipse(37, 33, 5, 7)
-        p.setPen(QPen(QColor("#9c4665"), 2, Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
-        mouth = QPainterPath(QPointF(28, 44))
-        mouth.quadTo(32, 48, 36, 44)
-        p.drawPath(mouth)
-        p.end()
+        painter = QPainter(pixmap)
+        PixelCharacter.draw_icon(painter, 64, self.store.preferences)
+        painter.end()
         return QIcon(pixmap)
 
     def _movement_menu(self, menu: QMenu) -> None:
@@ -1350,6 +1328,7 @@ class NoraApp(QWidget):
             )
             self.local_speech.configure(prefs["whisper_model"], prefs["whisper_device"])
             self.pet.set_appearance(prefs)
+            self.tray.setIcon(self._tray_icon())
             for action, key in (
                 (self.tts_action, "tts"),
                 (self.wake_action, "wake_word"),
