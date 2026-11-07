@@ -265,6 +265,23 @@ def _appearance(low: str) -> DirectCommand | None:
         "çift tıklayınca sohbet aç": ("double_click_action", "chat"),
         "yerel ses modu": ("stt_backend", "local"),
         "bulut ses modu": ("stt_backend", "google"),
+        "sürekli konuşma modu": ("continuous_conversation", True),
+        "sürekli konuşmayı aç": ("continuous_conversation", True),
+        "kesintisiz sohbet": ("continuous_conversation", True),
+        "sürekli konuşmayı kapat": ("continuous_conversation", False),
+        "dinlemeyi bırak": ("continuous_conversation", False),
+        "sohbeti bitir": ("continuous_conversation", False),
+        "bas konuş modu": ("push_to_talk", True),
+        "bas konuşu aç": ("push_to_talk", True),
+        "bas konuş modunu kapat": ("push_to_talk", False),
+        "ekranımı izle": ("auto_screen_watch", True),
+        "ekran incelemeyi aç": ("auto_screen_watch", True),
+        "ekran incelemeyi kapat": ("auto_screen_watch", False),
+        "kamera incelemesini aç": ("auto_camera_watch", True),
+        "kamera incelemesini kapat": ("auto_camera_watch", False),
+        "otomatik medyayı aç": ("auto_media", True),
+        "kendi kendine müzik aç": ("auto_media", True),
+        "otomatik medyayı kapat": ("auto_media", False),
     }
     if low in settings:
         key, value = settings[low]
@@ -506,6 +523,20 @@ def parse_direct_command(
     match = re.fullmatch(r"([\w-]+)\s*(?:numaralı\s*)?notu sil", low)
     if match:
         return _cmd("note", action="delete", id=match.group(1))
+    if low in {"müzik aç", "spotify aç", "spotifyda müzik aç", "biraz müzik aç"}:
+        return _cmd(
+            "media", "Spotify'da bir şeyler açıyorum senpai~ 🎧", action="music"
+        )
+    match = re.fullmatch(r"spotify(?:da)?\s+(.+?)\s+(?:aç|çal)", low)
+    if match:
+        return _cmd("media", action="music", query=match.group(1)[:200])
+    if low in {"video aç", "video izle", "bir şeyler izle"}:
+        return _cmd(
+            "media", "Bir video açıyorum, birlikte izleyelim~ 🍿", action="video"
+        )
+    match = re.fullmatch(r"(?:video|youtube)(?:da)?\s+(.+?)\s+aç", low)
+    if match:
+        return _cmd("media", action="video", query=match.group(1)[:200])
     if low in {
         "sesli konuş",
         "sesli yanıtı aç",

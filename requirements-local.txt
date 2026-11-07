@@ -5,3 +5,4 @@
 faster-whisper==1.2.1
 rapidocr-onnxruntime==1.4.4
 icalendar==7.3.0
+keyboard==0.13.5  # optional global push-to-talk hotkey; may need admin/root on some OSes

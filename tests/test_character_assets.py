@@ -74,11 +74,11 @@ def test_every_pose_and_animation_is_exported_and_animated(qapp, tmp_path):
         assert len(set(images)) >= 2, name
     counts = export_all(tmp_path, png_scale=1, gif_scale=1)
     assert counts == {
-        "poses": 16,
+        "poses": 18,
         "emotions": 8,
         "accessories": 4,
         "outfits": 3,
-        "animations": 22,
+        "animations": 24,
     }
     assert (tmp_path / "wolfcut-hero.png").exists()
     assert (tmp_path / "index.html").exists()

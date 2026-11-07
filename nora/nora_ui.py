@@ -37,6 +37,7 @@ from .nora_calendar import format_events, format_free_slots, read_ics
 from .nora_commands import normalize_text, parse_direct_command, parse_direct_sequence
 from .nora_desktop import DesktopLayouts
 from .nora_files import NoraFiles
+from .nora_hotkeys import DEFAULT_PTT_KEY, PushToTalkHotkey
 from .nora_local_ai import LocalOCR, LocalSpeech
 from .nora_personality import (
     EMOTIONS,
@@ -208,6 +209,9 @@ class NoraApp(QWidget):
         self._wake_followup = False
         self._resume_wake_after_audio = False
         self._stt_test_request = 0
+        self._conversation_active = False
+        self._continuous_empty = 0
+        self._ptt_active = False
         self._request_seq = 0
         self._active_request = 0
         self._workers: set[QThread] = set()
@@ -270,6 +274,7 @@ class NoraApp(QWidget):
         self.pet = NoraPet()
         self.pet.set_appearance(self.store.preferences)
         self.proactive = ProactiveEngine(self.tools, store=self.store, parent=self)
+        self.ptt_hotkey = PushToTalkHotkey(self)
         self._build_chat()
         self._build_tray()
         self._connect_signals()
@@ -284,6 +289,7 @@ class NoraApp(QWidget):
             self.voice.start_wake_word_listener()
         if proactive_enabled:
             self.proactive.start()
+        self._sync_voice_modes()
         self._update_mic_indicator()
         self._update_tts_indicator()
         try:
@@ -587,6 +593,32 @@ class NoraApp(QWidget):
                     {"command": "clipboard_help", "action": a}
                 ),
             )
+        live = features.addMenu("🔁 Canlı mod / otonomi")
+        live.setStyleSheet(self._menu_style())
+        for label, key in (
+            ("Sürekli konuşma", "continuous_conversation"),
+            ("Bas-konuş tuşu", "push_to_talk"),
+            ("Ara sıra ekranımı incele", "auto_screen_watch"),
+            ("Ara sıra kameradan beni incele", "auto_camera_watch"),
+            ("Kendi kendine müzik/video aç", "auto_media"),
+        ):
+            action = live.addAction(label)
+            action.setCheckable(True)
+            action.blockSignals(True)
+            action.setChecked(bool(self.store.preference(key)))
+            action.blockSignals(False)
+            action.toggled.connect(
+                lambda checked, k=key: self._apply_settings({k: bool(checked)})
+            )
+        live.addSeparator()
+        live.addAction(
+            "🎧 Müzik aç",
+            lambda: self._execute_command({"command": "media", "action": "music"}),
+        )
+        live.addAction(
+            "🍿 Video aç",
+            lambda: self._execute_command({"command": "media", "action": "video"}),
+        )
         features.addSeparator()
         features.addAction("🎤 Yerel ses modelini indir", self._download_local_model)
         features.addAction("🔊 Konuşma sesi seç", self._select_output_voice)
@@ -673,6 +705,10 @@ class NoraApp(QWidget):
             lambda message: self.add_message(message, "bot")
         )
         self.proactive.speak_requested.connect(self._on_proactive)
+        self.proactive.autonomy_requested.connect(self._on_autonomy_request)
+        self.ptt_hotkey.pressed.connect(self._on_ptt_pressed)
+        self.ptt_hotkey.released.connect(self._on_ptt_released)
+        self.ptt_hotkey.error.connect(self._on_ptt_error)
         app = QApplication.instance()
         if app:
             app.aboutToQuit.connect(self.shutdown)
@@ -703,6 +739,153 @@ class NoraApp(QWidget):
         self.proactive.set_suspended(
             self._busy or self._listening or self.voice.is_speaking
         )
+
+    def _sync_voice_modes(self) -> None:
+        prefs = self.store.preferences
+        if prefs.get("push_to_talk"):
+            self.ptt_hotkey.start(prefs.get("ptt_key") or DEFAULT_PTT_KEY)
+        else:
+            self.ptt_hotkey.stop()
+        if not prefs.get("continuous_conversation"):
+            self._conversation_active = False
+            self._continuous_empty = 0
+            self._wake_followup = False
+        self._update_mic_indicator()
+
+    def _queue_conversation_followup(self) -> None:
+        if (
+            self._closing
+            or not self._conversation_active
+            or not self.store.preference("continuous_conversation")
+        ):
+            return
+        if self.voice.is_speaking:
+            self._wake_followup = True
+            return
+        QTimer.singleShot(450, self._conversation_followup)
+
+    def _conversation_followup(self) -> None:
+        if (
+            self._closing
+            or self._busy
+            or self._listening
+            or self.voice.is_speaking
+            or not self._conversation_active
+            or not self.store.preference("continuous_conversation")
+        ):
+            return
+        self._start_listening()
+
+    def _on_ptt_pressed(self) -> None:
+        if self._closing or self._busy or self._listening:
+            return
+        if self.voice.is_speaking:
+            self._wake_followup = False
+            self.voice.stop_speaking()
+        self.show_chat()
+        self.proactive.user_interacted()
+        self._conversation_active = bool(
+            self.store.preference("continuous_conversation")
+        )
+        self._continuous_empty = 0
+        self._listening = True
+        self._ptt_active = True
+        self._pause_wake_for_audio()
+        self._set_busy(True, "Bas-konuş 🎙️ konuş, bırakınca cevaplayayım…")
+        self.mic_button.setStyleSheet("background: #e53950; border-color: #ff8fa3;")
+        self.pet.set_listening(True)
+        self.pet.show_speech("Bas-konuş 🎙️", 2000)
+        request_id = self._next_request()
+        if not self.voice.start_push_to_talk(request_id):
+            self._ptt_active = False
+            self._listening = False
+            self.mic_button.setStyleSheet("")
+            self.pet.set_listening(False)
+            self._set_busy(False)
+            self._resume_wake_after_audio_capture()
+            self.add_message(
+                "Bas-konuşu başlatamadım senpai. Mikrofon meşgul veya ses açık. 🎤",
+                "bot",
+            )
+        self._sync_pause()
+
+    def _on_ptt_released(self) -> None:
+        if self._ptt_active:
+            self.status_label.setText("Sesini işliyorum…")
+            self.voice.stop_push_to_talk()
+
+    def _on_ptt_error(self, message: str) -> None:
+        if not self._closing:
+            self.add_message(message, "bot", speak=False)
+            self._update_mic_indicator()
+
+    def _on_autonomy_request(self, kind: str) -> None:
+        if (
+            self._closing
+            or self._busy
+            or self._listening
+            or self.voice.is_speaking
+            or self.modes.current != "normal"
+        ):
+            return
+        if kind == "screen":
+            if not self.brain.available:
+                return
+            self.add_message(
+                "👀 Ekranına merak sardım, biraz bakıyorum…", "bot", speak=False
+            )
+            self._analyze_screen(
+                "Kullanıcı otomatik ekran incelemeyi açıkça açtı. Ekranda ne olduğunu "
+                "kısaca ve doğal biçimde yorumla; hassas veri/parola isteme."
+            )
+        elif kind == "camera":
+            if not self.brain.available:
+                return
+            self.add_message(
+                "📷 Kameradan sana bakıyorum, izin vermiştin~", "bot", speak=False
+            )
+            self._analyze_camera(
+                "Kullanıcı otomatik kamera incelemeyi açıkça açtı. Kamerada ne gördüğünü "
+                "kısaca, saygılı ve doğal biçimde anlat; fiziksel deneyim uydurma."
+            )
+        elif kind == "media":
+            music = self.proactive.rng.random() < 0.6
+            query = (
+                self.proactive.rng.choice(
+                    ["lofi hip hop", "synthwave", "anime opening", "jazz coffee"]
+                )
+                if music
+                else self.proactive.rng.choice(
+                    ["sevimli kediler", "lofi girl", "pixel art animation"]
+                )
+            )
+            self._execute_command(
+                {
+                    "command": "media",
+                    "action": "music" if music else "video",
+                    "query": query,
+                }
+            )
+
+    def _media_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd.get("action", "music")
+        query = str(cmd.get("query", ""))[:200]
+        if action == "music":
+            self.pet.perform_action("dance")
+            self._report(
+                f"Canım müzik istedi; Spotify'da “{query or 'lofi hip hop'}” açıyorum 🎧"
+            )
+            self._run_tool(
+                lambda: self.tools.spotify_search(query), "Spotify açılıyor…"
+            )
+        else:
+            self.pet.perform_action("watch")
+            self._report(
+                f"Bir video açıyorum, birlikte izleyelim~ 🍿 “{query or 'sevimli kediler'}”"
+            )
+            self._run_tool(
+                lambda: self.tools.video_search(query), "Video araması açılıyor…"
+            )
 
     def _set_busy(self, busy: bool, status: str = "") -> None:
         self._busy = busy
@@ -748,6 +931,13 @@ class NoraApp(QWidget):
         QTimer.singleShot(0, self._scroll_to_bottom)
         if sender == "bot" and speak:
             self._say(original)
+        if (
+            sender == "bot"
+            and self._conversation_active
+            and not original.startswith("🎙️")
+            and self.store.preference("continuous_conversation")
+        ):
+            self._queue_conversation_followup()
 
     def _say(self, text: str) -> bool:
         if self._closing:
@@ -1000,6 +1190,9 @@ class NoraApp(QWidget):
     def _send_message(self, text: str, *, transcript_note: str = "") -> None:
         if self._closing or not text.strip():
             return
+        if self.store.preference("continuous_conversation"):
+            self._conversation_active = True
+            self._continuous_empty = 0
         direct = parse_direct_command(text)
         command = None
         sequence_commands: list[dict[str, Any]] = []
@@ -1039,6 +1232,7 @@ class NoraApp(QWidget):
                 "stt_backend",
                 "game",
                 "stt_test",
+                "media",
             }
             for item in requested
         )
@@ -1131,6 +1325,8 @@ class NoraApp(QWidget):
             self._test_speech()
         elif name == "stt_test":
             self._start_listening(recognition_test=True)
+        elif name == "media":
+            self._media_command(cmd)
         elif name == "settings":
             if cmd["action"] == "list":
                 prefs = self.store.preferences
@@ -1351,6 +1547,7 @@ class NoraApp(QWidget):
             self._refresh_personal_context()
             self._update_mic_indicator()
             self._update_tts_indicator()
+            self._sync_voice_modes()
         except (ValueError, CommandError) as exc:
             self._report(f"Ayar uygulanamadı senpai: {exc}")
 
@@ -2032,6 +2229,7 @@ class NoraApp(QWidget):
         if self._closing or request_id != self._active_request:
             return
         self._listening = False
+        self._ptt_active = False
         self.mic_button.setStyleSheet("")
         self.pet.set_listening(False)
         self._set_busy(False)
@@ -2059,6 +2257,22 @@ class NoraApp(QWidget):
             self._resume_wake_after_audio_capture()
             self._sync_pause()
             return
+        if (
+            self.store.preference("continuous_conversation")
+            and self._conversation_active
+        ):
+            if text:
+                self._continuous_empty = 0
+            else:
+                self._continuous_empty += 1
+                if self._continuous_empty >= 2:
+                    self._conversation_active = False
+                    self._wake_followup = False
+                    self.add_message(
+                        "Sürekli konuşmayı durdurdum senpai. İstersen 'sürekli konuşma modu' ile tekrar aç. 🎙️",
+                        "bot",
+                        speak=False,
+                    )
         if text:
             self._send_message(
                 text, transcript_note=repair.notice() if repair is not None else ""
@@ -2177,6 +2391,9 @@ class NoraApp(QWidget):
             return
         self.proactive.user_interacted()
         self.show_chat()
+        if self.store.preference("continuous_conversation"):
+            self._conversation_active = True
+            self._continuous_empty = 0
         if remainder:
             self._send_message(remainder)
             return
@@ -2334,6 +2551,7 @@ class NoraApp(QWidget):
         if self.settings_dialog is not None:
             self.settings_dialog.close()
         self.proactive.stop()
+        self.ptt_hotkey.stop()
         self.reminders.stop()
         self.local_speech.close()
         self.ocr.close()

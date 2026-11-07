@@ -32,6 +32,13 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "whisper_model": "small",
     "whisper_device": "auto",
     "wake_word": True,
+    "continuous_conversation": False,
+    "push_to_talk": False,
+    "ptt_key": "ctrl+alt+space",
+    "auto_screen_watch": False,
+    "auto_camera_watch": False,
+    "auto_media": False,
+    "autonomy_minutes": 10,
     "tts": True,
     "proactive": True,
     "quiet_hours": True,
@@ -175,6 +182,7 @@ class NoraStore:
                 "appearance_version": (1, 2),
                 "hydration_minutes": (0, 240),
                 "break_minutes": (0, 180),
+                "autonomy_minutes": (5, 120),
             }
             low, high = bounds[key]
             if (

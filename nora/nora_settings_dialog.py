@@ -110,8 +110,41 @@ class NoraSettingsDialog(QDialog):
         self._line(form, "voice_id", "Ses kimliği (boş: otomatik)", prefs, 240)
         self._check(form, "tts", "Sesli yanıt", prefs)
         self._check(form, "wake_word", "Yerel Hey Nora bekçisi", prefs)
+        self._check(form, "continuous_conversation", "Sürekli konuşma modu", prefs)
+        self.fields["continuous_conversation"].setToolTip(
+            "Açıkken Nora cevap verdikten sonra tekrar dinler. 'Dinlemeyi bırak' veya "
+            "'sürekli konuşmayı kapat' ile durur. Mikrofon yalnızca dinleme sırasında açıktır."
+        )
+        self._check(form, "push_to_talk", "Bas-konuş tuşu", prefs)
+        self._line(form, "ptt_key", "Bas-konuş kısayolu", prefs, 60)
+        self.fields["push_to_talk"].setToolTip(
+            "Tuşa basılı tutunca dinler, bırakınca cevaplar. Global kısayol için 'keyboard' "
+            "paketi gerekir; bazı sistemlerde yönetici izni isteyebilir."
+        )
         self._check(form, "proactive", "Proaktif konuşma", prefs)
         self._check(form, "quiet_hours", "Gece 02:00-06:00 daha sessiz ol", prefs)
+        self._check(
+            form, "auto_screen_watch", "Nora ara sıra ekranımı incelesin", prefs
+        )
+        self._check(
+            form, "auto_camera_watch", "Nora ara sıra kameradan beni incelesin", prefs
+        )
+        self._check(
+            form, "auto_media", "Nora kendi kendine müzik/video açabilsin", prefs
+        )
+        self._spin(form, "autonomy_minutes", "Otonomi aralığı (dakika)", 5, 120, prefs)
+        self.fields["auto_screen_watch"].setToolTip(
+            "Açıkken Nora seyrek aralıklarla ekran görüntüsü alıp Groq'a analiz için gönderebilir. "
+            "Varsayılan kapalıdır; odak/sessiz modda ve gece daha az çalışır."
+        )
+        self.fields["auto_camera_watch"].setToolTip(
+            "Açıkken Nora seyrek aralıklarla kameradan bir kare alıp Groq'a analiz için gönderebilir. "
+            "Kamera izni gerekir; varsayılan kapalıdır."
+        )
+        self.fields["auto_media"].setToolTip(
+            "Açıkken Nora canı isterse Spotify/YouTube araması açıp dans edebilir veya video izleme "
+            "pozuna geçebilir. Varsayılan kapalıdır; tarayıcı/uygulama açılabilir."
+        )
         self._combo(
             form,
             "stt_backend",

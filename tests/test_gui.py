@@ -458,3 +458,90 @@ def test_speech_recognition_test_shows_transcript_without_executing(qapp, tmp_pa
     assert app.pet.state != PetState.SLEEP
     assert not app._busy and not app._listening
     app.shutdown()
+
+
+def test_continuous_conversation_followup_and_stop_command(qapp, tmp_path, monkeypatch):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    app.store.set_preference("continuous_conversation", True)
+    app._conversation_active = True
+    started = []
+    monkeypatch.setattr(
+        app.voice, "listen_async", lambda rid: started.append(rid) or True
+    )
+    app._conversation_followup()
+    assert started and app._listening
+    app._on_listen_done(started[0], "", "sessiz")
+    app._on_listen_done(app._next_request(), "", "sessiz")
+    assert not app._conversation_active
+    app._send_message("sürekli konuşma modu")
+    assert app.store.preference("continuous_conversation")
+    app._send_message("dinlemeyi bırak")
+    assert not app.store.preference("continuous_conversation")
+    app.shutdown()
+
+
+def test_ptt_handlers_start_and_stop_voice(qapp, tmp_path, monkeypatch):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    calls = []
+    monkeypatch.setattr(
+        app.voice,
+        "start_push_to_talk",
+        lambda rid: calls.append(("start", rid)) or True,
+    )
+    monkeypatch.setattr(app.voice, "stop_push_to_talk", lambda: calls.append(("stop",)))
+    app._on_ptt_pressed()
+    assert app._listening and app._ptt_active and calls[0][0] == "start"
+    app._on_ptt_released()
+    assert calls[-1] == ("stop",)
+    app.shutdown()
+
+
+def test_media_command_dances_or_watches(qapp, tmp_path, monkeypatch):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    app.pet._timer.stop()
+    opened = []
+    monkeypatch.setattr(
+        app.tools, "spotify_search", lambda q: opened.append(("music", q)) or "ok"
+    )
+    monkeypatch.setattr(
+        app.tools, "video_search", lambda q: opened.append(("video", q)) or "ok"
+    )
+    monkeypatch.setattr(app, "_run_tool", lambda fn, *a, **k: fn())
+    monkeypatch.setattr(app, "_report", lambda *a, **k: None)
+    app._media_command({"command": "media", "action": "music", "query": "lofi"})
+    assert app.pet.state == PetState.DANCE and opened[-1] == ("music", "lofi")
+    app._media_command({"command": "media", "action": "video", "query": "kediler"})
+    assert app.pet.state == PetState.WATCH and opened[-1] == ("video", "kediler")
+    app.shutdown()
+
+
+def test_drag_discomfort_and_pretty_landing(qapp):
+    pet = NoraPet()
+    pet._timer.stop()
+    pet._set_state(PetState.DRAG)
+    pet._state_frames = 111
+    pet._tick()
+    assert pet.emotion == "angry"
+    assert pet._bubble is not None and "bırak" in pet._bubble._text
+    pet._set_state(PetState.FALL)
+    pet._grounded = False
+    pet._y = pet._current_floor() - 1
+    pet._vy = 5
+    pet._tick()
+    assert pet.state == PetState.LAND
+    for _ in range(30):
+        pet._tick()
+    assert pet.state == PetState.IDLE
+    pet.shutdown()

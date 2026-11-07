@@ -190,3 +190,21 @@ def test_polite_and_misheard_address_command_variants(text, target):
         assert direct.command == {"command": "move_monitor", "target": target}
     else:
         assert direct.command == {"command": "pet_action", "action": target}
+
+
+def test_live_mode_and_media_commands():
+    assert parse_direct_command("sürekli konuşma modu").command == {
+        "command": "settings",
+        "action": "set",
+        "key": "continuous_conversation",
+        "value": True,
+    }
+    assert parse_direct_command("dinlemeyi bırak").command["value"] is False
+    assert parse_direct_command("bas konuş modu").command["key"] == "push_to_talk"
+    assert parse_direct_command("müzik aç").command == {
+        "command": "media",
+        "action": "music",
+    }
+    assert parse_direct_command("spotifyda lofi aç").command["query"] == "lofi"
+    assert parse_direct_command("video aç").command["action"] == "video"
+    assert normalize_command({"command": "media", "action": "video"})["query"]

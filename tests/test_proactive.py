@@ -113,3 +113,35 @@ def test_quiet_hours_reduce_random_probability():
     clock.value += 121
     engine._check()
     assert not emitted  # 5% > quiet random threshold 2%, idle not reached
+
+
+def test_autonomy_is_explicit_opt_in_and_rate_limited():
+    class Store:
+        def __init__(self):
+            self.prefs = {
+                "quiet_hours": True,
+                "auto_screen_watch": True,
+                "auto_camera_watch": False,
+                "auto_media": False,
+                "autonomy_minutes": 5,
+                "hydration_minutes": 0,
+                "break_minutes": 0,
+            }
+
+        def preference(self, key, default=None):
+            return self.prefs.get(key, default)
+
+    engine, clock, emitted = make_engine(rng=FixedRNG(0.1))
+    engine.store = Store()
+    requests = []
+    engine.autonomy_requested.connect(requests.append)
+    clock.value += 301
+    engine._check()
+    assert requests == ["screen"]
+    clock.value += 121
+    engine._check()
+    assert len(requests) == 1
+    engine.store.prefs["auto_screen_watch"] = False
+    clock.value += 301
+    engine._check()
+    assert len(requests) == 1

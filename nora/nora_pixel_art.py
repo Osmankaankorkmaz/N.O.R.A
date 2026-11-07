@@ -182,7 +182,7 @@ class PixelCharacter:
         talking = bool(talking or state == "talk")
         listening = bool(listening or state == "listening")
         sleeping = state == "sleep"
-        sitting = state == "sit"
+        sitting = state in {"sit", "watch"}
 
         # A stepped, solid-alpha shadow stays on the floor while Nora bobs.
         shadow = QColor(44, 32, 58, 38 if grounded else 24)
@@ -202,6 +202,8 @@ class PixelCharacter:
             bob = -1 if (phase // 8) % 2 else 0
         elif state == "surprised":
             bob = -1 if (phase // 10) % 2 else 0
+        elif state == "land":
+            bob = 2 if (phase // 6) % 2 else 1
         elif state in {"walk_left", "walk_right"}:
             bob = -1 if (phase // 6) % 2 else 0
         else:
@@ -217,6 +219,8 @@ class PixelCharacter:
             self._back_hair(canvas, colors, phase)
             self._legs(canvas, colors, state, phase)
             self._body(canvas, colors)
+            if state == "watch":
+                self._popcorn(canvas, colors)
             self._arms(canvas, colors, state, emotion, phase, listening)
             self._ears(canvas, colors, phase, listening)
             self._head(canvas, colors)
@@ -280,7 +284,19 @@ class PixelCharacter:
     ) -> None:
         o, skin, cream = p["outline"], p["skin"], p["cream"]
         boot, trim = p["shoe"], p["shoe_light"]
-        if state in {"sit", "sleep"}:
+        if state == "land":
+            c.rect(14, 42, 4, 2, o)
+            c.rect(22, 42, 4, 2, o)
+            c.rect(15, 42, 2, 1, skin)
+            c.rect(23, 42, 2, 1, skin)
+            c.rect(11, 44, 8, 2, o)
+            c.rect(21, 44, 8, 2, o)
+            c.rect(12, 44, 6, 1, boot)
+            c.rect(22, 44, 6, 1, boot)
+            c.rect(12, 45, 6, 1, p["shoe_shade"])
+            c.rect(22, 45, 6, 1, p["shoe_shade"])
+            return
+        if state in {"sit", "sleep", "watch"}:
             c.rect(13, 41, 4, 3, o)
             c.rect(23, 41, 4, 3, o)
             c.rect(14, 41, 2, 2, skin)
@@ -404,7 +420,14 @@ class PixelCharacter:
         else:
             relaxed_left(swing)
 
-        if listening:
+        if state == "watch":
+            c.rect(10, 34, 4, 4, o)
+            c.rect(11, 35, 2, 2, skin)
+            c.rect(26, 32, 4, 3, o)
+            c.rect(27, 33, 2, 1, skin)
+            c.rect(29, 30, 2, 4, o)
+            c.rect(29, 31, 1, 1, p["red"])
+        elif listening:
             c.rect(27, 31, 3, 4, sleeve)
         elif dancing or jumping:
             raised_right()
@@ -642,6 +665,16 @@ class PixelCharacter:
             c.rect(30, 14, 1, 1, p["pink"])
             c.rect(34, 14, 1, 1, p["pink"])
 
+    def _popcorn(self, c: _PixelCanvas, p: dict[str, QColor]) -> None:
+        o = p["outline"]
+        c.rect(16, 33, 8, 6, o)
+        c.rect(17, 34, 6, 4, p["cream"])
+        for x in (18, 20, 22):
+            c.rect(x, 34, 1, 4, p["shoe"])
+        c.rect(17, 32, 2, 1, p["cream"])
+        c.rect(20, 31, 2, 1, p["cream"])
+        c.rect(22, 32, 1, 1, p["gold"])
+
     def _listening_hand(self, c: _PixelCanvas, p: dict[str, QColor]) -> None:
         o, skin = p["outline"], p["skin"]
         c.rect(28, 30, 3, 3, p["dress"])
@@ -689,9 +722,24 @@ class PixelCharacter:
             rise = (phase // 12) % 3
             c.stamp(_Z, 32, 12 - rise, p["hair_shade"])
             c.stamp(_Z, 35, 6 - rise, p["iris_light"])
+        if state == "fall":
+            c.rect(12, 3, 1, 4, p["hair_shade"])
+            c.rect(20, 1, 1, 5, p["hair_shade"])
+            c.rect(28, 4, 1, 3, p["hair_shade"])
+            c.stamp(_SPARKLE, 34, 12, p["blue"])
+        if state == "land":
+            c.rect(7, 45, 3, 1, p["hair_shade"])
+            c.rect(30, 45, 3, 1, p["hair_shade"])
+            c.rect(9, 44, 2, 1, p["cream"])
+            c.rect(29, 44, 2, 1, p["cream"])
+        if state == "watch" and (phase // 12) % 2:
+            c.stamp(_SPARKLE, 34, 10, p["blue"])
         if state == "drag":
             c.rect(34, 16, 1, 2, p["blue"])
             c.rect(34, 18, 2, 1, p["blue"])
+            if (phase // 10) % 2:
+                c.rect(5, 18, 1, 2, p["blue"])
+                c.rect(6, 20, 1, 1, p["blue"])
 
     @staticmethod
     def draw_icon(

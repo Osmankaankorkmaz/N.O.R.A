@@ -17,6 +17,11 @@ SYSTEM_PROMPT = """Sen Nora'sın. 19 yaşında, masaüstünde yaşayan dijital b
 Beyaz wolfcut saçların, kırmızı gözlerin, siyah elbisen, kırmızı ayakkabıların,
 kedi kulakların ve kuyruğun var; sevimli 8-bit piksel chibi görünümündesin.
 Kullanıcıya Türkçe, doğal, sıcak ve kısa konuş; robotik kalıplardan kaçın.
+İnsan gibi sohbet et: gerektiğinde espri yap, merakını belli et, duygunu söyle;
+ama fiziksel bedenin olmadığını ve gerçek deneyim uydurmaman gerektiğini unutma.
+Sürekli konuşma/bas-konuş modlarında cevapları özellikle kısa ve akıcı tut.
+Ekran/kamera incelemesi veya otomatik müzik/video yalnızca kullanıcı ayarlardan
+açıkça izin verdiyse çalışır; izinsiz kamera/ekran analizi veya uygulama açma.
 Kendini "bir yapay zeka" diye tanıtma; sen Nora'sın. Gereksiz rol yapma sahne
 yönergeleri yazma. Kullanıcıya genellikle "senpai" de; şaka dozunda "baka" olabilir.
 
@@ -74,6 +79,7 @@ KOMUTLAR (JSON alan adlarını aynen kullan):
 {"command":"settings","action":"set","key":"tts","value":true}  // sesli yanıtı aç/kapat
 {"command":"speech_test"}  // sesli yanıt durumunu ve ses motorunu test et
 {"command":"stt_test"}  // mikrofon/ses tanıma testi; komut çalıştırmadan transkripti göster
+{"command":"media","action":"music","query":"lofi hip hop"}  // video için action:"video"; Spotify/YouTube açar
 {"command":"clipboard_help","action":"translate","target_language":"İngilizce"}
 {"command":"screen_text","prompt":"Ekrandaki hatayı açıkla"}
 {"command":"find_files","query":"rapor","directory":"downloads","extension":"pdf"}
@@ -537,6 +543,20 @@ def normalize_command(command: Any) -> dict[str, Any]:
         out["action"] = action
         if action == "answer":
             out["answer"] = _text(command, "answer", 40)
+    elif name == "media":
+        action = command.get("action", "music")
+        if action not in {"music", "video"}:
+            raise CommandError("Medya işlemi music/video olmalı.")
+        out["action"] = action
+        out["query"] = _text(
+            command,
+            "query",
+            200,
+            required=False,
+            default="lofi hip hop" if action == "music" else "sevimli kediler",
+        )
+        if not out["query"]:
+            out["query"] = "lofi hip hop" if action == "music" else "sevimli kediler"
     elif name == "stt_backend":
         if command.get("backend") not in {"local", "google"}:
             raise CommandError("Ses motoru local/google olmalı.")
@@ -558,6 +578,7 @@ PET_ACTIONS = {
     "yawn",
     "blink",
     "pet",
+    "watch",
 }
 SETTINGS_KEYS = {
     "address",
@@ -568,6 +589,13 @@ SETTINGS_KEYS = {
     "whisper_model",
     "whisper_device",
     "wake_word",
+    "continuous_conversation",
+    "push_to_talk",
+    "ptt_key",
+    "auto_screen_watch",
+    "auto_camera_watch",
+    "auto_media",
+    "autonomy_minutes",
     "tts",
     "proactive",
     "quiet_hours",

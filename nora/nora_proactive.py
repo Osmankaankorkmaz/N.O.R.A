@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class ProactiveEngine(QObject):
     speak_requested = pyqtSignal(str)
+    autonomy_requested = pyqtSignal(str)  # screen / camera / media, explicit opt-in
 
     CHECK_INTERVAL_MS = 30_000
     MIN_INTERVAL_SECONDS = 120
@@ -41,6 +42,7 @@ class ProactiveEngine(QObject):
         self.now = now
         self._last_interaction = clock()
         self._last_proactive = clock()
+        self._last_autonomy = clock()
         self._last_hour_key = ""
         self._alert_cooldowns: dict[str, float] = {}
         self._suspended = False
@@ -110,13 +112,35 @@ class ProactiveEngine(QObject):
                     self._trigger(message)
                     return
 
-        # 3. Five minutes without interaction: 40% (12% during quiet hours).
+        # 3. Explicit opt-in autonomy: Nora may occasionally look at the screen,
+        # camera, or choose music/video. Disabled by default and rate-limited.
+        if self.store is not None and not quiet:
+            minutes = self.store.preference("autonomy_minutes", 10)
+            if (
+                now_mono - self._last_autonomy >= minutes * 60
+                and now_mono - self._last_interaction >= 60
+            ):
+                kinds = [
+                    kind
+                    for key, kind in (
+                        ("auto_screen_watch", "screen"),
+                        ("auto_camera_watch", "camera"),
+                        ("auto_media", "media"),
+                    )
+                    if self.store.preference(key)
+                ]
+                if kinds and self.rng.random() < 0.65:
+                    self._last_autonomy = now_mono
+                    self.autonomy_requested.emit(self.rng.choice(kinds))
+                    return
+
+        # 4. Five minutes without interaction: 40% (12% during quiet hours).
         if now_mono - self._last_interaction >= self.IDLE_THRESHOLD_SECONDS:
             if self.rng.random() < (0.12 if quiet else 0.40):
                 self._trigger(random_line("idle", self.rng))
                 return
 
-        # 3. Hourly greeting, at most once per calendar hour.
+        # 5. Hourly greeting, at most once per calendar hour.
         if now.minute <= 2:
             key = f"{now:%Y-%m-%d-%H}"
             if key != self._last_hour_key and (not quiet or self.rng.random() < 0.25):
@@ -124,7 +148,7 @@ class ProactiveEngine(QObject):
                 self._trigger(random_line(get_time_category(now), self.rng))
                 return
 
-        # 4. Occasional personality line: 8% (2% during quiet hours).
+        # 6. Occasional personality line: 8% (2% during quiet hours).
         if self.rng.random() < (0.02 if quiet else 0.08):
             self._trigger(random_line("random", self.rng))
 

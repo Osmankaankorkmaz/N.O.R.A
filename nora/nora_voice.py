@@ -142,6 +142,9 @@ class NoraVoice(QObject):
                 )
         self.last_capture_info: dict[str, Any] = {}
         self.last_transcript = None
+        self._ptt_stop_event: threading.Event | None = None
+        self._ptt_thread: threading.Thread | None = None
+        self._ptt_request = 0
         try:
             self.wake_threshold = float(os.getenv("NORA_WAKE_THRESHOLD", "1e-20"))
         except ValueError:
@@ -492,6 +495,61 @@ class NoraVoice(QObject):
             logger.warning("Mikrofon listesi alınamadı: %s", type(exc).__name__)
             return []
 
+    def _transcribe_audio(
+        self, audio: Any, recognizer: Any, request_id: int | None = None
+    ) -> str:
+        """Shared STT path for silence-ended capture and push-to-talk release."""
+        import speech_recognition as sr
+
+        self.last_capture_info["backend"] = self.stt_backend
+        if self.stt_backend == "local":
+            if self.local_speech is None:
+                raise ValueError(
+                    "Yerel ses motoru yapılandırılmadı; sesini buluta göndermedim. 🎤"
+                )
+            try:
+                text = self.local_speech.transcribe(
+                    audio.get_raw_data(convert_rate=16000, convert_width=2), 16000
+                )
+            except Exception as exc:
+                from .nora_local_ai import LocalModelMissing
+
+                if isinstance(exc, (LocalModelMissing, ValueError)):
+                    raise ValueError(str(exc)) from exc
+                logger.warning("Yerel STT hatası: %s", type(exc).__name__)
+                raise ValueError(
+                    "Yerel ses modeli çalıştırılamadı. Ayarları kontrol et; sesini buluta göndermedim. 🎤"
+                ) from exc
+            if not text:
+                raise ValueError(
+                    "Ses geldi ama yerel model sözleri çıkaramadı senpai. 🎤"
+                )
+            self.last_transcript = repair_transcript(
+                text, command_parser=parse_direct_command, request_id=request_id
+            )
+            self.last_capture_info["address_corrected"] = (
+                self.last_transcript.address_corrected
+            )
+            return self.last_transcript.text
+        raw = recognizer.recognize_google(
+            audio, language="tr-TR", endpoint=_GOOGLE_ENDPOINT, show_all=True
+        )
+        candidates = google_candidates(raw)
+        if not candidates:
+            raise sr.UnknownValueError()
+        self.last_transcript = choose_transcript(
+            candidates, command_parser=parse_direct_command, request_id=request_id
+        )
+        self.last_capture_info.update(
+            {
+                "alternatives": len(candidates),
+                "selected_alternative": self.last_transcript.selected_alternative,
+                "confidence": self.last_transcript.confidence,
+                "address_corrected": self.last_transcript.address_corrected,
+            }
+        )
+        return self.last_transcript.text
+
     def _capture(
         self,
         timeout: float,
@@ -535,61 +593,7 @@ class NoraVoice(QObject):
                 "bytes": len(getattr(audio, "frame_data", b"") or b""),
                 "energy_threshold": recognizer.energy_threshold,
             }
-            self.last_capture_info["backend"] = self.stt_backend
-            if self.stt_backend == "local":
-                if self.local_speech is None:
-                    return (
-                        "",
-                        "Yerel ses motoru yapılandırılmadı; sesini buluta göndermedim. 🎤",
-                    )
-                try:
-                    text = self.local_speech.transcribe(
-                        audio.get_raw_data(convert_rate=16000, convert_width=2), 16000
-                    )
-                    if not text:
-                        return (
-                            "",
-                            "Ses geldi ama yerel model sözleri çıkaramadı senpai. 🎤",
-                        )
-                    self.last_transcript = repair_transcript(
-                        text,
-                        command_parser=parse_direct_command,
-                        request_id=request_id,
-                    )
-                    self.last_capture_info["address_corrected"] = (
-                        self.last_transcript.address_corrected
-                    )
-                    return self.last_transcript.text, ""
-                except Exception as exc:
-                    from .nora_local_ai import LocalModelMissing
-
-                    if isinstance(exc, (LocalModelMissing, ValueError)):
-                        return "", str(exc)
-                    logger.warning("Yerel STT hatası: %s", type(exc).__name__)
-                    return (
-                        "",
-                        "Yerel ses modeli çalıştırılamadı. Ayarları kontrol et; sesini buluta göndermedim. 🎤",
-                    )
-            raw = recognizer.recognize_google(
-                audio, language="tr-TR", endpoint=_GOOGLE_ENDPOINT, show_all=True
-            )
-            candidates = google_candidates(raw)
-            if not candidates:
-                raise sr.UnknownValueError()
-            self.last_transcript = choose_transcript(
-                candidates,
-                command_parser=parse_direct_command,
-                request_id=request_id,
-            )
-            self.last_capture_info.update(
-                {
-                    "alternatives": len(candidates),
-                    "selected_alternative": self.last_transcript.selected_alternative,
-                    "confidence": self.last_transcript.confidence,
-                    "address_corrected": self.last_transcript.address_corrected,
-                }
-            )
-            return self.last_transcript.text, ""
+            return self._transcribe_audio(audio, recognizer, request_id), ""
         except sr.WaitTimeoutError:
             logger.debug("Mikrofon dinleme zaman aşımı (wake=%s)", wake)
             if wake:
@@ -598,6 +602,8 @@ class NoraVoice(QObject):
                 "",
                 "Mikrofon ses algılamadı senpai. Mikrofon seçimini/seviyesini kontrol et; sağ tık → Mikrofon Testi'ni dene. 🎤",
             )
+        except ValueError as exc:
+            return "", str(exc)
         except sr.UnknownValueError:
             return (
                 "",
@@ -737,6 +743,134 @@ class NoraVoice(QObject):
             raise
         return True
 
+    # ------------------------------------------------------------ push-to-talk
+    def start_push_to_talk(self, request_id: int = 0) -> bool:
+        """Record while the user holds a key; release stops and transcribes."""
+        with self._listen_request_lock:
+            if self._closed or self._listening or self.is_speaking:
+                return False
+            self._listening = True
+            self._ptt_request = request_id
+            self._ptt_stop_event = threading.Event()
+        stop_event = self._ptt_stop_event
+
+        def run() -> None:
+            text, error = "", ""
+            try:
+                text, error = self._push_to_talk_capture(request_id, stop_event)
+            except Exception as exc:
+                logger.exception("Bas-konuş hatası: %s", type(exc).__name__)
+                error = "Bas-konuş dinlemesi tamamlanamadı senpai. 🎤"
+            finally:
+                with self._listen_request_lock:
+                    self._listening = False
+                    self._ptt_stop_event = None
+                    self._ptt_thread = None
+                    self._ptt_request = 0
+            if not self._closed:
+                self.listening_finished.emit(request_id, text, error)
+
+        try:
+            self._ptt_thread = threading.Thread(
+                target=run, name=f"nora-ptt-{request_id}", daemon=True
+            )
+            self._ptt_thread.start()
+            return True
+        except Exception:
+            with self._listen_request_lock:
+                self._listening = False
+                self._ptt_stop_event = None
+                self._ptt_thread = None
+            raise
+
+    def stop_push_to_talk(self) -> None:
+        event = self._ptt_stop_event
+        if event is not None:
+            event.set()
+
+    @property
+    def push_to_talk_active(self) -> bool:
+        return bool(self._ptt_thread and self._ptt_thread.is_alive())
+
+    def _push_to_talk_capture(
+        self, request_id: int, stop_event: threading.Event
+    ) -> tuple[str, str]:
+        try:
+            import speech_recognition as sr
+        except ImportError:
+            return "", "Bas-konuş için SpeechRecognition ve PyAudio gerekli senpai. 🎤"
+        if not self._mic_lock.acquire(timeout=1.5):
+            return "", "Mikrofon meşgul senpai. Biraz sonra tekrar dene. 🎤"
+        frames = bytearray()
+        started = time.monotonic()
+        stopped_emitted = False
+        try:
+            self.last_transcript = None
+            recognizer = self._recognizer()
+            with sr.Microphone(
+                sample_rate=16000, device_index=self.microphone_index
+            ) as source:
+                stream = source.stream
+                chunk = getattr(source, "CHUNK", 1024)
+                if request_id:
+                    self.listening_started.emit(request_id)
+                while not stop_event.is_set() and not self._closed:
+                    if time.monotonic() - started > 30:
+                        break
+                    raw = stream.read(chunk, exception_on_overflow=False)
+                    if raw:
+                        frames.extend(bytes(raw))
+            if self._closed:
+                return "", ""
+            duration = time.monotonic() - started
+            if request_id:
+                self.listening_stopped.emit(request_id)
+                stopped_emitted = True
+            if duration < 0.25 or not frames:
+                return (
+                    "",
+                    "Tuşa çok kısa bastın senpai. Basılı tutup konuş, bırakınca cevaplayayım. 🎤",
+                )
+            audio = sr.AudioData(bytes(frames), 16000, 2)
+            self.last_capture_info = {
+                "device_index": self.microphone_index,
+                "sample_rate": 16000,
+                "bytes": len(frames),
+                "duration": round(duration, 2),
+                "mode": "push_to_talk",
+                "energy_threshold": recognizer.energy_threshold,
+            }
+            return self._transcribe_audio(audio, recognizer, request_id), ""
+        except sr.WaitTimeoutError:
+            return "", "Bas-konuş sırasında ses algılamadım senpai. 🎤"
+        except sr.UnknownValueError:
+            return (
+                "",
+                "Ses geldi ama anlayamadım senpai. Biraz daha net konuşur musun? 🎤",
+            )
+        except sr.RequestError:
+            return (
+                "",
+                "Ses tanımaya ulaşamadım senpai. İnternet bağlantını kontrol et. 🎤",
+            )
+        except ValueError as exc:
+            return "", str(exc)
+        except (ImportError, AttributeError, OSError):
+            return (
+                "",
+                "Mikrofona erişemedim senpai. PyAudio, mikrofon izni ve cihazı kontrol et. 🎤",
+            )
+        except Exception as exc:
+            logger.warning("Bas-konuş ses tanıma hatası: %s", type(exc).__name__)
+            return (
+                "",
+                "Bas-konuşta küçük bir sorun yaşadım senpai. Tekrar dener misin? 🎤",
+            )
+        finally:
+            if request_id and not stopped_emitted:
+                self.listening_stopped.emit(request_id)
+            self._mic_lock.release()
+
     # ---------------------------------------------------------------- wake word
     def start_wake_word_listener(
         self, callback: Callable[[str], None] | None = None
@@ -799,9 +933,12 @@ class NoraVoice(QObject):
                 while not self._wake_stop.is_set():
                     if self._closed or self.is_speaking or self._listening:
                         return False
-                    buf = stream.read(chunk, exception_on_overflow=False)
-                    if not buf:
+                    raw = stream.read(chunk, exception_on_overflow=False)
+                    if not raw:
                         return False
+                    # Some PortAudio/PyAudio builds return bytearray/memoryview.
+                    # PocketSphinx's Cython binding requires plain bytes.
+                    buf = bytes(raw)
                     decoder.process_raw(buf, False, False)
                     if self._wake_hyp_detected(decoder):
                         return True
@@ -853,8 +990,20 @@ class NoraVoice(QObject):
                     "Yerel 'Hey Nora' mikrofonu açamadı senpai. Mikrofon izni/cihazını kontrol et. 🎙️"
                 )
                 self._wake_stop.wait(1)
+            except TypeError as exc:
+                logger.warning(
+                    "Yerel wake word veri biçimi hatası: %s", exc, exc_info=True
+                )
+                self._wake_error_rate_limited(
+                    "Yerel 'Hey Nora' ses verisi biçimiyle sorun yaşadım; mikrofon/PyAudio sürümünü kontrol et. 🎤 düğmesi hâlâ çalışır. 🎙️"
+                )
+                self._wake_stop.wait(2)
             except Exception as exc:
-                logger.warning("Yerel wake word döngüsü hatası: %s", type(exc).__name__)
+                logger.warning(
+                    "Yerel wake word döngüsü hatası: %s",
+                    type(exc).__name__,
+                    exc_info=True,
+                )
                 self._wake_error_rate_limited(
                     "Yerel 'Hey Nora' bekçisiyle sorun yaşadım senpai. 🎤 düğmesi hâlâ çalışır. 🎙️"
                 )
@@ -877,6 +1026,7 @@ class NoraVoice(QObject):
 
     def close(self) -> None:
         self._closed = True
+        self.stop_push_to_talk()
         self.stop_wake_word_listener()
         self.stop_speaking()
         self._tts_stop.set()

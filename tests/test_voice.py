@@ -415,3 +415,121 @@ def test_local_capture_repairs_bare_misheard_name_only_for_safe_command(
     assert text == "nova nasılsın" and not error
     assert not voice.last_transcript.address_corrected
     voice.close()
+
+
+def test_wake_session_converts_bytearray_to_bytes_for_pocketsphinx(qapp, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    seen = {}
+
+    class Decoder:
+        def start_utt(self):
+            pass
+
+        def end_utt(self):
+            pass
+
+        def process_raw(self, data, no_search, full_utt):
+            seen["type"] = type(data)
+            voice._wake_stop.set()
+
+        def hyp(self):
+            return None
+
+        def get_in_speech(self):
+            return False
+
+    class Stream:
+        def read(self, chunk, exception_on_overflow=False):
+            return bytearray(b"\x00\x10" * chunk)
+
+    class Mic:
+        CHUNK = 64
+
+        def __init__(self, sample_rate=16000, device_index=None):
+            self.stream = Stream()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    fake = SimpleNamespace(Microphone=Mic)
+    monkeypatch.setitem(sys.modules, "speech_recognition", fake)
+    voice = NoraVoice(tts_enabled=False)
+    monkeypatch.setattr(voice, "_make_wake_decoder", lambda: Decoder())
+    assert voice._local_wake_session() is False
+    assert seen["type"] is bytes
+    voice.close()
+
+
+def test_push_to_talk_records_until_release_and_transcribes(qapp, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import speech_recognition as real_sr
+
+    class Stream:
+        def read(self, chunk, exception_on_overflow=False):
+            return b"\x00\x10" * chunk
+
+    class Mic:
+        CHUNK = 512
+
+        def __init__(self, sample_rate=16000, device_index=None):
+            self.stream = Stream()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class Rec(_FakeRecognizer):
+        def recognize_google(
+            self, audio, language="tr-TR", endpoint=None, show_all=False
+        ):
+            assert show_all
+            return {
+                "results": [
+                    {
+                        "alternatives": [
+                            {"transcript": "hey nova uyu", "confidence": 0.9}
+                        ]
+                    }
+                ]
+            }
+
+    fake = SimpleNamespace(
+        Recognizer=lambda: Rec(),
+        Microphone=Mic,
+        AudioData=real_sr.AudioData,
+        WaitTimeoutError=real_sr.WaitTimeoutError,
+        UnknownValueError=real_sr.UnknownValueError,
+        RequestError=real_sr.RequestError,
+    )
+    monkeypatch.setitem(sys.modules, "speech_recognition", fake)
+    voice = NoraVoice(tts_enabled=False)
+    started, stopped, finished = [], [], []
+    voice.listening_started.connect(started.append)
+    voice.listening_stopped.connect(stopped.append)
+    voice.listening_finished.connect(
+        lambda rid, text, error: finished.append((rid, text, error))
+    )
+    assert voice.start_push_to_talk(11)
+    deadline = time.time() + 2
+    while not voice.push_to_talk_active and time.time() < deadline:
+        time.sleep(0.02)
+    time.sleep(0.3)
+    voice.stop_push_to_talk()
+    deadline = time.time() + 2
+    while not finished and time.time() < deadline:
+        qapp.processEvents()
+        time.sleep(0.02)
+    assert finished and finished[0][0] == 11
+    assert finished[0][1] == "Hey Nora, uyu"
+    assert not finished[0][2]
+    assert started == [11] and stopped == [11]
+    assert voice.last_capture_info["mode"] == "push_to_talk"
+    voice.close()

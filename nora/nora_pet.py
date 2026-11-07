@@ -36,6 +36,8 @@ class PetState(Enum):
     DRAG = auto()
     DANCE = auto()
     YAWN = auto()
+    WATCH = auto()
+    LAND = auto()
 
 
 class SpeechBubble(QWidget):
@@ -150,6 +152,7 @@ class NoraPet(QWidget):
         self._drag_offset = QPoint()
         self._press_pos = QPoint()
         self._dragging = False
+        self._drag_complained = False
         self._bubble: SpeechBubble | None = None
         self._speech_queue: deque[tuple[str, int, str]] = deque(maxlen=5)
         self._bubble_timer = QTimer(self)
@@ -201,6 +204,8 @@ class NoraPet(QWidget):
     def _set_state(self, state: PetState, duration: int | None = None) -> None:
         self.state = state
         self._state_frames = 0
+        if state != PetState.DRAG:
+            self._drag_complained = False
         self._state_duration = duration or self.rng.randint(70, 170)
         self._vx = {
             PetState.WALK_LEFT: -self.WALK_SPEED,
@@ -216,6 +221,14 @@ class NoraPet(QWidget):
         self.update()
 
     def _choose_state(self) -> None:
+        if self.state == PetState.LAND:
+            if self._listening:
+                self._set_state(PetState.LISTENING, 100000)
+            elif self._pinned_state is not None:
+                self._set_state(self._pinned_state, 100000)
+            else:
+                self._set_state(PetState.IDLE, 80)
+            return
         if (
             self._talking
             or self._listening
@@ -273,6 +286,14 @@ class NoraPet(QWidget):
             self._frame += 1
         self._affection_frames = max(0, self._affection_frames - 1)
         self._state_frames += 1
+        if (
+            self.state == PetState.DRAG
+            and self._state_frames > 110
+            and not self._drag_complained
+        ):
+            self._drag_complained = True
+            self.emotion = "angry"
+            self.show_speech("Beni biraz bırak senpai! 😾", 3000)
         if self._blink_left > 0:
             self._blink_left -= 1
         else:
@@ -301,7 +322,9 @@ class NoraPet(QWidget):
                     self._vy = 0.0
                     self._grounded = True
                     if self.state in (PetState.JUMP, PetState.FALL):
-                        if self._listening:
+                        if self.state == PetState.FALL:
+                            self._set_state(PetState.LAND, 18)
+                        elif self._listening:
                             self._set_state(PetState.LISTENING, 100000)
                         elif self._pinned_state is not None:
                             self._set_state(self._pinned_state, 100000)
@@ -483,6 +506,12 @@ class NoraPet(QWidget):
             self.emotion = "love"
             self._set_state(PetState.DANCE, 100000)
             return "Dans modu açık! 'Dur' dersen bitiririm. 🎵"
+        if action == "watch":
+            self._manual = True
+            self._pinned_state = PetState.WATCH
+            self.emotion = "happy"
+            self._set_state(PetState.WATCH, 100000)
+            return "Video izleme modu açık. Mısırlarımı aldım, birlikte izleyelim~ 🍿"
         if action == "jump":
             if not self._grounded:
                 return "Zaten havadayım senpai! Bir de yere ineyim. 😼"

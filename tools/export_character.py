@@ -75,6 +75,8 @@ POSE_FRAMES: dict[str, Frame] = {
     "drag": Frame("drag", emotion="surprised", grounded=False),
     "dance": Frame("dance", emotion="love", frame=6),
     "yawn": Frame("yawn", emotion="sleepy", frame=10),
+    "watch": Frame("watch"),
+    "land": Frame("land", frame=6),
 }
 
 ANIMATIONS: dict[str, list[Frame]] = {
@@ -108,7 +110,14 @@ ANIMATIONS: dict[str, list[Frame]] = {
     "sleepy": _cycles("idle", [0, 12, 24, 36], emotion="sleepy"),
     "dance": _cycles("dance", list(range(0, 48, 6)), emotion="love"),
     "yawn": _cycles("yawn", [0, 10, 20, 30], emotion="sleepy"),
-    "drag": _cycles("drag", [0, 8, 16, 24], emotion="surprised", grounded=False),
+    "drag": [
+        Frame("drag", frame=0, emotion="surprised", grounded=False),
+        Frame("drag", frame=8, emotion="surprised", grounded=False),
+        Frame("drag", frame=16, emotion="angry", grounded=False),
+        Frame("drag", frame=24, emotion="angry", grounded=False),
+    ],
+    "watch": _cycles("watch", [0, 12, 24, 36]),
+    "land": _cycles("land", [0, 6, 12, 18]),
     "affection": _cycles(
         "love", [0, 10, 20, 30, 40, 50], emotion="love", affection=True
     ),

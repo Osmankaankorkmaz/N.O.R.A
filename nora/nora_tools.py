@@ -355,6 +355,18 @@ class NoraTools(QObject):
         )
         return result.replace("Bağlantıyı", "YouTube aramasını") + " 🎧"
 
+    def spotify_search(self, query: str) -> str:
+        query = str(query).strip()[:200] or "lofi hip hop"
+        result = self.open_url("https://open.spotify.com/search/" + quote(query))
+        return result.replace("Bağlantıyı", "Spotify aramasını") + " 🎧"
+
+    def video_search(self, query: str) -> str:
+        query = str(query).strip()[:200] or "sevimli kediler"
+        result = self.open_url(
+            "https://www.youtube.com/results?search_query=" + quote_plus(query)
+        )
+        return result.replace("Bağlantıyı", "YouTube video aramasını") + " 🍿"
+
     # ------------------------------------------------------------------- volume
     def set_volume(self, level: int | float) -> str:
         try:
