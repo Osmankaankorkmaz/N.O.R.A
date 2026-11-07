@@ -29,10 +29,13 @@ class ProactiveEngine(QObject):
         rng: random.Random | None = None,
         clock: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] = datetime.now,
+        store=None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.tools = tools
+        self.store = store
+        self._routine_last = {"hydration_minutes": clock(), "break_minutes": clock()}
         self.rng = rng or random.Random()
         self.clock = clock
         self.now = now
@@ -70,7 +73,9 @@ class ProactiveEngine(QObject):
         if now_mono - self._last_proactive < self.MIN_INTERVAL_SECONDS:
             return
         now = self.now()
-        quiet = is_quiet_hours(now)
+        quiet = is_quiet_hours(now) and (
+            self.store is None or self.store.preference("quiet_hours")
+        )
 
         # 1. System health has priority, but a repeated alert is rate-limited.
         try:
@@ -87,7 +92,25 @@ class ProactiveEngine(QObject):
                 )
                 return
 
-        # 2. Five minutes without interaction: 40% (12% during quiet hours).
+        # 2. Explicit opt-in wellbeing routines; disabled by default (0 minutes).
+        if self.store is not None and not quiet:
+            for key, message in (
+                (
+                    "hydration_minutes",
+                    "Su molası senpai. Bir bardak su iç, sonra devam. 💧",
+                ),
+                (
+                    "break_minutes",
+                    "Ekran molası zamanı. Biraz uzağa bak ve omuzlarını gevşet. 🐾",
+                ),
+            ):
+                minutes = self.store.preference(key, 0)
+                if minutes > 0 and now_mono - self._routine_last[key] >= minutes * 60:
+                    self._routine_last[key] = now_mono
+                    self._trigger(message)
+                    return
+
+        # 3. Five minutes without interaction: 40% (12% during quiet hours).
         if now_mono - self._last_interaction >= self.IDLE_THRESHOLD_SECONDS:
             if self.rng.random() < (0.12 if quiet else 0.40):
                 self._trigger(random_line("idle", self.rng))

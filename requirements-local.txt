@@ -1,0 +1,7 @@
+# All base features plus optional local speech, OCR and calendar import.
+# Speech/OCR MODEL FILES are NOT bundled or downloaded at startup.
+# Windows/Linux/macOS, Python 3.10-3.12 (RapidOCR upstream restriction).
+-r requirements.txt
+faster-whisper==1.2.1
+rapidocr-onnxruntime==1.4.4
+icalendar==7.3.0

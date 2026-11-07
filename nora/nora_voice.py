@@ -43,10 +43,27 @@ class NoraVoice(QObject):
     wake_word_detected = pyqtSignal(str)  # words after "Nora", possibly empty
 
     def __init__(
-        self, *, tts_enabled: bool = True, parent: QObject | None = None
+        self,
+        *,
+        tts_enabled: bool = True,
+        stt_backend: str = "google",
+        local_speech: Any = None,
+        speech_rate: int = 180,
+        speech_volume: float = 0.9,
+        voice_id: str = "",
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.tts_enabled = tts_enabled
+        self.stt_backend = (
+            stt_backend if stt_backend in {"google", "local"} else "google"
+        )
+        self.local_speech = local_speech
+        self._tts_settings = {
+            "rate": int(speech_rate),
+            "volume": float(speech_volume),
+            "voice_id": str(voice_id),
+        }
         self._closed = False
         self._speech_queue: queue.Queue = queue.Queue()
         self._speech_lock = threading.RLock()
@@ -132,8 +149,10 @@ class NoraVoice(QObject):
         import pyttsx3
 
         engine = pyttsx3.init()
-        engine.setProperty("rate", 180)
-        engine.setProperty("volume", 0.9)
+        with self._speech_lock:
+            settings = dict(self._tts_settings)
+        engine.setProperty("rate", settings["rate"])
+        engine.setProperty("volume", settings["volume"])
         try:
             voices = engine.getProperty("voices") or []
             female_words = (
@@ -171,7 +190,11 @@ class NoraVoice(QObject):
                 )
                 return (int(turkish and female), int(female), int(turkish))
 
-            if voices:
+            if settings["voice_id"] and any(
+                getattr(voice, "id", "") == settings["voice_id"] for voice in voices
+            ):
+                engine.setProperty("voice", settings["voice_id"])
+            elif voices:
                 best = max(voices, key=score)
                 if score(best)[1] or score(best)[2]:
                     engine.setProperty("voice", best.id)
@@ -194,6 +217,15 @@ class NoraVoice(QObject):
                     continue
                 if self._engine is None:
                     self._engine = self._make_engine()
+                with self._speech_lock:
+                    settings = dict(self._tts_settings)
+                for key, value in (
+                    ("rate", settings["rate"]),
+                    ("volume", settings["volume"]),
+                ):
+                    self._engine.setProperty(key, value)
+                if settings["voice_id"]:
+                    self._engine.setProperty("voice", settings["voice_id"])
                 self.speaking_started.emit()
                 if on_start:
                     try:
@@ -242,7 +274,50 @@ class NoraVoice(QObject):
         if not enabled:
             self.stop_speaking()
 
+    def configure_speech(self, rate: int, volume: float, voice_id: str = "") -> None:
+        if (
+            isinstance(rate, bool)
+            or not isinstance(rate, (int, float))
+            or not 100 <= rate <= 260
+        ):
+            raise ValueError("Ses hızı 100-260 olmalı.")
+        if (
+            isinstance(volume, bool)
+            or not isinstance(volume, (int, float))
+            or not 0 <= volume <= 1
+        ):
+            raise ValueError("Ses düzeyi 0-1 olmalı.")
+        with self._speech_lock:
+            self._tts_settings = {
+                "rate": int(rate),
+                "volume": float(volume),
+                "voice_id": str(voice_id)[:240],
+            }
+
+    @staticmethod
+    def list_output_voices() -> list[dict[str, str]]:
+        """Enumerate system voices in a worker, never on the GUI thread."""
+        try:
+            import pyttsx3
+
+            engine = pyttsx3.init()
+            try:
+                return [
+                    {"id": str(voice.id), "name": str(getattr(voice, "name", voice.id))}
+                    for voice in engine.getProperty("voices") or []
+                ]
+            finally:
+                engine.stop()
+        except Exception as exc:
+            logger.warning("Ses listesi alınamadı: %s", type(exc).__name__)
+            return []
+
     # --------------------------------------------------------------------- STT
+    def set_stt_backend(self, backend: str) -> None:
+        if backend not in {"google", "local"}:
+            raise ValueError("Ses motoru local/google olmalı.")
+        self.stt_backend = backend
+
     def _recognizer(self, energy: int = 250) -> Any:
         import speech_recognition as sr
 
@@ -311,6 +386,33 @@ class NoraVoice(QObject):
                 "bytes": len(getattr(audio, "frame_data", b"") or b""),
                 "energy_threshold": recognizer.energy_threshold,
             }
+            self.last_capture_info["backend"] = self.stt_backend
+            if self.stt_backend == "local":
+                if self.local_speech is None:
+                    return (
+                        "",
+                        "Yerel ses motoru yapılandırılmadı; sesini buluta göndermedim. 🎤",
+                    )
+                try:
+                    text = self.local_speech.transcribe(
+                        audio.get_raw_data(convert_rate=16000, convert_width=2), 16000
+                    )
+                    return (
+                        text,
+                        ""
+                        if text
+                        else "Ses geldi ama yerel model sözleri çıkaramadı senpai. 🎤",
+                    )
+                except Exception as exc:
+                    from .nora_local_ai import LocalModelMissing
+
+                    if isinstance(exc, (LocalModelMissing, ValueError)):
+                        return "", str(exc)
+                    logger.warning("Yerel STT hatası: %s", type(exc).__name__)
+                    return (
+                        "",
+                        "Yerel ses modeli çalıştırılamadı. Ayarları kontrol et; sesini buluta göndermedim. 🎤",
+                    )
             text = recognizer.recognize_google(
                 audio, language="tr-TR", endpoint=_GOOGLE_ENDPOINT
             )
@@ -326,7 +428,7 @@ class NoraVoice(QObject):
         except sr.UnknownValueError:
             return (
                 "",
-                "Ses geldi ama Google anlayamadı senpai. Biraz daha net konuşur musun? 🎤",
+                "Ses geldi ama anlayamadım senpai. Biraz daha net konuşur musun? 🎤",
             )
         except sr.RequestError:
             return (

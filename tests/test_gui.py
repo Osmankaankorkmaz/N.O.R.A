@@ -150,3 +150,185 @@ def test_user_speech_bubble_is_distinct(qapp):
     assert pet._bubble._speaker == "user"
     assert pet._bubble._text.startswith("Sen: ")
     pet.shutdown()
+
+
+def test_explicit_pet_commands_bypass_chat_worker(qapp, tmp_path, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("movement must not need an AI worker")
+
+    monkeypatch.setattr("nora.nora_ui.ChatWorker", forbidden)
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    app.pet._timer.stop()
+    app._send_message("Hey Nora, uyu")
+    assert app.pet.state == PetState.SLEEP
+    app.pet.set_emotion("happy")
+    assert app.pet.state == PetState.SLEEP
+    app._send_message("dolaş")
+    assert app.pet.state in (PetState.WALK_LEFT, PetState.WALK_RIGHT)
+    app._send_message("dur")
+    assert app.pet.state == PetState.IDLE
+    app._send_message("zıpla ve uyu")
+    for _ in range(100):
+        app.pet._tick()
+    assert app.pet.state == PetState.SLEEP
+    assert not app._workers
+    app.shutdown()
+
+
+def test_monitor_transfer_with_two_screen_geometries(qapp, monkeypatch):
+    from PyQt5.QtCore import QRect
+    from types import SimpleNamespace
+
+    pet = NoraPet()
+    pet._timer.stop()
+    screens = [
+        SimpleNamespace(
+            geometry=lambda: QRect(0, 0, 1920, 1080),
+            availableGeometry=lambda: QRect(0, 0, 1920, 1040),
+            name=lambda: "Primary",
+        ),
+        SimpleNamespace(
+            geometry=lambda: QRect(1920, 0, 1280, 1024),
+            availableGeometry=lambda: QRect(1920, 0, 1280, 984),
+            name=lambda: "Second",
+        ),
+    ]
+    monkeypatch.setattr(pet, "_monitor_screens", lambda: screens)
+    ok, message = pet.move_to_monitor(2)
+    assert ok and pet.x() >= 1920 and "2." in message
+    assert not pet.move_to_monitor(3)[0]
+    pet.shutdown()
+
+
+def test_memory_tasks_and_reminders_persist_across_app_restart(qapp, tmp_path):
+    options = NoraOptions(
+        wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+    )
+    app = NoraApp(options)
+    app._send_message("bunu hatırla: kahvem = şekersiz")
+    app._send_message("görev ekle: raporu bitir")
+    app._send_message("10 dakika sonra çayı hatırlat")
+    assert app.store.memories["kahvem"]["value"] == "şekersiz"
+    assert app.store.tasks and app.store.reminders
+    app.shutdown()
+    reopened = NoraApp(options)
+    assert reopened.store.memories["kahvem"]["value"] == "şekersiz"
+    assert reopened.store.tasks[0]["text"] == "raporu bitir"
+    assert reopened.store.reminders[0]["text"] == "çayı"
+    reopened.shutdown()
+
+
+def test_settings_dialog_applies_vector_appearance_and_persona(qapp, tmp_path):
+    from nora.nora_settings_dialog import NoraSettingsDialog
+    from nora.nora_store import NoraStore
+
+    store = NoraStore(tmp_path / "state.json")
+    applied = []
+
+    def apply_values(values):
+        store.update_preferences(values)
+        applied.append(values)
+
+    dialog = NoraSettingsDialog(store, on_apply=apply_values)
+    dialog.fields["tone"].setCurrentIndex(dialog.fields["tone"].findData("sweet"))
+    dialog.fields["accessory"].setCurrentIndex(
+        dialog.fields["accessory"].findData("glasses")
+    )
+    dialog.apply()
+    assert applied[0]["tone"] == "sweet"
+    assert store.preference("accessory") == "glasses"
+    pet = NoraPet()
+    pet._timer.stop()
+    pet.set_appearance(store.preferences)
+    assert not pet.grab().isNull()
+    pet.shutdown()
+
+
+def test_pet_accessories_and_dance_render(qapp):
+    pet = NoraPet()
+    pet._timer.stop()
+    for accessory in ("none", "headphones", "glasses", "ribbon"):
+        pet.set_appearance(
+            {"accessory": accessory, "outfit": "night", "hair_color": "#202b52"}
+        )
+        assert not pet.grab().isNull()
+    pet.perform_action("dance")
+    assert pet.state == PetState.DANCE
+    pet._tick()
+    assert not pet.grab().isNull()
+    pet.shutdown()
+
+
+def test_routine_runs_bounded_steps_after_confirmation(qapp, tmp_path, monkeypatch):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    app.pet._timer.stop()
+    monkeypatch.setattr(app, "_confirm", lambda *args: True)
+    app.store.save_routine(
+        "test",
+        [
+            {"command": "pet_action", "action": "wave"},
+            {"command": "pet_action", "action": "sit"},
+        ],
+    )
+    app._execute_command({"command": "routine", "action": "run", "name": "test"})
+    assert process_until(
+        qapp, lambda: not app._pending_commands and app.pet.state == PetState.SIT
+    )
+    app.shutdown()
+
+
+def test_screen_ocr_is_local_until_analysis_confirmation(qapp, tmp_path, monkeypatch):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    monkeypatch.setattr(app.tools, "screenshot", lambda: "fake-image")
+    monkeypatch.setattr(app.ocr, "read", lambda image: "Hata: örnek kod")
+    monkeypatch.setattr(app, "_confirm", lambda *args: False)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("OCR text must not upload without consent")
+
+    monkeypatch.setattr("nora.nora_ui.TextWorker", forbidden)
+    app._execute_command({"command": "screen_text"})
+    assert process_until(
+        qapp,
+        lambda: (
+            not app._busy
+            and any(
+                "örnek kod" in row.findChild(QLabel).text()
+                for row in app._message_rows
+                if row.findChild(QLabel)
+            )
+        ),
+    )
+    app.shutdown()
+
+
+def test_clipboard_is_not_uploaded_without_confirmation(qapp, tmp_path, monkeypatch):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    monkeypatch.setattr(app.tools, "clipboard_paste", lambda: "özel metin")
+    monkeypatch.setattr(app.brain, "_client", object())
+    app.brain.offline = False
+    monkeypatch.setattr(app, "_confirm", lambda *args: False)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("clipboard upload requires consent")
+
+    monkeypatch.setattr("nora.nora_ui.TextWorker", forbidden)
+    app._execute_command({"command": "clipboard_help", "action": "summarize"})
+    assert not app._workers
+    app.shutdown()

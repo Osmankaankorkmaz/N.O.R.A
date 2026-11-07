@@ -17,7 +17,9 @@ from .nora_ui import NoraApp, NoraOptions
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Nora · masaüstü asistanı")
     parser.add_argument(
-        "--no-wake-word", action="store_true", help="Sürekli mikrofon dinlemeyi kapat"
+        "--no-wake-word",
+        action="store_true",
+        help="Yerel Hey Nora bekçisini kapat; yalnızca 🎤 dinler",
     )
     parser.add_argument("--no-tts", action="store_true", help="Sesli yanıtları kapat")
     parser.add_argument(
@@ -25,6 +27,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--offline", action="store_true", help="Groq'a bağlanma; temel komutlar çalışır"
+    )
+    parser.add_argument(
+        "--data-dir",
+        help="Kalıcı ayar/not/model klasörü (varsayılan: kullanıcı veri dizini)",
     )
     parser.add_argument("--version", action="version", version=f"Nora {__version__}")
     args = parser.parse_args(argv)
@@ -48,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         tts=False if args.no_tts else None,
         proactive=False if args.no_proactive else None,
         offline=args.offline,
+        data_dir=args.data_dir,
     )
     nora = NoraApp(options)
     nora.start()

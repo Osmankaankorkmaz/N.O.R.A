@@ -103,6 +103,9 @@ class _FakeAudio:
     sample_rate = 16000
     frame_data = b"\x00\x10" * 800  # little-endian 16-bit samples, amplitude 4096
 
+    def get_raw_data(self, convert_rate=16000, convert_width=2):
+        return self.frame_data
+
 
 class _FakeRecognizer:
     def __init__(self):
@@ -185,4 +188,50 @@ def test_microphone_test_is_local_and_reports_level(qapp, monkeypatch):
     result = voice.test_microphone(timeout=1)
     assert "Sesini algıladım" in result
     assert voice.last_capture_info["heard"] is True
+    voice.close()
+
+
+def test_local_command_stt_never_calls_google(qapp, monkeypatch):
+    from types import SimpleNamespace
+
+    rec = _FakeRecognizer()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("local backend must not call Google")
+
+    rec.recognize_google = forbidden
+    _install_fake_sr(monkeypatch, rec)
+    calls = []
+    local = SimpleNamespace(
+        transcribe=lambda pcm, rate: calls.append((pcm, rate)) or "uyu"
+    )
+    voice = NoraVoice(tts_enabled=False, stt_backend="local", local_speech=local)
+    text, error = voice._capture(1, 2, 0.1, request_id=4)
+    assert text == "uyu" and not error
+    assert calls and voice.last_capture_info["backend"] == "local"
+    voice.close()
+
+
+def test_missing_local_model_does_not_fallback_to_cloud(qapp, monkeypatch):
+    from types import SimpleNamespace
+    from nora.nora_local_ai import LocalModelMissing
+
+    rec = _FakeRecognizer()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("missing local model must not upload audio")
+
+    rec.recognize_google = forbidden
+    _install_fake_sr(monkeypatch, rec)
+
+    def missing(*args):
+        raise LocalModelMissing("model yok")
+
+    voice = NoraVoice(
+        tts_enabled=False,
+        stt_backend="local",
+        local_speech=SimpleNamespace(transcribe=missing),
+    )
+    text, error = voice._capture(1, 2, 0.1)
+    assert not text and "model yok" in error
     voice.close()

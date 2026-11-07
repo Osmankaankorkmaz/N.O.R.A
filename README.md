@@ -1,65 +1,70 @@
 # Nora 💕 · Anime Kız Masaüstü Asistanı
 
-Nora; masaüstünde gezen, sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve
-sistem araçlarını çalıştıran Türkçe bir PyQt5 asistanıdır. Karakterin tamamı
-**QPainter ile kod içinde çizilir**; harici sprite, resim veya ses dosyası gerekmez.
+Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakterin tamamı **QPainter ile kod içinde çizilir**; harici sprite veya resim dosyası kullanılmaz.
 
-> **Önemli model notu:** `llama-3.3-70b-versatile` Groq’un free/developer
-> hesapları için **16 Ağustos 2026’da emekliye ayrıldı**; önerilen yerine
-> `openai/gpt-oss-120b` geçti. Varsayılan sohbet modeli artık budur. Enterprise
-> sözleşmen varsa `NORA_CHAT_MODEL` ile eski modeli açıkça seçebilirsin. Vision tarafında
-> eski `llama-3.2-90b-vision-preview` yerine `qwen/qwen3.8-27b` kullanılır.
-> `NotFoundError` artık güvenli Groq hata ayrıntısını gösterir; sağ tık →
-> **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler.
-> Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [1](https://console.groq.com/docs/vision)
+> **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
 
----
+## Neler yapabilir?
 
-## Özellikler
+### Karakter ve ses
+- 120×150 şeffaf, always-on-top pet; yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme ve duygu efektleri.
+- **Komutla hareket:** “ikinci monitöre geç”, “uyu”, “uyan”, “dolaş”, “dur”, “zıpla”, “dans et”, “otur”. Bu komutlar Groq/internet olmadan çalışır.
+- “Uyu” ve “dolaş” siz değiştirene kadar sürer. “Zıpla ve uyu” gibi en fazla dört açık hareket komutu arka arkaya çalışabilir.
+- Çoklu monitör algılama, numaralı/sonraki/ana monitöre geçme, kenarlara yapışma ve görev çubuğu üstünde oturma.
+- Kıyafet, saç rengi, gözlük/kulaklık/kurdele, animasyon ve otonom hareket ayarları; baş okşama tepkisi ve çift tıklama davranışı.
+- Yerel **“Hey Nora”** bekçisi; yalnızca tam ifade duyulunca veya 🎤 basılınca komut dinler. Sizin metniniz kafasının üzerinde mor **“Sen: …”** balonunda görünür.
+- Komut dinlerken elini kulağına götürür. Google STT veya isteğe bağlı **yerel Whisper** ile Türkçe komut tanıma; pyttsx3 sesli yanıt, ses/hız seçimi.
 
-- 🐈 120×150 şeffaf, always-on-top masaüstü peti; yürüme, oturma, uyuma, zıplama,
-  el sallama, sürüklenip düşme, göz kırpma, kuyruk/saç animasyonu ve duygu efektleri
-- 💬 Ayrı, taşınabilir, koyu mor/pembe sohbet penceresi; seçilebilir mesaj balonları
-- 🧠 Groq sohbeti, oturum içi son 30 mesajlık hafıza, duygu ve JSON komut protokolü
-- 🎙️ **Yerel “Hey Nora” bekçisi** (PocketSphinx): komut dinlemesi yalnızca tam
-  `Hey Nora` ifadesi duyulunca veya 🎤 düğmesine basınca başlar; bekçi sesi buluta göndermez
-- 🗨️ Sizin söylediğiniz/yazdığınız metin Nora’nın başının üzerinde **“Sen: …” balonunda** görünür
-- Nora komut dinlerken **elini kulağına götürür**, başını hafif eğer ve pembe ses dalgaları çıkarır
-- 🎧 Mikrofon cihazı seçimi ve yerel **Mikrofon Testi** (ses seviyesi/algılama kontrolü)
-- 📸 Ekran görüntüsü analizi — Nora’nın kendi pencereleri görüntüden önce gizlenir
-- 📷 Kamera analizi — kare yakalandıktan sonra kamera hemen serbest bırakılır
-- 💻 CPU/RAM/disk/batarya bilgisi ve proaktif sistem uyarıları
-- 🔊 Ses, parlaklık, uygulama açma, URL/arama, YouTube müzik araması
-- 📝 Oturum içi not defteri, ⏰ hatırlatıcılar, 🌤️ wttr.in hava durumu
-- 😴 Gece 02:00–06:00 daha az konuşma ve daha fazla uyku davranışı
-- 🖥️ Çoklu monitörde mevcut ekranı algılama, kenarlara yapışma, görev çubuğu üstüne oturma
-- 🧩 System tray + pet sağ tık menüsü; hafıza sıfırlama ve güvenli kapatma
+### Günlük yardımcılar
+- **Kalıcı kişisel hafıza:** yalnızca “bunu hatırla” dediğiniz bilgiler saklanır; hitap ve kişilik tonu kişiselleştirilebilir.
+- Kalıcı notlar, görev listeleri ve nottan görev çıkarma.
+- **Kalıcı hatırlatıcılar:** göreli süre, saat/tarih, her gün, hafta içi ve her hafta; uygulama yeniden başlayınca kaybolmaz.
+- Odak/çalışma, oyun, sessiz ve normal modlar. Odak sayacı; isteğe bağlı su/mola hatırlatmaları.
+- Güvenli rutinler: uygulama/müzik açma, hareket, mod ve benzeri sınırlı adımları onaylı çalıştırma.
+- Kelime/anagram oyunu; çift tıklayınca oyun açma seçeneği.
+- Yerel **OCR** ile ekrandaki yazıları okuma; isterseniz okunan metni Groq’a ayrıca onayla analiz ettirme.
+- Pano metnini özetleme/çevirme/düzenleme/biçimlendirme; pano geçmişi tutulmaz, gönderim onay ister.
+- Standart kullanıcı klasörlerinde dosya bulma, önizlemeli ve onaylı taşıma, üzerine yazmadan son taşımayı geri alma.
+- `.ics` takvim dosyası içe aktarma, bugünkü/yaklaşan etkinlikler, boş zaman bulma ve sınırlı tekrarlayan etkinlik açılımı.
+- Windows’ta pencere konumlarını yerelde kaydetme ve açık pencereleri onaylı eski düzenine döndürme; uygulama açma/kapatma yok.
+- Ekran/kamera vision analizi, CPU/RAM/disk/batarya bilgisi, ses/parlaklık, uygulama/URL/arama/müzik, hava durumu ve sistem araçları.
 
-## Dosya yapısı
+## Hızlı komut örnekleri
 
-```text
-.
-├── main.py                  # Kök başlatıcı: python main.py
-├── nora/
-│   ├── main.py              # QApplication, High DPI, CLI seçenekleri
-│   ├── nora_personality.py  # System prompt, duygular, komut şeması, proaktif replikler
-│   ├── nora_brain.py        # Groq chat/vision, hafıza, çevrimdışı temel komutlar
-│   ├── nora_voice.py        # TTS, STT, wake word thread’leri
-│   ├── nora_pet.py          # QPainter karakter, fizik, davranış AI’ı, konuşma balonu
-│   ├── nora_tools.py        # Sistem/kamera/ekran/uygulama/ses/not/hava/timer araçları
-│   ├── nora_proactive.py    # 30 sn kontrol, 120 sn minimum aralık, 5 dk idle
-│   └── nora_ui.py           # Chat, tray, worker thread’ler, tüm entegrasyon
-├── tests/                   # pytest: personality, brain, tools, voice, proactive, GUI
-├── requirements.txt
-├── requirements-dev.txt
-└── .env.example             # Örnek ortam değişkenleri; otomatik yüklenmez
-```
+| Söyleyebileceğiniz şey | Sonuç |
+|---|---|
+| `Hey Nora, ikinci monitöre geç` / `2. ekrana git` | Nora ikinci monitöre taşınır |
+| `ana ekrana dön` / `önceki ekrana geç` | Ana/önceki monitör |
+| `uyu` / `uyan` / `dolaş` / `dur` / `zıpla` | Kalıcı uyku, uyanma, dolaşma, bekleme, zıplama |
+| `dans et` / `otur` / `zıpla ve uyu` | Dans, oturma, sıralı hareket |
+| `çalışma modu` / `oyun modu` / `sessiz mod` / `normal mod` | Nora’nın davranış modu değişir |
+| `bunu hatırla: kahvem = şekersiz` | Açık kişisel bilgi kaydı |
+| `hafızanda ne var` / `bunu unut: kahvem` | Hafıza listeleme/silme |
+| `10 dakika sonra çayı hatırlat` | Kalıcı göreli hatırlatıcı |
+| `yarın 10:00'da toplantıyı hatırlat` | Tarih/saatli hatırlatıcı |
+| `her cuma 18:00'de haftayı özetlememi hatırlat` | Haftalık tekrar |
+| `hatırlatıcılar` / `hatırlatıcı ID iptal` | Listeleme/iptal |
+| `görev ekle: raporu bitir` / `görevler` | Görev ekleme/listeleme |
+| `1 numaralı görevi tamamla` / `1 numaralı notu görevlere çevir` | Görev yönetimi |
+| `gözlük tak` / `kulaklık tak` / `gece kıyafeti` | QPainter görünümü |
+| `saç rengi #202b52` / `tatlı mod` / `bana Kaan diye hitap et` | Görünüm/kişilik |
+| `panoyu özetle` / `panoyu İngilizce çevir` | Onaylı pano yardımı |
+| `ekrandaki yazıları oku` | Yerel OCR; analiz gönderimi ayrıca onaylı |
+| `indirilenlerde rapor dosyalarını bul` | Güvenli dosya araması |
+| `1 numaralı dosyayı Belgeler'e taşı` | Önizleme + onay; silme/üzerine yazma yok |
+| `dosya taşımayı geri al` | Değişmemiş son taşımayı geri alma |
+| `kelime oyunu başlat` / `cevabım kedi` / `ipucu ver` | Mini oyun |
+| `sabah rutini çalıştır` | Kayıtlı güvenli rutini onayla başlatma |
+| `bugünkü program` / `yaklaşan etkinlikler` | İçe aktarılan takvim |
+| `bugün boş zamanım var mı` / `bugün 30 dakika boş zaman bul` | Takvimde boşluk arama |
+| `masaüstü düzenini kaydet` / `masaüstü düzenini geri yükle` | Windows pencere konumları |
+| `yerel ses modu` / `bulut ses modu` | Whisper / Google STT seçimi |
 
----
+Serbest sohbet ve daha esnek ifadeler için Groq gerekir. Hareket komutları deterministik olduğundan internet kesilse de çalışır. Bilgisayarı kapatma, kod çalıştırma ve etkin pencereye yazma gibi işlemler yine ayrıca onay ister; “ne dersem yapsın” güvenlik onaylarını kaldırmaz.
 
 ## Kurulum
 
-Python **3.10+** gerekir. Komutları depo kökünde çalıştır.
+Temel paket için Python **3.10+**. Yerel ses/OCR/takvim eklentileri için `requirements-local.txt` önerilir; RapidOCR üst paket kısıtı nedeniyle bu ek paket **Python 3.10–3.12** ister.
 
 ### Windows
 
@@ -68,22 +73,18 @@ py -3 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+# Tüm yerel özellikler (Whisper, OCR, .ics):
+python -m pip install -r requirements-local.txt
 
 $env:GROQ_API_KEY = "gsk_..."
 python main.py
 ```
 
-PyAudio kurulumu başarısız olursa önce güncel tekerleği dene; eski Windows/Python
-kombinasyonlarında belgedeki `pipwin` yöntemi hâlâ bir seçenek olabilir:
+Yerel ses modelleri başlangıçta indirilmez. Kurulumdan sonra Nora sağ tık/tray → **Özellikler → Yerel ses modelini indir** adımını açıkça onaylayın; ardından **Ayarlar → Komut ses tanıma → Whisper** seçin. Model yoksa Nora sesinizi Google’a göndermez.
 
-```powershell
-python -m pip install PyAudio==0.2.14
-# Gerekirse:
-python -m pip install pipwin
-pipwin install pyaudio
-```
+PyAudio kurulumu başarısız olursa güncel tekerleği veya eski Windows/Python kombinasyonlarında `pipwin` yöntemini deneyebilirsiniz. Windows’ta mikrofon ve masaüstü erişim izinlerini kontrol edin.
 
-### Linux (Debian/Ubuntu)
+### Linux
 
 ```bash
 sudo apt update
@@ -91,22 +92,14 @@ sudo apt install -y python3-venv python3-dev portaudio19-dev espeak-ng \
   libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
   libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
   libxcb-xinerama0 libxcb-xfixes0 xclip scrot
-
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-
+python -m pip install -r requirements-local.txt
 export GROQ_API_KEY="gsk_..."
 python main.py
 ```
 
-- Ses sentezi için `espeak-ng` (veya dağıtımının `pyttsx3` desteklediği motor) gerekir.
-- Ses kontrolü `pactl` (PulseAudio/PipeWire) veya `amixer` kullanır.
-- Masaüstü otomasyonu için X11 en sorunsuz yoldur. Wayland’de `pyautogui`, pano ve
-  ekran yakalama kısıtlı olabilir.
-- GNOME’da system tray görünmüyorsa AppIndicator desteği gerekebilir; pet sağ tık
-  menüsü her zaman yedektir.
+X11 masaüstü otomasyonu en sorunsuz yoldur; Wayland’de pano/ekran yakalama kısıtlı olabilir. GNOME tray görünmüyorsa pet sağ tık menüsünü kullanın.
 
 ### macOS
 
@@ -114,180 +107,102 @@ python main.py
 brew install portaudio
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-local.txt
 export GROQ_API_KEY="gsk_..."
 python main.py
 ```
 
-Kamera, mikrofon, ekran kaydı ve erişilebilirlik izinlerini Sistem Ayarları’ndan
-Python/terminal uygulamasına ver. `pyttsx3` macOS’ta sistem seslerini kullanır.
+Ekran kaydı, kamera, mikrofon ve erişilebilirlik izinlerini Sistem Ayarları’ndan verin.
 
----
+## Ayarlar ve veri
+
+Sağ tık → **Özellikler → Ayarlar** panelinden kişilik, hitap, kıyafet, saç, aksesuar, animasyon, ses, Whisper, odak süresi ve su/mola aralıkları değiştirilebilir. Çift tıklama sohbet, oyun veya baş okşama olabilir.
+
+Kalıcı veriler varsayılan olarak:
+- Windows: `%LOCALAPPDATA%\Nora\state.json`
+- Linux: `~/.local/share/nora/state.json`
+- macOS: `~/Library/Application Support/Nora/state.json`
+
+`NORA_DATA_DIR` veya `python main.py --data-dir D:\NoraVeri` ile değiştirilebilir. Yerel modeller bu klasörün `models/` altındadır.
+
+**Saklananlar:** ayarlar, açıkça kaydedilen kişisel bilgiler, notlar, görevler, hatırlatıcılar, rutinler ve içe aktarılan takvim etkinlikleri. **Saklanmayanlar:** ham sohbet geçmişi, mikrofon sesi, pano geçmişi. Sohbet bağlamı oturumda son 30 mesajdır; “Sohbet Geçmişini Sıfırla” kişisel hafızayı silmez. Kişisel hafıza ayrı bir onaylı menüyle silinebilir.
+
+## Gizlilik ve güvenlik sınırları
+
+- “Hey Nora” bekçisi mikrofonu **yerel anahtar ifade tespiti** için açar; bu aşamada transkripsiyon/bulut yoktur. Hiç mikrofon açılmasın isterseniz `--no-wake-word` kullanın veya bekçiyi kapatın.
+- Varsayılan komut STT’si Google’dır; yalnızca aktivasyon/🎤 sırasında ses gönderir. Yerel Whisper seçiliyse model hazır olmasa bile buluta gizlice geçilmez.
+- Groq sohbet/vision isteği açıkça yaptığınız analizlerde kullanılır. OCR önce cihazda çalışır; okunan metnin Groq’a gönderilmesi ayrı onay ister. Pano analizi de onay ister.
+- Dosya işlemleri yalnızca standart kullanıcı klasörlerinde çalışır; keyfi yol, silme, üzerine yazma veya kabuk komutu yoktur. Taşıma öncesi kaynak/hedef gösterilir.
+- Rutinler kapatma/kod/dosya taşıma/pano gibi adımları içeremez. Modlar uygulamaları kendiliğinden kapatmaz veya işletim sistemi ayarlarını değiştirmez.
+- `NORA_ALLOW_CODE=0` varsayılan kalır. Kod çalıştırma açık olsa bile her istek onaylıdır ve güvenlik sandbox’ı değildir.
+- Takvim entegrasyonu seçtiğiniz `.ics` dosyasını yerelde okur; bulut hesap senkronizasyonu veya hesap bilgisi istemez.
+- Pencere düzeni özelliği Windows’ta `pygetwindow` kullanır; yalnızca hâlâ açık ve başlığı eşleşen pencereleri taşır. Diğer platformlarda desteklenmediğini açıkça söyler.
 
 ## Ortam değişkenleri
 
-`.env.example` yalnızca örnektir; Nora `.env` dosyasını **otomatik okumaz**.
-Değerleri kabuk ortamına aktar veya IDE çalıştırma ayarlarına ekle.
+`.env.example` yalnızca örnektir; otomatik yüklenmez. Değerleri kabuk ortamında ayarlayın.
 
 | Değişken | Varsayılan | Açıklama |
-|---|---:|---|
-| `GROQ_API_KEY` | yok | Groq anahtarı. Koda gömme, depoya commit’leme. |
+|---|---|---|
+| `GROQ_API_KEY` | boş | Serbest sohbet/vision/metin analizi anahtarı |
 | `NORA_CHAT_MODEL` | `openai/gpt-oss-120b` | Sohbet modeli |
-| `NORA_VISION_MODEL` | `qwen/qwen3.8-27b` | Ekran/kamera analiz modeli |
-| `NORA_WAKE_WORD` | `1` | Yerel “Hey Nora” bekçisi; komut dinlemesini kendiliğinden başlatmaz |
-| `NORA_TTS` | `1` | Sesli yanıt |
-| `NORA_PROACTIVE` | `1` | Nora’nın kendi kendine konuşması |
-| `NORA_OFFLINE` | `0` | Groq’a bağlanma; yalnızca temel deterministik komutlar |
-| `NORA_ALLOW_CODE` | `0` | Python kod çalıştırmaya izin ver; her kod yine onay ister |
-| `NORA_LOG_LEVEL` | `INFO` | Log ayrıntısı |
-| `NORA_MICROPHONE_INDEX` | boş | PyAudio giriş cihazı indeksi; boşsa varsayılan cihaz |
-| `NORA_WAKE_THRESHOLD` | `1e-20` | Yerel “Hey Nora” eşik hassasiyeti; yanlış tetiklenmede büyüt, hiç tetiklenmede küçült |
+| `NORA_VISION_MODEL` | `qwen/qwen3.8-27b` | Vision modeli |
+| `NORA_WAKE_WORD` | `1` | Yerel Hey Nora bekçisi |
+| `NORA_TTS` / `NORA_PROACTIVE` | `1` | Sesli yanıt / proaktif konuşma |
+| `NORA_OFFLINE` | `0` | Groq bağlantısını kapat |
+| `NORA_MICROPHONE_INDEX` | boş | PyAudio giriş cihazı |
+| `NORA_WAKE_THRESHOLD` | `1e-20` | Yerel anahtar ifade eşiği |
+| `NORA_DATA_DIR` | boş | Kalıcı veri/model klasörü |
+| `NORA_ALLOW_CODE` | `0` | Onaylı Python çalıştırma opt-in |
+| `NORA_LOG_LEVEL` | `INFO` | Log seviyesi |
 
-Anahtar yoksa uygulama çökmez; çevrimdışı temel komut moduna geçer ve bunu açıkça
-söyler. Serbest AI sohbeti ve görsel analiz için anahtar gerekir.
-
-### CLI seçenekleri
+## CLI
 
 ```bash
-python main.py --no-wake-word     # yerel Hey Nora bekçisi kapalı; yalnızca 🎤 dinler
-python main.py --no-tts           # sessiz mod
-python main.py --no-proactive     # proaktif replikler kapalı
-python main.py --offline          # Groq kapalı, temel komutlar açık
+python main.py --no-wake-word       # yalnızca 🎤 ile komut dinle
+python main.py --no-tts             # sesli yanıt kapalı
+python main.py --no-proactive       # kendiliğinden konuşma kapalı
+python main.py --offline            # Groq kapalı; yerel komutlar çalışır
+python main.py --data-dir ./veri    # taşınabilir veri klasörü
 python main.py --version
-python -m nora.main --version
 ```
 
----
-
-## Kullanım
-
-- Pet’e **sol tık**: sohbeti aç/kapat. **Çift tık**: sohbeti aç.
-- Pet’i **sürükle**: bırakınca yerçekimiyle düşer.
-- Pet’e **sağ tık**: tüm araçlar, duygular, hafıza ve kapatma menüsü.
-- Sohbette **Enter** veya 💝 ile gönder.
-- 📸 ekran analizi, 📷 kamera, 🎤 tek seferlik sesli komut, 💻 sistem bilgisi.
-- Hızlı butonlar: 🔍 Ara, ⏰ Saat, 📝 Notlar, 🌤️ Hava.
-- Tam **“Hey Nora”** de → Nora görsel “Efendim senpai?” der ve komut dinlemeye geçer.
-  Sadece “Nora” demek artık tetiklemez. “Hey Nora chrome aç” dersen komut kısmı için
-  hemen ardından konuşman gerekir; bekçi yalnızca aktivasyon ifadesini yerel tanır.
-- Sizin konuşmanız kafasının üzerinde mor **“Sen: …”** balonunda gösterilir.
-- Nora dinlerken elini kulağına götürür; 🎙️ **Mikrofon Testi** sesi Google’a göndermeden
-  yerel seviye ölçer, 🎧 **Mikrofon Seç** giriş cihazını değiştirir.
-- Sohbeti kapatmak uygulamayı kapatmaz. Tamamen kapatmak için tray/sağ tık → **Kapat**.
-
-Örnek ifadeler:
+## Dosya yapısı
 
 ```text
-not al: yarın saat 10'da toplantı var
-notlarımı göster
-5 dakika sonra hatırlat çayım demlendi
-Bursa hava durumu
-sesi %40 yap
-parlaklığı %60 yap
-chrome aç
-Python asyncio ara
-ekranda ne var?
-kamerada ne görüyorsun?
-sistem bilgisi
-kapatmayı iptal et
+main.py
+nora/
+  main.py                 # CLI / QApplication
+  nora_personality.py     # persona, duygu ve güvenli komut şeması
+  nora_commands.py        # internetsiz Türkçe komut çözümleme
+  nora_brain.py           # Groq chat/vision/metin yardımı
+  nora_voice.py           # yerel wake, Google/Whisper STT, TTS
+  nora_pet.py             # QPainter karakter, fizik, hareket, baloncuk
+  nora_tools.py           # sistem/ekran/kamera/uygulama/not araçları
+  nora_store.py           # atomik kalıcı yerel veri
+  nora_activities.py      # hatırlatıcı zamanlayıcı, modlar, kelime oyunu
+  nora_files.py           # sınırlı dosya bulma/taşıma/geri alma
+  nora_calendar.py        # .ics okuma, etkinlik ve boş zaman listeleme
+  nora_desktop.py         # Windows pencere düzeni kaydetme/geri yükleme
+  nora_local_ai.py        # isteğe bağlı Whisper ve RapidOCR
+  nora_settings_dialog.py # ayar paneli
+  nora_proactive.py       # düşük frekanslı proaktif konuşma
+  nora_ui.py              # sohbet/tray/worker entegrasyonu
+tests/
+requirements.txt
+requirements-local.txt
+requirements-dev.txt
+.env.example
 ```
 
-## Komut protokolü
-
-Nora cevabının sonunda duygu, isteğe bağlı olarak da JSON komut üretir:
-
-```text
-Notunu aldım senpai~ [CMD:{"command":"note","action":"add","text":"toplantı"}] [EMO:happy]
-```
-
-Etiketler kullanıcıya gösterilmez; duygu pet animasyonunu değiştirir. Komutlar
-çalıştırılmadan önce şema ve güvenlik doğrulamasından geçer.
-
-| Komut | Örnek JSON |
-|---|---|
-| `open_app` | `{"command":"open_app","app":"chrome"}` |
-| `search` | `{"command":"search","query":"Python asyncio"}` |
-| `open_url` | `{"command":"open_url","url":"https://example.com"}` |
-| `volume` | `{"command":"volume","level":50}` |
-| `brightness` | `{"command":"brightness","level":60}` |
-| `type_text` | `{"command":"type_text","text":"merhaba"}` |
-| `clipboard_copy` | `{"command":"clipboard_copy","text":"metin"}` |
-| `system_info` | `{"command":"system_info"}` |
-| `screenshot` | `{"command":"screenshot","prompt":"ekranda ne var?"}` |
-| `camera` | `{"command":"camera","prompt":"ne görüyorsun?"}` |
-| `shutdown` | `{"command":"shutdown"}` |
-| `cancel_shutdown` | `{"command":"cancel_shutdown"}` |
-| `lock_screen` | `{"command":"lock_screen"}` |
-| `set_timer` | `{"command":"set_timer","seconds":300,"message":"çay hazır"}` |
-| `play_music` | `{"command":"play_music","query":"lofi hip hop"}` |
-| `weather` | `{"command":"weather","city":"Bursa"}` |
-| `note` | `{"command":"note","action":"add","text":"not"}` / `{"command":"note","action":"list"}` |
-| `run_code` | `{"command":"run_code","language":"python","code":"print(2+2)"}` |
-
----
-
-## Gizlilik ve güvenlik
-
-- **Yerel “Hey Nora” bekçisi varsayılan açıktır.** Mikrofonu yalnızca `hey nora`
-  anahtar ifadesini cihaz içinde dinlemek için kullanır; sohbeti yazıya dökmez ve
-  buluta ses göndermez. Komut dinleme/Google STT ancak aktivasyondan sonra veya 🎤 ile başlar.
-- Sohbet başlığındaki 🎙️ simgesi ve tray’deki **“Hey Nora bekçisi (yerel)”** anahtarı
-  bunu görünür/kontrol edilebilir kılar. Hiç mikrofon açılmasın istiyorsan `--no-wake-word`
-  kullan ve yalnızca 🎤 düğmesine bas.
-- 🎤 komut dinlemesi sesi **Google Speech Recognition** servisine gönderir. Nora ses
-  kaydını diske yazmaz. İnternet yoksa komut STT’si çalışmaz; yerel bekçi çalışmaya devam eder.
-- Sohbet Groq’a; ekran/kamera görselleri yalnızca sen istediğinde Groq vision’a gider.
-  Kamera karesi yakalanır yakalanmaz serbest bırakılır. Ekran görüntüsünde Nora’nın
-  kendi pencereleri önce gizlenir.
-- `run_code` varsayılan **kapalıdır**. `NORA_ALLOW_CODE=1` açsan bile her çalıştırma
-  modal onay ister. Bu bir sandbox değildir: kod senin kullanıcı yetkilerinle çalışır.
-- `shutdown` onay ister ve 60 saniye gecikmeli planlanır; `cancel_shutdown` iptal eder.
-- `type_text` etkin pencereye yazmadan önce onay ister. Türkçe metin pano üzerinden
-  yapıştırılır ve pano içeriği değişebilir.
-- Uygulama açma `shell=True` kullanmaz; bilinmeyen adlar yalnızca PATH’teki tek bir
-  yürütülebilir olarak çözülür. URL’lerde yalnızca http/https kabul edilir.
-- Notlar ve sohbet hafızası oturum belleğindedir; uygulama kapanınca kaybolur.
-
-## Test
+## Test ve geliştirme
 
 ```bash
 python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-local.txt  # yerel özellik testleri için
 python -m pytest -q
-python -m ruff check nora tests main.py
+python -m compileall -q nora main.py tests
+ruff check nora tests main.py
 ```
 
-Testler Qt’yi offscreen çalıştırır; GUI kütüphaneleri yoksa GUI testleri atlanır.
-Bu depodaki geliştirme ortamında personality, brain, tools, voice, proactive ve
-offscreen GUI testleri çalıştırıldı. Gerçek Windows ses API’si, fiziksel mikrofon,
-kamera, parlaklık ve çoklu monitör davranışı hedef masaüstünde doğrulanmalıdır.
-
-## Sorun giderme
-
-| Belirti | Kontrol |
-|---|---|
-| `PyAudio` kurulmuyor | PortAudio başlıkları: `portaudio19-dev` / `brew install portaudio`; Windows’ta güncel wheel veya pipwin |
-| Ses yok | Windows SAPI sesi, Linux `espeak-ng`, macOS sistem sesi; tray’de “Sesli yanıt” açık mı? |
-| Mikrofon yok | OS mikrofon izni, doğru cihaz, PyAudio; 🎙️ dinleyiciyi kapatıp 🎤 ile dene |
-| “Hey Nora” tetiklenmiyor | Tam `hey nora` de; 🎙️ Mikrofon Testi ile ses seviyesini kontrol et; 🎧 Mikrofon Seç; `NORA_WAKE_THRESHOLD` değerini küçültmeyi dene; pocketsphinx kurulu mu? |
-| Yanlışlıkla tetikleniyor | `NORA_WAKE_THRESHOLD` değerini büyüt (örn. `1e-15`); mikrofon gürültüsünü azalt |
-| Ses geldi ama anlayamadı | Mikrofon seviyesi/gürültü; Windows varsayılan iletişim cihazı; `NORA_MICROPHONE_INDEX`; Google STT dil/anahtar sınırları |
-| Tray görünmüyor | Linux AppIndicator/extension; pet sağ tık menüsünü kullan |
-| Ekran/klavye çalışmıyor | Wayland kısıtları, macOS ekran kaydı/erişilebilirlik izinleri, X11 oturumu |
-| Parlaklık değişmiyor | Harici ekran/DDR desteği değişir; `screen-brightness-control` uyumluluğu |
-| Groq `NotFoundError` | Sağ tık → 🩺 Groq Bağlantısı. `llama-3.3-70b-versatile` free/dev için 16.08.2026’da kapatıldı; `openai/gpt-oss-120b` kullan [1](https://console.groq.com/docs/deprecations) |
-| `comtypes` INFO logları | Windows COM önbelleği bilgilendirmesidir; artık WARNING seviyesine çekildi, hata değildir |
-| `libGL.so.1` hatası | Linux’ta `libgl1`/Mesa kur; sanal makinede offscreen test için Qt GUI paketleri gerekir |
-| OpenCV çakışması | Aynı ortamda hem `opencv-python` hem `opencv-python-headless` kurma; birini seç |
-
-## Bilinen sınırlar
-
-- Yerel bekçi PocketSphinx’in İngilizce akustik modeliyle yalnızca `hey nora` ifadesini
-  tanır; Türkçe aksan/gürültüde hassasiyet ayarı gerekebilir. Komut transkripsiyonu hâlâ
-  Google STT kullanır; Google’ın genel test anahtarı ileride değişebilir.
-- `pyautogui` ekran görüntüsü öncelikli olarak birincil ekranı yakalar; pet çoklu
-  monitörde mevcut ekranı algılar ama tüm sanal masaüstünü tek görüntüde analiz etmez.
-- Windows ses/parlaklık/kapatma birinci sınıf hedeflerdir; Linux/macOS araçları
-  dağıtım, masaüstü ortamı ve izinlere göre best-effort çalışır.
-- `pyttsx3` ses kalitesi işletim sisteminin ses motoruna bağlıdır.
-- Proaktif motor en az 120 saniyede bir konuşur; gece daha seyrek, sistem uyarılarında
-  öncelikli ve tekrarları için soğuma süreli davranır.
+Bu sürümde **165 test** geçmiştir; offscreen GUI, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

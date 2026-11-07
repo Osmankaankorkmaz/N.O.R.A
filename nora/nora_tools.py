@@ -28,6 +28,7 @@ from urllib.parse import quote, quote_plus, urlsplit
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from .nora_personality import CommandError, normalize_command
+from .nora_store import NoraStore
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,11 @@ class NoraTools(QObject):
     }
 
     def __init__(
-        self, *, allow_code: bool | None = None, parent: QObject | None = None
+        self,
+        *,
+        allow_code: bool | None = None,
+        store: NoraStore | None = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.allow_code = (
@@ -70,7 +75,7 @@ class NoraTools(QObject):
             if allow_code is None
             else allow_code
         )
-        self._notes: list[dict[str, str]] = []
+        self.store = store if store is not None else NoraStore()
         self._timers: dict[str, threading.Timer] = {}
         self._lock = threading.RLock()
         self._camera_lock = threading.Lock()
@@ -635,32 +640,35 @@ class NoraTools(QObject):
         text = str(text).strip()
         if not text or len(text) > 2000:
             return "Not 1-2000 karakter olmalı senpai."
-        with self._lock:
-            if len(self._notes) >= 200:
-                return "Not defteri doldu senpai (200 not). Bu oturumda daha fazla ekleyemem. 📝"
-            self._notes.append(
-                {
-                    "text": text,
-                    "created_at": datetime.now().isoformat(timespec="seconds"),
-                }
-            )
-        return f"Notunu aldım senpai: {text} 📝"
+        try:
+            note = self.store.add_note(text)
+        except ValueError as exc:
+            return f"Not kaydedilemedi senpai: {exc}"
+        return f"Notunu kalıcı olarak aldım senpai: {text} [{note['id']}] 📝"
 
     def list_notes(self) -> str:
-        with self._lock:
-            notes = [note.copy() for note in self._notes]
+        notes = self.store.notes
         if not notes:
             return "Henüz notun yok senpai. 'Not al: ...' dersen yazarım. 📝"
         lines = ["Notların senpai~ 📝"]
         for index, note in enumerate(notes, 1):
             stamp = datetime.fromisoformat(note["created_at"]).strftime("%d.%m %H:%M")
-            lines.append(f"{index}. [{stamp}] {note['text']}")
+            lines.append(f"{index}. [{stamp}] {note['text']} [{note.get('id', '')}]")
         return "\n".join(lines)
 
     @property
     def notes(self) -> list[dict[str, str]]:
-        with self._lock:
-            return [note.copy() for note in self._notes]
+        return self.store.notes
+
+    def delete_note(self, identifier: str) -> str:
+        try:
+            return (
+                "Notu sildim senpai."
+                if self.store.delete_note(identifier)
+                else "Bu notu bulamadım senpai."
+            )
+        except ValueError as exc:
+            return str(exc)
 
     # ------------------------------------------------------------------ weather
     def weather(self, city: str) -> str:

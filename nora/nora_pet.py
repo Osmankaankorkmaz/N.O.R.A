@@ -42,6 +42,8 @@ class PetState(Enum):
     LOVE = auto()
     ANGRY = auto()
     DRAG = auto()
+    DANCE = auto()
+    YAWN = auto()
 
 
 class SpeechBubble(QWidget):
@@ -140,6 +142,16 @@ class NoraPet(QWidget):
         self._listening = False
         self._state_before_talk = PetState.IDLE
         self._state_before_listening = PetState.IDLE
+        self._pinned_state: PetState | None = None
+        self._manual = False
+        self._autonomous = True
+        self._animations = True
+        self._affection_frames = 0
+        self._appearance = {
+            "outfit": "classic",
+            "hair_color": "#33204d",
+            "accessory": "none",
+        }
         self._mouth = 0.0
         self._blink_left = 0
         self._next_blink = self.rng.randint(100, 200)
@@ -212,7 +224,16 @@ class NoraPet(QWidget):
         self.update()
 
     def _choose_state(self) -> None:
-        if self._talking or self._listening or self.state == PetState.DRAG:
+        if (
+            self._talking
+            or self._listening
+            or self.state == PetState.DRAG
+            or self._manual
+        ):
+            return
+        if not self._autonomous:
+            if self.state != PetState.IDLE:
+                self._set_state(PetState.IDLE, 100000)
             return
         from .nora_personality import is_quiet_hours
 
@@ -256,7 +277,9 @@ class NoraPet(QWidget):
                 return
 
     def _tick(self) -> None:
-        self._frame += 1
+        if self._animations:
+            self._frame += 1
+        self._affection_frames = max(0, self._affection_frames - 1)
         self._state_frames += 1
         if self._blink_left > 0:
             self._blink_left -= 1
@@ -287,9 +310,12 @@ class NoraPet(QWidget):
                     self._vy = 0.0
                     self._grounded = True
                     if self.state in (PetState.JUMP, PetState.FALL):
-                        self._set_state(
-                            PetState.LISTENING if self._listening else PetState.IDLE, 60
-                        )
+                        if self._listening:
+                            self._set_state(PetState.LISTENING, 100000)
+                        elif self._pinned_state is not None:
+                            self._set_state(self._pinned_state, 100000)
+                        else:
+                            self._set_state(PetState.IDLE, 60)
             elif self._y < self._floor_y:
                 self._grounded = False
                 self._vy = 0.0
@@ -311,7 +337,12 @@ class NoraPet(QWidget):
         from .nora_personality import EMOTIONS
 
         self.emotion = emotion if emotion in EMOTIONS else "happy"
-        if self.state != PetState.DRAG and not self._talking and not self._listening:
+        if (
+            self.state != PetState.DRAG
+            and not self._talking
+            and not self._listening
+            and not self._manual
+        ):
             mapping = {
                 "happy": PetState.WAVE,
                 "thinking": PetState.IDLE,
@@ -428,6 +459,135 @@ class NoraPet(QWidget):
         self._set_state(PetState.JUMP)
         self.move(int(x), int(y))
 
+    def perform_action(self, action: str) -> str:
+        """Explicit commands pin a behavior until the user changes it."""
+        if action == "sleep":
+            self._manual = True
+            self._pinned_state = PetState.SLEEP
+            self.emotion = "sleepy"
+            self._set_state(PetState.SLEEP if self._grounded else PetState.FALL, 100000)
+            return "Uyku modundayım senpai. 'Uyan' dersen kalkarım. z Z Z"
+        if action in {"wake", "stop"}:
+            self._manual = False
+            self._pinned_state = None
+            self.emotion = "happy"
+            self._grounded = True
+            self._y = self._current_floor()
+            self._vy = 0.0
+            self._set_state(PetState.IDLE, 100000)
+            return (
+                "Uyandım senpai~"
+                if action == "wake"
+                else "Tamam, burada bekliyorum senpai."
+            )
+        if action == "walk":
+            self._manual = True
+            direction = PetState.WALK_LEFT if self._vx < 0 else PetState.WALK_RIGHT
+            self._pinned_state = direction
+            self._set_state(direction, 100000)
+            return "Dolaşıyorum senpai. 'Dur' diyene kadar gezeceğim. 🐾"
+        if action == "dance":
+            self._manual = True
+            self._pinned_state = PetState.DANCE
+            self.emotion = "love"
+            self._set_state(PetState.DANCE, 100000)
+            return "Dans modu açık! 'Dur' dersen bitiririm. 🎵"
+        if action == "jump":
+            if not self._grounded:
+                return "Zaten havadayım senpai! Bir de yere ineyim. 😼"
+            self._set_state(PetState.JUMP, 100000)
+            return "Hop! Zıpladım senpai~"
+        if action == "sit":
+            self._manual = True
+            self._pinned_state = PetState.SIT
+            self._set_state(PetState.SIT, 100000)
+            return "Oturdum senpai. Buradan nöbet tutuyorum."
+        if action == "pet":
+            self._affection_frames = 120
+            self.emotion = "love"
+            if not self._manual and not self._listening and not self._talking:
+                self._set_state(PetState.LOVE, 100)
+            self.show_speech("Mırr… Bunu istediğim anlamına gelmez, baka. 💜", 4000)
+            return "Başımı okşadın… Şey, teşekkürler senpai. 💜"
+        if action == "blink":
+            self._blink_left = 10
+            return "Göz kırptım senpai~"
+        if action == "yawn":
+            if not self._manual:
+                self._set_state(PetState.YAWN, 75)
+            self.show_speech("Eeehh… Uykum geldi sanpai değil, kahvem bitti. ☕", 3000)
+            return "Esnedim senpai. Kahve molası?"
+        if action == "wave":
+            if not self._manual:
+                self._set_state(PetState.WAVE, 100)
+            self.show_speech("Selam senpai~ 👋", 3000)
+            return "Selam verdim senpai~"
+        return "Bu hareketi bilmiyorum senpai."
+
+    def set_appearance(self, settings: dict) -> None:
+        for key in ("outfit", "hair_color", "accessory"):
+            if key in settings:
+                self._appearance[key] = str(settings[key])
+        if "animations" in settings:
+            self._animations = bool(settings["animations"])
+        if "autonomous" in settings:
+            self._autonomous = bool(settings["autonomous"])
+            if not self._autonomous and not self._manual:
+                self._set_state(PetState.IDLE, 100000)
+        self.update()
+
+    def _monitor_screens(self) -> list:
+        app = QApplication.instance()
+        return sorted(
+            app.screens() if app else [],
+            key=lambda screen: (screen.geometry().x(), screen.geometry().y()),
+        )
+
+    def move_to_monitor(self, target: int | str = "next") -> tuple[bool, str]:
+        screens = self._monitor_screens()
+        if not screens:
+            return False, "Monitör bilgisini alamadım senpai."
+        app = QApplication.instance()
+        current = (
+            app.screenAt(self.pos() + QPoint(self.WIDTH // 2, self.HEIGHT // 2))
+            if app
+            else None
+        )
+        if current not in screens:
+            current = screens[0]
+        index = screens.index(current)
+        if isinstance(target, int):
+            if not 1 <= target <= len(screens):
+                return (
+                    False,
+                    f"{target} numaralı monitör yok senpai. Şu an {len(screens)} monitör bağlı. 🖥️",
+                )
+            destination = target - 1
+        elif target == "primary":
+            primary = app.primaryScreen() if app else screens[0]
+            destination = screens.index(primary) if primary in screens else 0
+        else:
+            destination = (index + (1 if target == "next" else -1)) % len(screens)
+        screen = screens[destination]
+        area = screen.availableGeometry()
+        if area.width() < self.WIDTH or area.height() < self.HEIGHT:
+            return False, "Hedef ekranın kullanılabilir alanı çok küçük senpai."
+        old_area = current.availableGeometry()
+        fraction = (self._x - old_area.left()) / max(1, old_area.width() - self.WIDTH)
+        self._x = float(
+            area.left() + max(0, min(1, fraction)) * (area.width() - self.WIDTH)
+        )
+        self._y = float(area.bottom() - self.HEIGHT + 1)
+        self._floor_y = self._y
+        self._grounded = True
+        self._vy = 0.0
+        self._on_taskbar = False
+        self.move(int(round(self._x)), int(round(self._y)))
+        self.position_changed.emit(self.pos())
+        self._update_bubble_position()
+        name = screen.name() or f"Monitör {destination + 1}"
+        return True, f"{destination + 1}. monitöre geçtim senpai ({name}). 🖥️"
+
     def go_to_screen_edge(self) -> None:
         available, _ = self._screen_rects()
         center = self._x + self.WIDTH / 2
@@ -513,16 +673,19 @@ class NoraPet(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         breath = math.sin(self._frame * 0.055)
-        tail = math.sin(self._frame * 0.12)
+        tail = math.sin(self._frame * (0.22 if self._affection_frames else 0.12))
         wind = math.sin(self._frame * 0.045) * 2.2
         walk = (
             math.sin(self._frame * 0.32)
-            if self.state in (PetState.WALK_LEFT, PetState.WALK_RIGHT)
+            if self.state in (PetState.WALK_LEFT, PetState.WALK_RIGHT, PetState.DANCE)
             else 0.0
         )
         bob = breath * 1.1 if self._grounded else 0.0
-        if self.state == PetState.SIT:
+        if self.state in (PetState.SIT, PetState.SLEEP):
             bob += 5
+        if self.state == PetState.DANCE:
+            bob += math.sin(self._frame * 0.32) * 3
+            painter.translate(math.sin(self._frame * 0.16) * 2, 0)
 
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(0, 0, 0, 42))
@@ -544,6 +707,7 @@ class NoraPet(QWidget):
         self._draw_face(painter)
         self._draw_front_hair(painter, wind)
         self._draw_star_clip(painter)
+        self._draw_accessory(painter)
         if self._listening or self.state == PetState.LISTENING:
             painter.restore()
             self._draw_listening_hand(painter)
@@ -578,7 +742,7 @@ class NoraPet(QWidget):
         path.cubicTo(70, 11, 45, 13, 31, 30)
         gradient = QLinearGradient(20, 18, 96, 120)
         gradient.setColorAt(0, QColor("#170b22"))
-        gradient.setColorAt(0.45, QColor("#33204d"))
+        gradient.setColorAt(0.45, QColor(self._appearance["hair_color"]))
         gradient.setColorAt(0.75, QColor("#4a2a66"))
         gradient.setColorAt(1, QColor("#160c20"))
         p.setPen(QPen(QColor("#120818"), 1))
@@ -632,9 +796,13 @@ class NoraPet(QWidget):
         dress.quadTo(60, 125, 34, 118)
         dress.closeSubpath()
         gradient = QLinearGradient(42, 80, 80, 124)
-        gradient.setColorAt(0, QColor("#b58aff"))
-        gradient.setColorAt(0.35, QColor("#7c4dff"))
-        gradient.setColorAt(0.8, QColor("#4a2a80"))
+        palette = {
+            "classic": ("#b58aff", "#7c4dff", "#4a2a80"),
+            "casual": ("#ffd1df", "#ef739e", "#91445f"),
+            "night": ("#8ca9ff", "#3c559b", "#202b52"),
+        }.get(self._appearance["outfit"], ("#b58aff", "#7c4dff", "#4a2a80"))
+        for position, color in zip((0, 0.35, 0.8), palette):
+            gradient.setColorAt(position, QColor(color))
         gradient.setColorAt(1, QColor("#2c1742"))
         p.setPen(QPen(QColor("#241332"), 1.2))
         p.setBrush(QBrush(gradient))
@@ -675,6 +843,15 @@ class NoraPet(QWidget):
         skin.setColorAt(0, QColor("#ffe0d0"))
         skin.setColorAt(1, QColor("#f3bda9"))
         swing = walk * 5
+        if self.state == PetState.DANCE:
+            p.setPen(QPen(QBrush(skin), 7, Qt.SolidLine, Qt.RoundCap))
+            p.setBrush(Qt.NoBrush)
+            for start, end in (
+                ((43, 87), (25, 67 + walk * 7)),
+                ((76, 87), (95, 67 - walk * 7)),
+            ):
+                p.drawLine(QPointF(*start), QPointF(*end))
+            return
         if self._listening or self.state == PetState.LISTENING:
             p.setPen(QPen(QBrush(skin), 7, Qt.SolidLine, Qt.RoundCap))
             p.setBrush(Qt.NoBrush)
@@ -784,7 +961,7 @@ class NoraPet(QWidget):
             )
             p.drawPath(brow)
         for x in (45, 75):
-            if closed:
+            if closed or self.state == PetState.YAWN:
                 p.setPen(QPen(QColor("#3a204c"), 2, Qt.SolidLine, Qt.RoundCap))
                 path = QPainterPath(QPointF(x - 6, 53))
                 path.quadTo(x, 57 if self.state == PetState.SLEEP else 51, x + 6, 53)
@@ -839,7 +1016,10 @@ class NoraPet(QWidget):
         p.drawPoint(QPointF(60, 62))
         p.setPen(QPen(QColor("#9c4665"), 1.4, Qt.SolidLine, Qt.RoundCap))
         p.setBrush(Qt.NoBrush)
-        if self._mouth > 0.15 and self.state != PetState.SLEEP:
+        if self.state == PetState.YAWN:
+            p.setBrush(QColor("#9c4665"))
+            p.drawEllipse(QRectF(55, 66, 10, 12))
+        elif self._mouth > 0.15 and self.state != PetState.SLEEP:
             p.setBrush(QColor("#e8799d"))
             p.drawEllipse(QRectF(56, 68, 8, 3 + self._mouth * 6))
         elif surprised:
@@ -917,6 +1097,37 @@ class NoraPet(QWidget):
         p.setBrush(QColor("#ffd166"))
         p.drawPolygon(QPolygonF(points))
 
+    def _draw_accessory(self, p: QPainter) -> None:
+        accessory = self._appearance["accessory"]
+        if accessory == "headphones":
+            p.setPen(QPen(QColor("#202039"), 4))
+            p.setBrush(Qt.NoBrush)
+            p.drawArc(QRectF(27, 24, 66, 54), 0, 180 * 16)
+            p.setPen(QPen(QColor("#b388ff"), 1))
+            p.setBrush(QColor("#443060"))
+            p.drawRoundedRect(QRectF(24, 46, 9, 20), 4, 4)
+            p.drawRoundedRect(QRectF(87, 46, 9, 20), 4, 4)
+        elif accessory == "glasses":
+            p.setPen(QPen(QColor("#382441"), 1.6))
+            p.setBrush(QColor(200, 225, 255, 22))
+            p.drawRoundedRect(QRectF(35, 44, 21, 17), 5, 5)
+            p.drawRoundedRect(QRectF(64, 44, 21, 17), 5, 5)
+            p.drawLine(QPointF(56, 50), QPointF(64, 50))
+        elif accessory == "ribbon":
+            p.setPen(QPen(QColor("#b83268"), 1))
+            p.setBrush(QColor("#ff7eae"))
+            ribbon = QPainterPath(QPointF(83, 28))
+            ribbon.lineTo(72, 20)
+            ribbon.lineTo(73, 34)
+            ribbon.closeSubpath()
+            ribbon.moveTo(83, 28)
+            ribbon.lineTo(94, 20)
+            ribbon.lineTo(93, 34)
+            ribbon.closeSubpath()
+            p.drawPath(ribbon)
+            p.setBrush(QColor("#ffd166"))
+            p.drawEllipse(QRectF(80, 25, 6, 6))
+
     def _draw_effects(self, p: QPainter) -> None:
         if self._listening or self.state == PetState.LISTENING:
             pulse = (math.sin(self._frame * 0.18) + 1) / 2
@@ -940,7 +1151,16 @@ class NoraPet(QWidget):
             p.setBrush(QColor("#ff6b9d"))
             p.drawEllipse(QRectF(98, 47, 4, 4))
         p.setPen(Qt.NoPen)
-        if self.emotion == "love" or self.state == PetState.LOVE:
+        if self.state == PetState.DANCE:
+            p.setPen(QPen(QColor("#b388ff"), 1.5))
+            p.setFont(QFont("Segoe UI Symbol", 12))
+            p.drawText(QPointF(12, 45 + math.sin(self._frame * 0.1) * 5), "♪")
+            p.drawText(QPointF(98, 28 + math.cos(self._frame * 0.1) * 5), "♫")
+        if (
+            self.emotion == "love"
+            or self.state == PetState.LOVE
+            or self._affection_frames
+        ):
             p.setBrush(QColor("#ff4f8b"))
             p.setFont(QFont("Segoe UI Symbol", 10))
             for i in range(3):
