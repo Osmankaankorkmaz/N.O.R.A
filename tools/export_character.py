@@ -229,8 +229,8 @@ figure{{margin:0;background:#241b31;border:1px solid #4a315c;border-radius:12px;
 img{{image-rendering:pixelated;width:180px;height:225px;object-fit:contain}}
 figcaption{{margin-top:8px;font-size:13px;color:#d7a8cc}}
 </style></head><body>
-<h1>Nora · siyah elbise, kırmızı ayakkabı, kırmızı göz, beyaz wolfcut</h1>
-<p>Bu görseller uygulamanın kendi QPainter çiziminden üretildi; çalışma zamanında harici sprite kullanılmaz.</p>
+<h1>Nora · daha tatlı chibi · siyah elbise, kırmızı ayakkabı, kırmızı göz, beyaz wolfcut</h1>
+<p>Bu görseller uygulamanın kendi QPainter çiziminden üretildi; çalışma zamanında harici sprite kullanılmaz. Büyük parıltılı kırmızı gözler, pembe yanaklar, kalp toka ve etek danteli aynı 8-bit ızgarada çizilir.</p>
 <h2>Pozlar</h2><section>{poses}</section>
 <h2>Duygular</h2><section>{emotions}</section>
 <h2>Animasyonlar</h2><section>{animations}</section>

@@ -29,6 +29,8 @@ def test_requested_wolfcut_palette_is_the_default(qapp):
     assert QColor("#1c1c24").rgba() in colors  # black dress
     assert QColor("#d92b3d").rgba() in colors  # red shoes
     assert QColor("#e6384c").rgba() in colors  # red eyes
+    assert QColor("#f49ab0").rgba() in colors  # softer blush
+    assert QColor("#fff3e6").rgba() in colors  # collar / lace dots
     pet.shutdown()
 
 

@@ -161,3 +161,32 @@ def test_requested_black_dress_and_white_wolfcut_commands():
         "key": "hair_color",
         "value": "#f5f3f0",
     }
+
+
+def test_speech_test_commands_normalize_and_recognition_test_is_bounded():
+    assert normalize_command(parse_direct_command("ses testi").command) == {
+        "command": "speech_test"
+    }
+    assert normalize_command(parse_direct_command("ses tanıma testi").command) == {
+        "command": "stt_test"
+    }
+
+
+@pytest.mark.parametrize(
+    "text,target",
+    [
+        ("Hey Nova, 2 numaralı monitöre geç", 2),
+        ("monitör 2 ye geç", 2),
+        ("ikinci ekrana geçer misin", 2),
+        ("lütfen uyu", "sleep"),
+        ("oturur musun", "sit"),
+        ("el sallar mısın", "wave"),
+    ],
+)
+def test_polite_and_misheard_address_command_variants(text, target):
+    direct = parse_direct_command(text)
+    assert direct is not None
+    if isinstance(target, int):
+        assert direct.command == {"command": "move_monitor", "target": target}
+    else:
+        assert direct.command == {"command": "pet_action", "action": target}

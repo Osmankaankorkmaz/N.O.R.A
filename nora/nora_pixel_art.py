@@ -324,6 +324,8 @@ class PixelCharacter:
         c.rect(13, 36, 14, 2, base)
         c.rect(12, 38, 16, 2, base)
         c.rect(13, 40, 14, 1, light)
+        for x in (14, 18, 22, 26):
+            c.rect(x, 40, 1, 1, p["cream"])  # little lace dots on the black hem
         c.rect(15, 33, 2, 3, light)
         for x in (16, 20, 24):
             c.rect(x, 37, 1, 3, shade)
@@ -351,7 +353,9 @@ class PixelCharacter:
         dancing = state == "dance"
         jumping = state in {"jump", "drag"}
         falling = state == "fall"
-        waving = state == "wave" or (emotion == "happy" and state == "idle")
+        waving = state == "wave" or (
+            emotion == "happy" and state == "idle" and (phase // 48) % 4 == 0
+        )
         angry = state == "angry" or emotion == "angry"
         surprised = state == "surprised" or emotion == "surprised"
         wave = (0, -1, 0, 1)[(phase // 8) % 4]
@@ -512,27 +516,30 @@ class PixelCharacter:
         smug = emotion == "smug" or state == "sit"
         sleepy = emotion == "sleepy" and state != "sleep"
         iris = p["pink_iris"] if love else p["iris"]
-        for x in (11, 23):
+        # Larger, rounded sparkly eyes read as sweeter at 120×150 while keeping
+        # the requested red iris palette. Corners are omitted, not anti-aliased.
+        for x in (10, 23):
             if closed:
-                c.stamp(("X....X", ".XXXX."), x, 22, o)
+                c.stamp((".XXXX.", "X....X"), x, 22, o)
                 continue
-            c.rect(x, 19, 6, 1, o)
-            c.rect(x, 20, 6, 5, o)
+            c.rect(x + 1, 19, 5, 1, o)
+            c.rect(x, 20, 7, 4, o)
+            c.rect(x + 1, 24, 5, 1, o)
+            c.rect(x + 1, 20, 5, 4, p["white"])
             if surprised:
-                c.rect(x + 1, 20, 4, 5, p["white"])
-                c.rect(x + 1, 21, 4, 3, iris)
-                c.rect(x + 2, 22, 2, 2, o)
-                c.rect(x + 1, 21, 1, 1, p["white"])
-            else:
-                c.rect(x + 1, 20, 4, 5, iris)
-                c.rect(x + 2, 21, 2, 3, o)
+                c.rect(x + 1, 21, 5, 2, iris)
+                c.rect(x + 2, 21, 2, 2, o)
                 c.rect(x + 1, 20, 2, 2, p["white"])
-                c.rect(x + 4, 23, 1, 1, p["white"])
-                c.rect(x + 2, 24, 3, 1, p["iris_light"])
+            else:
+                c.rect(x + 1, 20, 5, 4, iris)
+                c.rect(x + 3, 21, 2, 3, o)
+                c.rect(x + 1, 20, 2, 2, p["white"])
+                c.rect(x + 5, 23, 1, 1, p["white"])
+                c.rect(x + 2, 23, 3, 1, p["iris_light"])
             c.rect(x - 1, 19, 1, 1, o)
-            c.rect(x + 6, 19, 1, 1, o)
+            c.rect(x + 7, 19, 1, 1, o)
             if smug or sleepy:
-                c.rect(x, 19, 6, 2, o)
+                c.rect(x, 19, 7, 2, o)
         if angry:
             c.rect(11, 17, 2, 1, o)
             c.rect(13, 18, 3, 1, o)
@@ -547,11 +554,11 @@ class PixelCharacter:
         elif listening or emotion == "thinking":
             c.rect(12, 16, 4, 1, p["hair_shade"])
             c.rect(24, 17, 4, 1, p["hair_shade"])
-        c.rect(10, 25, 3, 1, p["blush"])
-        c.rect(27, 25, 3, 1, p["blush"])
+        c.rect(9, 25, 3, 2, p["blush"])
+        c.rect(28, 25, 3, 2, p["blush"])
         c.rect(10, 25, 1, 1, p["pink"])
         c.rect(29, 25, 1, 1, p["pink"])
-        c.rect(20, 24, 1, 1, p["skin_shade"])
+        c.rect(20, 25, 1, 1, p["skin_shade"])
         if state == "sleep":
             c.rect(20, 27, 1, 1, mouth)
         elif state == "yawn":
@@ -598,12 +605,9 @@ class PixelCharacter:
         c.rect(18, 9, 3, 1, glint)
 
     def _star_clip(self, c: _PixelCanvas, p: dict[str, QColor]) -> None:
-        # Small red hair pin echoing the eyes and shoes.
-        c.rect(9, 13, 1, 1, p["shoe"])
-        c.rect(11, 13, 1, 1, p["shoe"])
-        c.rect(10, 14, 1, 1, p["shoe_light"])
-        c.rect(9, 15, 1, 1, p["shoe"])
-        c.rect(11, 15, 1, 1, p["shoe"])
+        # Tiny red heart pin echoing the eyes and shoes.
+        c.stamp(("X.X", "XXX", ".X."), 9, 13, p["shoe"])
+        c.rect(10, 13, 1, 1, p["shoe_light"])
 
     def _accessory(self, c: _PixelCanvas, p: dict[str, QColor], accessory: str) -> None:
         o = p["outline"]
@@ -664,6 +668,8 @@ class PixelCharacter:
                 c.stamp(("..X", ".X.", "X..", ".X.", "..X"), 36, 16, p["iris_light"])
             else:
                 c.stamp((".X", "X.", ".X"), 37, 18, p["iris_light"])
+        if state == "idle" and emotion == "happy" and (phase // 24) % 4 == 1:
+            c.stamp(_SPARKLE, 4, 10, p["gold"])
         if state == "dance":
             drift = (0, -1, 0, 1)[(phase // 10) % 4]
             c.stamp(_NOTE, 2, 20 + drift, p["hair_light"])

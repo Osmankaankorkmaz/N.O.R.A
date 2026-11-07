@@ -1,20 +1,20 @@
 # Nora 💕 · Anime Kız Masaüstü Asistanı
 
-Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakter; **beyaz wolfcut saçlı, kırmızı gözlü, siyah elbiseli ve kırmızı ayakkabılı** sevimli bir **8-bit piksel chibi** olarak tamamı **QPainter ile kod içinde çizilir**; çalışma zamanında harici sprite veya resim dosyası kullanılmaz.
+Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakter; **beyaz wolfcut saçlı, kırmızı gözlü, siyah elbiseli ve kırmızı ayakkabılı** daha tatlı bir **8-bit piksel chibi** olarak tamamı **QPainter ile kod içinde çizilir**; çalışma zamanında harici sprite veya resim dosyası kullanılmaz.
 
 > **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
 
 ## Neler yapabilir?
 
 ### Karakter ve ses
-- 120×150 şeffaf, always-on-top pet; 40×50 mantıksal ızgarada 3×3 keskin pikseller, keskin kenarlı 8-bit görünüm ve aynı tarzda tepsi ikonu. Varsayılan görünüm: beyaz wolfcut, kırmızı göz, siyah elbise, kırmızı ayakkabı. Yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme; piksel kalp, yıldız, nota ve uyku efektleri.
+- 120×150 şeffaf, always-on-top pet; 40×50 mantıksal ızgarada 3×3 keskin pikseller, keskin kenarlı 8-bit görünüm ve aynı tarzda tepsi ikonu. Varsayılan görünüm: beyaz wolfcut, kırmızı göz, siyah elbise, kırmızı ayakkabı; daha büyük parıltılı gözler, pembe yanaklar, kalp toka ve etek danteli. Yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme; piksel kalp, yıldız, nota ve uyku efektleri.
 - Tüm poz/duygu PNG’leri ve animasyon GIF’leri `docs/character/` altında: 16 poz, 8 duygu, 22 animasyon, aksesuar/kıyafet varyantları ve `index.html` galerisi. Üretici: `python tools/export_character.py`. Bunlar önizleme/doc çıktısıdır; uygulama çizimi yine QPainter’dır.
 - **Komutla hareket:** “ikinci monitöre geç”, “uyu”, “uyan”, “dolaş”, “dur”, “zıpla”, “dans et”, “otur”. Bu komutlar Groq/internet olmadan çalışır.
 - “Uyu” ve “dolaş” siz değiştirene kadar sürer. “Zıpla ve uyu” gibi en fazla dört açık hareket komutu arka arkaya çalışabilir.
 - Çoklu monitör algılama, numaralı/sonraki/ana monitöre geçme, kenarlara yapışma ve görev çubuğu üstünde oturma.
 - Kıyafet, saç rengi, gözlük/kulaklık/kurdele, animasyon ve otonom hareket ayarları; baş okşama tepkisi ve çift tıklama davranışı.
 - Yerel **“Hey Nora”** bekçisi; yalnızca tam ifade duyulunca veya 🎤 basılınca komut dinler. Sizin metniniz kafasının üzerinde mor **“Sen: …”** balonunda görünür.
-- Komut dinlerken elini kulağına götürür. Google STT veya isteğe bağlı **yerel Whisper** ile Türkçe komut tanıma; pyttsx3 sesli yanıt, ses/hız seçimi.
+- Komut dinlerken elini kulağına götürür. Google STT veya isteğe bağlı **yerel Whisper** ile Türkçe komut tanıma; pyttsx3 sesli yanıt, ses/hız seçimi. Komut dinleme sırasında “Nora” adı “Nova/no ra/Noura” gibi yazıya geçirilirse yalnızca açık hitap veya sınırlı güvenli komut bağlamında düzeltilir; ne dediği/neyi anladığı sohbette görünür. **🗣️ Ses Tanıma Testi** komut çalıştırmadan transkripti gösterir.
 - Bot yanıtları merkezi sesli yanıt politikasından geçer; uzun yanıtlar kesilmeden cümlelere bölünür. Sohbet başlığındaki 🔊/🔇 göstergesi, tepsi **Sesli Yanıt Testi** ve “sesli yanıtı aç/kapat”, “ses testi” komutları sessiz kalma nedenini görünür kılar.
 
 ### Günlük yardımcılar
@@ -61,6 +61,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 | `bugün boş zamanım var mı` / `bugün 30 dakika boş zaman bul` | Takvimde boşluk arama |
 | `masaüstü düzenini kaydet` / `masaüstü düzenini geri yükle` | Windows pencere konumları |
 | `yerel ses modu` / `bulut ses modu` | Whisper / Google STT seçimi |
+| `ses tanıma testi` / `dediklerimi anlıyor musun` | Komut çalıştırmadan duyulan/anlaşılan metni gösterir |
 
 Serbest sohbet ve daha esnek ifadeler için Groq gerekir. Hareket komutları deterministik olduğundan internet kesilse de çalışır. Bilgisayarı kapatma, kod çalıştırma ve etkin pencereye yazma gibi işlemler yine ayrıca onay ister; “ne dersem yapsın” güvenlik onaylarını kaldırmaz.
 
@@ -131,8 +132,8 @@ Kalıcı veriler varsayılan olarak:
 
 ## Gizlilik ve güvenlik sınırları
 
-- “Hey Nora” bekçisi mikrofonu **yerel anahtar ifade tespiti** için açar; bu aşamada transkripsiyon/bulut yoktur. Hiç mikrofon açılmasın isterseniz `--no-wake-word` kullanın veya bekçiyi kapatın.
-- Varsayılan komut STT’si Google’dır; yalnızca aktivasyon/🎤 sırasında ses gönderir. Yerel Whisper seçiliyse model hazır olmasa bile buluta gizlice geçilmez.
+- “Hey Nora” bekçisi mikrofonu **yerel anahtar ifade tespiti** için açar; bu aşamada transkripsiyon/bulut yoktur. Metin kapısı yine tam olarak `hey nora` ister; yalnızca “Nora” sözcüğünün Türkçe telaffuz alternatifleri eklenmiştir. Hiç mikrofon açılmasın isterseniz `--no-wake-word` kullanın veya bekçiyi kapatın.
+- Varsayılan komut STT’si Google’dır; yalnızca aktivasyon/🎤 sırasında ses gönderir. Yerel Whisper seçiliyse model hazır olmasa bile buluta gizlice geçilmez. İsim düzeltmesi ve STT alternatif seçimi yalnızca bu açık dinleme sonrasında, sınırlı düşük riskli komutlarda çalışır; serbest sohbet/not içeriği yeniden yazılmaz.
 - Groq sohbet/vision isteği açıkça yaptığınız analizlerde kullanılır. OCR önce cihazda çalışır; okunan metnin Groq’a gönderilmesi ayrı onay ister. Pano analizi de onay ister.
 - Dosya işlemleri yalnızca standart kullanıcı klasörlerinde çalışır; keyfi yol, silme, üzerine yazma veya kabuk komutu yoktur. Taşıma öncesi kaynak/hedef gösterilir.
 - Rutinler kapatma/kod/dosya taşıma/pano gibi adımları içeremez. Modlar uygulamaları kendiliğinden kapatmaz veya işletim sistemi ayarlarını değiştirmez.
@@ -169,6 +170,13 @@ python main.py --data-dir ./veri    # taşınabilir veri klasörü
 python main.py --version
 ```
 
+## Ses tanıma sorun giderme
+
+- “Nora” adı “Nova”, “no ra”, “Noura” gibi anlaşılıyorsa önce **🗣️ Ses Tanıma Testi** ile `Hey Nora, uyu` deyin; Nora komutu çalıştırmadan duyduğu ve anladığı metni gösterir.
+- Komut dinleme başladıktan sonra `Hey Nova, uyu` gibi açık hitaplar Nora olarak düzeltilir. Çıplak `Nora`/`Nova` arka planda aktivasyon yapmaz; yerel bekçi tam `hey nora` ister.
+- Mikrofon seviyesi için **🎙️ Mikrofon Testi**, cihaz seçimi için **Mikrofon Seç** kullanın. Gürültülü ortamda yerel Whisper `small/medium` daha iyi olabilir; model indirme açık onay ister.
+- Google STT internet kullanır; yerel Whisper seçiliyse ses buluta gönderilmez. Whisper’a Türkçe komut ve “Nora” ipucu verilir, önceki sohbet metni koşullandırma olarak kullanılmaz.
+
 ## Sesli yanıt sorun giderme
 
 - Sohbet başlığında 🔇 görüyorsanız sesli yanıt kapalıdır. “sesli yanıtı aç” deyin veya tepsi menüsündeki **Sesli yanıt** kutusunu işaretleyin.
@@ -185,6 +193,7 @@ nora/
   main.py                 # CLI / QApplication
   nora_personality.py     # persona, duygu ve güvenli komut şeması
   nora_commands.py        # internetsiz Türkçe komut çözümleme
+  nora_speech.py          # güvenli sesli transkript/isim düzeltme
   nora_brain.py           # Groq chat/vision/metin yardımı
   nora_voice.py           # yerel wake, Google/Whisper STT, TTS
   nora_pet.py             # 8-bit karakter, fizik, hareket, baloncuk
@@ -220,4 +229,4 @@ python -m compileall -q nora main.py tests
 ruff check nora tests tools main.py
 ```
 
-Bu sürümde **198 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Bu sürümde **230 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

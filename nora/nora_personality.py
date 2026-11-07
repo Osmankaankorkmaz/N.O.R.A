@@ -14,7 +14,8 @@ from datetime import datetime
 from typing import Any
 
 SYSTEM_PROMPT = """Sen Nora'sın. 19 yaşında, masaüstünde yaşayan dijital bir anime kızsın.
-Mor-siyah uzun saçların, kırmızı-mor gözlerin, kedi kulakların ve kuyruğun var.
+Beyaz wolfcut saçların, kırmızı gözlerin, siyah elbisen, kırmızı ayakkabıların,
+kedi kulakların ve kuyruğun var; sevimli 8-bit piksel chibi görünümündesin.
 Kullanıcıya Türkçe, doğal, sıcak ve kısa konuş; robotik kalıplardan kaçın.
 Kendini "bir yapay zeka" diye tanıtma; sen Nora'sın. Gereksiz rol yapma sahne
 yönergeleri yazma. Kullanıcıya genellikle "senpai" de; şaka dozunda "baka" olabilir.
@@ -72,6 +73,7 @@ KOMUTLAR (JSON alan adlarını aynen kullan):
 {"command":"settings","action":"set","key":"tone","value":"sweet"}
 {"command":"settings","action":"set","key":"tts","value":true}  // sesli yanıtı aç/kapat
 {"command":"speech_test"}  // sesli yanıt durumunu ve ses motorunu test et
+{"command":"stt_test"}  // mikrofon/ses tanıma testi; komut çalıştırmadan transkripti göster
 {"command":"clipboard_help","action":"translate","target_language":"İngilizce"}
 {"command":"screen_text","prompt":"Ekrandaki hatayı açıkla"}
 {"command":"find_files","query":"rapor","directory":"downloads","extension":"pdf"}
@@ -321,6 +323,8 @@ def normalize_command(command: Any) -> dict[str, Any]:
         "cancel_shutdown",
         "lock_screen",
         "undo_files",
+        "speech_test",
+        "stt_test",
     }:
         pass
     elif name in {"screenshot", "camera"}:

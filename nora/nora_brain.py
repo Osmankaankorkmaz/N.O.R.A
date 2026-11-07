@@ -24,6 +24,7 @@ from .nora_personality import (
     normalize_command,
     parse_response,
 )
+from .nora_speech import repair_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,9 @@ class NoraBrain:
             return ChatReply(
                 "Şimdi dinleniyorum senpai. Sonra konuşuruz.", "sleepy", error=True
             )
+        # Voice capture already repairs transcripts; this also keeps direct
+        # library/offline callers consistent. Free-form chat is not rewritten.
+        message = repair_transcript(message, command_parser=parse_direct_command).text
         direct = parse_direct_command(message)
         if direct is not None:
             try:

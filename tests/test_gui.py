@@ -398,3 +398,63 @@ def test_tray_icon_refreshes_with_pixel_appearance(qapp, tmp_path):
     after = app.tray.icon().pixmap(64, 64).toImage()
     assert not after.isNull() and after != before
     app.shutdown()
+
+
+def test_voice_name_correction_is_visible_and_executes_safe_command(qapp, tmp_path):
+    from nora.nora_commands import parse_direct_command
+    from nora.nora_speech import repair_transcript
+
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    app.pet._timer.stop()
+    request_id = app._next_request()
+    app._listening = True
+    app._set_busy(True)
+    repair = repair_transcript(
+        "hey nova uyu", command_parser=parse_direct_command, request_id=request_id
+    )
+    app.voice.last_transcript = repair
+    app._on_listen_done(request_id, repair.text, "")
+    qapp.processEvents()
+    texts = [
+        row.findChild(QLabel).text()
+        for row in app._message_rows
+        if row.findChild(QLabel)
+    ]
+    assert any("Adımı “nova” diye duydum" in text for text in texts)
+    assert app.pet.state == PetState.SLEEP
+    app.shutdown()
+
+
+def test_speech_recognition_test_shows_transcript_without_executing(qapp, tmp_path):
+    from nora.nora_commands import parse_direct_command
+    from nora.nora_speech import repair_transcript
+
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    app.pet._timer.stop()
+    request_id = app._next_request()
+    app._stt_test_request = request_id
+    app._listening = True
+    app._set_busy(True)
+    repair = repair_transcript(
+        "hey nova uyu", command_parser=parse_direct_command, request_id=request_id
+    )
+    app.voice.last_transcript = repair
+    app._on_listen_done(request_id, repair.text, "")
+    qapp.processEvents()
+    texts = [
+        row.findChild(QLabel).text()
+        for row in app._message_rows
+        if row.findChild(QLabel)
+    ]
+    assert any("Ses tanıma testi" in text and "Duyduğum" in text for text in texts)
+    assert app.pet.state != PetState.SLEEP
+    assert not app._busy and not app._listening
+    app.shutdown()

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Any
 
+from .nora_speech import normalize_spoken_address
 from .nora_store import now_local
 
 ORDINALS = {
@@ -57,11 +58,12 @@ ACTIONS = {
         "uyur musun",
         "uyur",
         "uyku modu",
+        "uyku moduna geç",
         "uyumaya başla",
         "biraz uyu",
         "uyu artık",
     ),
-    "wake": ("uyan", "uyandır kendini", "uykudan çık", "ayağa kalk"),
+    "wake": ("uyan", "uyanır", "uyandır kendini", "uykudan çık", "ayağa kalk"),
     "walk": (
         "dolaş",
         "dolaşır mısın",
@@ -80,13 +82,16 @@ ACTIONS = {
         "dolaşmayı durdur",
         "hareketi durdur",
         "bekle",
+        "bekler",
+        "durur",
+        "hareketi kes",
     ),
     "jump": ("zıpla", "zıplar mısın", "zıplar", "bir zıpla", "hopla", "zıplama yap"),
     "dance": ("dans et", "dans eder misin", "dans eder", "oyna", "dans etmeye başla"),
-    "sit": ("otur", "biraz otur"),
-    "wave": ("selam ver", "el salla"),
-    "yawn": ("esne", "bir esne"),
-    "blink": ("göz kırp"),
+    "sit": ("otur", "oturur", "biraz otur", "otursana"),
+    "wave": ("selam ver", "el salla", "el sallar"),
+    "yawn": ("esne", "esner", "bir esne"),
+    "blink": ("göz kırp", "göz kırpar", "gözlerini kırp"),
 }
 ACTION_REPLIES = {
     "sleep": ("Uyku moduna geçiyorum senpai. z Z Z", "sleepy"),
@@ -113,8 +118,9 @@ class DirectCommand:
 
 
 def normalize_text(text: str) -> str:
+    value = normalize_spoken_address(str(text))
     value = (
-        unicodedata.normalize("NFKC", str(text))
+        unicodedata.normalize("NFKC", value)
         .translate(str.maketrans("Iİ", "ıi"))
         .lower()
         .strip()
@@ -122,8 +128,11 @@ def normalize_text(text: str) -> str:
     value = re.sub(r"[^\w\s%#+=.:/-]", " ", value)
     value = re.sub(r"\s+", " ", value).strip()
     value = re.sub(r"^(?:hey\s+)?nora\s*[,!: -]*\s*", "", value)
+    value = re.sub(r"^(?:lütfen|rica etsem)\s+", "", value).strip()
     value = re.sub(
-        r"(?:\s+(?:lütfen|hadisene|bakalım|senpai|nora|[.!?]))+$", "", value
+        r"(?:\s+(?:lütfen|rica etsem|hadisene|bakalım|senpai|nora|olur mu|tamam mı|[.!?]))+$",
+        "",
+        value,
     ).strip()
     value = re.sub(
         r"\s+(?:abilir|ebilir|ır|ir|ur|ür)?\s*(?:mısın|misin|musun|müsün)$", "", value
@@ -289,6 +298,7 @@ def parse_direct_command(
     )
     if match:
         token = (match.group(1) or "").strip()
+        token = re.sub(r"\s+(?:numaralı|numara|nolu)$", "", token).strip()
         target: Any = "next"
         if token in {"ana", "birincil", "primary"}:
             target = "primary"
@@ -513,6 +523,13 @@ def parse_direct_command(
         return _cmd("settings", action="set", key="tts", value=False)
     if low in {"ses testi", "sesli yanıt testi", "ses durumu", "neden konuşmuyorsun"}:
         return _cmd("speech_test")
+    if low in {
+        "ses tanıma testi",
+        "sesimi anlıyor musun",
+        "dediklerimi anlıyor musun",
+        "mikrofon tanıma testi",
+    }:
+        return _cmd("stt_test")
     if low in {"mikrofonu tamamen kapat", "hey nora bekçisini kapat"}:
         return _cmd("settings", action="set", key="wake_word", value=False)
     if low in {"hey nora bekçisini aç", "yerel mikrofon bekçisini aç"}:

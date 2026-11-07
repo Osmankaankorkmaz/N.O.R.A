@@ -207,6 +207,7 @@ class NoraApp(QWidget):
         self._listening = False
         self._wake_followup = False
         self._resume_wake_after_audio = False
+        self._stt_test_request = 0
         self._request_seq = 0
         self._active_request = 0
         self._workers: set[QThread] = set()
@@ -374,7 +375,7 @@ class NoraApp(QWidget):
         for text, tip, slot in (
             ("📸", "Ekran görüntüsü al ve analiz et", self._analyze_screen),
             ("📷", "Kameradan bir kare analiz et", self._analyze_camera),
-            ("🎤", "Sesli komut ver", self._start_listening),
+            ("🎤", "Sesli komut ver", lambda: self._start_listening()),
             ("💻", "Sistem bilgisi", self._show_system_info),
             ("─", "Sohbeti küçült", self.chat_window.hide),
             ("✕", "Sohbeti gizle (Nora çalışmaya devam eder)", self.chat_window.hide),
@@ -599,7 +600,10 @@ class NoraApp(QWidget):
         menu.addAction("Göster", self._show_pet)
         menu.addAction("Sohbet Aç", self.show_chat)
         menu.addAction("Ekran Analiz", self._analyze_screen)
-        menu.addAction("Sesli Komut", self._start_listening)
+        menu.addAction("Sesli Komut", lambda: self._start_listening())
+        menu.addAction(
+            "🗣️ Ses Tanıma Testi", lambda: self._start_listening(recognition_test=True)
+        )
         menu.addAction("🎙️ Mikrofon Testi", self._test_microphone)
         menu.addAction("🔊 Sesli Yanıt Testi", self._test_speech)
         menu.addAction("🎧 Mikrofon Seç", self._select_microphone)
@@ -900,7 +904,10 @@ class NoraApp(QWidget):
         )
         menu.addAction("📸 Ekran Analiz", self._analyze_screen)
         menu.addAction("📷 Kamera", self._analyze_camera)
-        menu.addAction("🎤 Sesli Komut", self._start_listening)
+        menu.addAction("🎤 Sesli Komut", lambda: self._start_listening())
+        menu.addAction(
+            "🗣️ Ses Tanıma Testi", lambda: self._start_listening(recognition_test=True)
+        )
         menu.addAction("🎙️ Mikrofon Testi", self._test_microphone)
         menu.addAction("🎧 Mikrofon Seç", self._select_microphone)
         menu.addAction("🩺 Groq Bağlantısı", self._check_groq)
@@ -990,7 +997,7 @@ class NoraApp(QWidget):
         self.input.clear()
         self._send_message(text)
 
-    def _send_message(self, text: str) -> None:
+    def _send_message(self, text: str, *, transcript_note: str = "") -> None:
         if self._closing or not text.strip():
             return
         direct = parse_direct_command(text)
@@ -1031,6 +1038,7 @@ class NoraApp(QWidget):
                 "reminder",
                 "stt_backend",
                 "game",
+                "stt_test",
             }
             for item in requested
         )
@@ -1040,6 +1048,8 @@ class NoraApp(QWidget):
         self.proactive.user_interacted()
         self.add_message(text, "user")
         self.pet.show_user_speech(text)
+        if transcript_note:
+            self.add_message(transcript_note, "bot", speak=False)
         if sequence_commands:
             for item in sequence_commands:
                 self._execute_command(item)
@@ -1119,6 +1129,8 @@ class NoraApp(QWidget):
             self._task_command(cmd)
         elif name == "speech_test":
             self._test_speech()
+        elif name == "stt_test":
+            self._start_listening(recognition_test=True)
         elif name == "settings":
             if cmd["action"] == "list":
                 prefs = self.store.preferences
@@ -1990,7 +2002,7 @@ class NoraApp(QWidget):
         self.pet.set_emotion(reply.emotion)
 
     # --------------------------------------------------------------------- voice
-    def _start_listening(self) -> None:
+    def _start_listening(self, *, recognition_test: bool = False) -> None:
         if self._closing or self._busy or self._listening:
             return
         self.show_chat()
@@ -2001,7 +2013,11 @@ class NoraApp(QWidget):
         self.mic_button.setStyleSheet("background: #e53950; border-color: #ff8fa3;")
         self.pet.set_listening(True)
         request_id = self._next_request()
+        self._stt_test_request = request_id if recognition_test else 0
+        if recognition_test:
+            self.pet.show_speech("Ses tanıma testi 🎙️ 'Hey Nora, uyu' de.", 4000)
         if not self.voice.listen_async(request_id):
+            self._stt_test_request = 0
             self._listening = False
             self.mic_button.setStyleSheet("")
             self.pet.set_listening(False)
@@ -2020,8 +2036,33 @@ class NoraApp(QWidget):
         self.pet.set_listening(False)
         self._set_busy(False)
         self.proactive.user_interacted()
+        repair = self.voice.last_transcript
+        if repair is not None and repair.request_id != request_id:
+            repair = None
+        if request_id == self._stt_test_request:
+            self._stt_test_request = 0
+            if text:
+                original = repair.original if repair is not None else text
+                message = (
+                    f"🎙️ Ses tanıma testi\nDuyduğum: “{original}”\nAnladığım: “{text}”"
+                )
+                if repair is not None and repair.address_corrected:
+                    message += "\nAdını yanlış duymuşum; Nora olarak düzelttim."
+                self.add_message(message, "bot", speak=False)
+                self.pet.show_speech(f"Şöyle anladım: {text}", 5000)
+                self.pet.set_emotion("happy")
+            else:
+                self.add_message(
+                    error or "Ses tanıma testinde ses duyamadım senpai. 🎤", "bot"
+                )
+                self.pet.set_emotion("sad")
+            self._resume_wake_after_audio_capture()
+            self._sync_pause()
+            return
         if text:
-            self._send_message(text)
+            self._send_message(
+                text, transcript_note=repair.notice() if repair is not None else ""
+            )
         else:
             message = error or "Seni duyamadım senpai. Bir daha dener misin? 🎤"
             self.add_message(message, "bot")

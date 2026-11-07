@@ -119,6 +119,10 @@ class NoraSettingsDialog(QDialog):
             (("google", "Google (internet gerekir)"), ("local", "Whisper (yerel)")),
             prefs,
         )
+        self.fields["stt_backend"].setToolTip(
+            "Yalnızca Hey Nora/🎤 sonrası dinler. Nora adı Nova/no ra gibi duyulursa "
+            "sınırlı komut bağlamında düzeltilir; Ses Tanıma Testi ile kontrol edebilirsin."
+        )
         self._combo(
             form,
             "whisper_model",

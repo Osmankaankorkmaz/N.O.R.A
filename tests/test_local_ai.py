@@ -31,6 +31,11 @@ def test_local_whisper_uses_turkish_and_in_memory_pcm(tmp_path, monkeypatch):
     speech._model = Model()
     assert speech.transcribe(b"\x00\x00" * 1600) == "hey nora uyu"
     assert calls[0][0] == 1600 and calls[0][1]["language"] == "tr"
+    kwargs = calls[0][1]
+    assert kwargs["beam_size"] == 5
+    assert "Nora" in kwargs["initial_prompt"]
+    assert kwargs["hotwords"] == "Nora"
+    assert kwargs["condition_on_previous_text"] is False
     speech.close()
 
 

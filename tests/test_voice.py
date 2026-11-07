@@ -122,7 +122,13 @@ class _FakeRecognizer:
             raise sr.WaitTimeoutError()
         return _FakeAudio()
 
-    def recognize_google(self, audio, language="tr-TR", endpoint=None):
+    def recognize_google(self, audio, language="tr-TR", endpoint=None, show_all=False):
+        if show_all:
+            return {
+                "results": [
+                    {"alternatives": [{"transcript": "nora selam", "confidence": 0.9}]}
+                ]
+            }
         return "nora selam"
 
 
@@ -331,4 +337,81 @@ def test_tts_failure_is_visible_not_silent(qapp, monkeypatch):
     assert _wait_voice(qapp, voice, lambda: not voice.is_speaking and bool(errors))
     assert "Ses motorunu açamadım" in errors[-1]
     assert voice.last_speech_error
+    voice.close()
+
+
+def test_wake_decoder_adds_turkish_nora_pronunciations_but_gate_stays_exact(qapp):
+    pytest = __import__("pytest")
+    pytest.importorskip("pocketsphinx")
+    voice = NoraVoice(tts_enabled=False)
+    decoder = voice._make_wake_decoder()
+    assert decoder.get_kws("nora_wake") == "hey nora"
+    assert decoder.lookup_word("nora(2)") == "N OW R AH"
+    assert decoder.lookup_word("nora(3)") == "N AO R AA"
+    assert not voice._is_wake_hypothesis("hey nova")
+    assert not voice._is_wake_hypothesis("hey no ra")
+    voice.close()
+
+
+def test_recognizer_allows_turkish_pause_between_name_and_command(qapp):
+    voice = NoraVoice(tts_enabled=False)
+    recognizer = voice._recognizer()
+    assert recognizer.pause_threshold >= 0.8
+    assert recognizer.non_speaking_duration >= 0.5
+    voice.close()
+
+
+def test_google_capture_repairs_misheard_name_without_extra_request(qapp, monkeypatch):
+    class Rec(_FakeRecognizer):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def recognize_google(
+            self, audio, language="tr-TR", endpoint=None, show_all=False
+        ):
+            self.calls += 1
+            assert show_all
+            return {
+                "results": [
+                    {
+                        "alternatives": [
+                            {
+                                "transcript": "hey nova ikinci monitöre geç",
+                                "confidence": 0.91,
+                            }
+                        ]
+                    }
+                ]
+            }
+
+    rec = Rec()
+    _install_fake_sr(monkeypatch, rec)
+    voice = NoraVoice(tts_enabled=False)
+    text, error = voice._capture(1, 2, 0.1, request_id=9)
+    assert not error
+    assert text == "Hey Nora, ikinci monitöre geç"
+    assert rec.calls == 1
+    assert voice.last_transcript.address_corrected
+    assert voice.last_transcript.heard_name == "nova"
+    assert voice.last_capture_info["address_corrected"] is True
+    voice.close()
+
+
+def test_local_capture_repairs_bare_misheard_name_only_for_safe_command(
+    qapp, monkeypatch
+):
+    from types import SimpleNamespace
+
+    _install_fake_sr(monkeypatch, _FakeRecognizer())
+    local = SimpleNamespace(transcribe=lambda pcm, rate: "nova uyu")
+    voice = NoraVoice(tts_enabled=False, stt_backend="local", local_speech=local)
+    text, error = voice._capture(1, 2, 0.1, request_id=3)
+    assert text == "uyu" and not error
+    assert voice.last_transcript.address_corrected
+    local = SimpleNamespace(transcribe=lambda pcm, rate: "nova nasılsın")
+    voice.local_speech = local
+    text, error = voice._capture(1, 2, 0.1, request_id=4)
+    assert text == "nova nasılsın" and not error
+    assert not voice.last_transcript.address_corrected
     voice.close()

@@ -19,6 +19,9 @@ from typing import Any, Callable
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
+from .nora_commands import parse_direct_command
+from .nora_speech import choose_transcript, google_candidates, repair_transcript
+
 logger = logging.getLogger(__name__)
 
 WAKE_PHRASE = "hey nora"
@@ -138,6 +141,7 @@ class NoraVoice(QObject):
                     "NORA_MICROPHONE_INDEX sayı olmalı; varsayılan mikrofon kullanılacak."
                 )
         self.last_capture_info: dict[str, Any] = {}
+        self.last_transcript = None
         try:
             self.wake_threshold = float(os.getenv("NORA_WAKE_THRESHOLD", "1e-20"))
         except ValueError:
@@ -466,11 +470,13 @@ class NoraVoice(QObject):
         recognizer = sr.Recognizer()
         recognizer.energy_threshold = energy
         recognizer.dynamic_energy_threshold = True
-        recognizer.pause_threshold = 0.6
-        recognizer.non_speaking_duration = 0.4
+        # Turkish commands often contain a short breath between the name and
+        # the action. Do not cut the phrase at the first 0.6 s pause.
+        recognizer.pause_threshold = 0.85
+        recognizer.non_speaking_duration = 0.55
         recognizer.dynamic_energy_adjustment_damping = 0.15
         recognizer.dynamic_energy_ratio = 1.5
-        recognizer.operation_timeout = 8
+        recognizer.operation_timeout = 12
         return recognizer
 
     def set_microphone_index(self, index: int | None) -> None:
@@ -496,6 +502,7 @@ class NoraVoice(QObject):
         wake: bool = False,
         request_id: int | None = None,
     ) -> tuple[str, str]:
+        self.last_transcript = None
         try:
             import speech_recognition as sr
         except ImportError:
@@ -539,12 +546,20 @@ class NoraVoice(QObject):
                     text = self.local_speech.transcribe(
                         audio.get_raw_data(convert_rate=16000, convert_width=2), 16000
                     )
-                    return (
+                    if not text:
+                        return (
+                            "",
+                            "Ses geldi ama yerel model sözleri çıkaramadı senpai. 🎤",
+                        )
+                    self.last_transcript = repair_transcript(
                         text,
-                        ""
-                        if text
-                        else "Ses geldi ama yerel model sözleri çıkaramadı senpai. 🎤",
+                        command_parser=parse_direct_command,
+                        request_id=request_id,
                     )
+                    self.last_capture_info["address_corrected"] = (
+                        self.last_transcript.address_corrected
+                    )
+                    return self.last_transcript.text, ""
                 except Exception as exc:
                     from .nora_local_ai import LocalModelMissing
 
@@ -555,10 +570,26 @@ class NoraVoice(QObject):
                         "",
                         "Yerel ses modeli çalıştırılamadı. Ayarları kontrol et; sesini buluta göndermedim. 🎤",
                     )
-            text = recognizer.recognize_google(
-                audio, language="tr-TR", endpoint=_GOOGLE_ENDPOINT
+            raw = recognizer.recognize_google(
+                audio, language="tr-TR", endpoint=_GOOGLE_ENDPOINT, show_all=True
             )
-            return str(text).strip(), ""
+            candidates = google_candidates(raw)
+            if not candidates:
+                raise sr.UnknownValueError()
+            self.last_transcript = choose_transcript(
+                candidates,
+                command_parser=parse_direct_command,
+                request_id=request_id,
+            )
+            self.last_capture_info.update(
+                {
+                    "alternatives": len(candidates),
+                    "selected_alternative": self.last_transcript.selected_alternative,
+                    "confidence": self.last_transcript.confidence,
+                    "address_corrected": self.last_transcript.address_corrected,
+                }
+            )
+            return self.last_transcript.text, ""
         except sr.WaitTimeoutError:
             logger.debug("Mikrofon dinleme zaman aşımı (wake=%s)", wake)
             if wake:
@@ -649,8 +680,8 @@ class NoraVoice(QObject):
 
     def listen_once(
         self,
-        timeout: float = 6,
-        phrase_time_limit: float = 10,
+        timeout: float = 8,
+        phrase_time_limit: float = 15,
         request_id: int | None = None,
     ) -> str:
         if self._closed or self.is_speaking or not self._mic_lock.acquire(timeout=1.5):
@@ -659,7 +690,7 @@ class NoraVoice(QObject):
         self._listening = True
         try:
             text, error = self._capture(
-                timeout, phrase_time_limit, ambient=0.5, request_id=request_id
+                timeout, phrase_time_limit, ambient=0.7, request_id=request_id
             )
             self._last_listen_error = error
             if error:
@@ -738,6 +769,12 @@ class NoraVoice(QObject):
         decoder = Decoder(config)
         if not decoder.lookup_word("nora"):
             decoder.add_word("nora", "N AO R AH", True)
+        # Turkish speakers may round/unround the vowels differently. These are
+        # still only pronunciations of "nora"; the spotted text gate remains the
+        # exact phrase "hey nora" and never accepts "nova" or "no ra".
+        for alternate, phones in (("nora(2)", "N OW R AH"), ("nora(3)", "N AO R AA")):
+            if not decoder.lookup_word(alternate):
+                decoder.add_word(alternate, phones, True)
         decoder.add_keyphrase("nora_wake", WAKE_PHRASE)
         decoder.activate_search("nora_wake")
         return decoder

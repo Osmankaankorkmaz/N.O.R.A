@@ -15,6 +15,15 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 WHISPER_MODELS = {"tiny", "base", "small", "medium"}
+# A short, static vocabulary hint helps Whisper spell the assistant's name and
+# common Turkish desktop commands correctly. It is not conversation history and
+# contains no user data; previous-text conditioning remains disabled.
+TURKISH_COMMAND_PROMPT = (
+    "Nora, Türkçe konuşan sevimli masaüstü asistanı. "
+    "Komutlar: Hey Nora; uyu, uyan, dolaş, dur, zıpla, dans et, otur, el salla; "
+    "ikinci monitöre geç, ana ekrana dön; sesli yanıtı aç, sesli yanıtı kapat; "
+    "ses tanıma testi, not al, hatırlatıcı kur, görev ekle."
+)
 
 
 class LocalModelMissing(RuntimeError):
@@ -104,7 +113,9 @@ class LocalSpeech:
             segments, _ = self._model.transcribe(
                 samples,
                 language="tr",
-                beam_size=3,
+                beam_size=5,
+                initial_prompt=TURKISH_COMMAND_PROMPT,
+                hotwords="Nora",
                 vad_filter=True,
                 condition_on_previous_text=False,
                 without_timestamps=True,
