@@ -21,8 +21,10 @@ sistem araçlarını çalıştıran Türkçe bir PyQt5 asistanıdır. Karakterin
   el sallama, sürüklenip düşme, göz kırpma, kuyruk/saç animasyonu ve duygu efektleri
 - 💬 Ayrı, taşınabilir, koyu mor/pembe sohbet penceresi; seçilebilir mesaj balonları
 - 🧠 Groq sohbeti, oturum içi son 30 mesajlık hafıza, duygu ve JSON komut protokolü
-- 🎙️ “Hey Nora” wake word dinleyicisi, tek seferlik Türkçe STT, pyttsx3 TTS;
-  dinlerken **elini kulağına götürür**, başını hafif eğer ve pembe ses dalgaları çıkarır
+- 🎙️ **Yerel “Hey Nora” bekçisi** (PocketSphinx): komut dinlemesi yalnızca tam
+  `Hey Nora` ifadesi duyulunca veya 🎤 düğmesine basınca başlar; bekçi sesi buluta göndermez
+- 🗨️ Sizin söylediğiniz/yazdığınız metin Nora’nın başının üzerinde **“Sen: …” balonunda** görünür
+- Nora komut dinlerken **elini kulağına götürür**, başını hafif eğer ve pembe ses dalgaları çıkarır
 - 🎧 Mikrofon cihazı seçimi ve yerel **Mikrofon Testi** (ses seviyesi/algılama kontrolü)
 - 📸 Ekran görüntüsü analizi — Nora’nın kendi pencereleri görüntüden önce gizlenir
 - 📷 Kamera analizi — kare yakalandıktan sonra kamera hemen serbest bırakılır
@@ -132,13 +134,14 @@ Değerleri kabuk ortamına aktar veya IDE çalıştırma ayarlarına ekle.
 | `GROQ_API_KEY` | yok | Groq anahtarı. Koda gömme, depoya commit’leme. |
 | `NORA_CHAT_MODEL` | `openai/gpt-oss-120b` | Sohbet modeli |
 | `NORA_VISION_MODEL` | `qwen/qwen3.8-27b` | Ekran/kamera analiz modeli |
-| `NORA_WAKE_WORD` | `1` | Sürekli “Hey Nora” dinleyicisi |
+| `NORA_WAKE_WORD` | `1` | Yerel “Hey Nora” bekçisi; komut dinlemesini kendiliğinden başlatmaz |
 | `NORA_TTS` | `1` | Sesli yanıt |
 | `NORA_PROACTIVE` | `1` | Nora’nın kendi kendine konuşması |
 | `NORA_OFFLINE` | `0` | Groq’a bağlanma; yalnızca temel deterministik komutlar |
 | `NORA_ALLOW_CODE` | `0` | Python kod çalıştırmaya izin ver; her kod yine onay ister |
 | `NORA_LOG_LEVEL` | `INFO` | Log ayrıntısı |
 | `NORA_MICROPHONE_INDEX` | boş | PyAudio giriş cihazı indeksi; boşsa varsayılan cihaz |
+| `NORA_WAKE_THRESHOLD` | `1e-20` | Yerel “Hey Nora” eşik hassasiyeti; yanlış tetiklenmede büyüt, hiç tetiklenmede küçült |
 
 Anahtar yoksa uygulama çökmez; çevrimdışı temel komut moduna geçer ve bunu açıkça
 söyler. Serbest AI sohbeti ve görsel analiz için anahtar gerekir.
@@ -146,7 +149,7 @@ söyler. Serbest AI sohbeti ve görsel analiz için anahtar gerekir.
 ### CLI seçenekleri
 
 ```bash
-python main.py --no-wake-word     # sürekli mikrofon dinleme kapalı
+python main.py --no-wake-word     # yerel Hey Nora bekçisi kapalı; yalnızca 🎤 dinler
 python main.py --no-tts           # sessiz mod
 python main.py --no-proactive     # proaktif replikler kapalı
 python main.py --offline          # Groq kapalı, temel komutlar açık
@@ -164,7 +167,10 @@ python -m nora.main --version
 - Sohbette **Enter** veya 💝 ile gönder.
 - 📸 ekran analizi, 📷 kamera, 🎤 tek seferlik sesli komut, 💻 sistem bilgisi.
 - Hızlı butonlar: 🔍 Ara, ⏰ Saat, 📝 Notlar, 🌤️ Hava.
-- “Hey Nora chrome aç” → doğrudan komut; sadece “Nora” → “Efendim senpai?” + dinleme.
+- Tam **“Hey Nora”** de → Nora görsel “Efendim senpai?” der ve komut dinlemeye geçer.
+  Sadece “Nora” demek artık tetiklemez. “Hey Nora chrome aç” dersen komut kısmı için
+  hemen ardından konuşman gerekir; bekçi yalnızca aktivasyon ifadesini yerel tanır.
+- Sizin konuşmanız kafasının üzerinde mor **“Sen: …”** balonunda gösterilir.
 - Nora dinlerken elini kulağına götürür; 🎙️ **Mikrofon Testi** sesi Google’a göndermeden
   yerel seviye ölçer, 🎧 **Mikrofon Seç** giriş cihazını değiştirir.
 - Sohbeti kapatmak uygulamayı kapatmaz. Tamamen kapatmak için tray/sağ tık → **Kapat**.
@@ -222,11 +228,14 @@ Etiketler kullanıcıya gösterilmez; duygu pet animasyonunu değiştirir. Komut
 
 ## Gizlilik ve güvenlik
 
-- **Sürekli dinleme varsayılan olarak açıktır** (proje belgesindeki davranış).
-  Sohbet başlığındaki 🎙️ simgesi ve tray menüsündeki “Hey Nora dinleyicisi” anahtarı
-  bunu görünür/kontrol edilebilir kılar. Başlangıçta `--no-wake-word` ile kapatabilirsin.
-- Wake word ve 🎤 dinlemesi sesi **Google Speech Recognition** servisine gönderir.
-  Nora ses kaydını diske yazmaz. İnternet yoksa STT çalışmaz.
+- **Yerel “Hey Nora” bekçisi varsayılan açıktır.** Mikrofonu yalnızca `hey nora`
+  anahtar ifadesini cihaz içinde dinlemek için kullanır; sohbeti yazıya dökmez ve
+  buluta ses göndermez. Komut dinleme/Google STT ancak aktivasyondan sonra veya 🎤 ile başlar.
+- Sohbet başlığındaki 🎙️ simgesi ve tray’deki **“Hey Nora bekçisi (yerel)”** anahtarı
+  bunu görünür/kontrol edilebilir kılar. Hiç mikrofon açılmasın istiyorsan `--no-wake-word`
+  kullan ve yalnızca 🎤 düğmesine bas.
+- 🎤 komut dinlemesi sesi **Google Speech Recognition** servisine gönderir. Nora ses
+  kaydını diske yazmaz. İnternet yoksa komut STT’si çalışmaz; yerel bekçi çalışmaya devam eder.
 - Sohbet Groq’a; ekran/kamera görselleri yalnızca sen istediğinde Groq vision’a gider.
   Kamera karesi yakalanır yakalanmaz serbest bırakılır. Ekran görüntüsünde Nora’nın
   kendi pencereleri önce gizlenir.
@@ -259,7 +268,8 @@ kamera, parlaklık ve çoklu monitör davranışı hedef masaüstünde doğrulan
 | `PyAudio` kurulmuyor | PortAudio başlıkları: `portaudio19-dev` / `brew install portaudio`; Windows’ta güncel wheel veya pipwin |
 | Ses yok | Windows SAPI sesi, Linux `espeak-ng`, macOS sistem sesi; tray’de “Sesli yanıt” açık mı? |
 | Mikrofon yok | OS mikrofon izni, doğru cihaz, PyAudio; 🎙️ dinleyiciyi kapatıp 🎤 ile dene |
-| “Hey Nora” tetiklenmiyor | Önce 🎙️ Mikrofon Testi: ses algılanıyor mu? 🎧 Mikrofon Seç ile doğru giriş cihazını seç; Windows Ses → Giriş seviyesi; internet (Google STT); Nora konuşurken dinleme duraklar |
+| “Hey Nora” tetiklenmiyor | Tam `hey nora` de; 🎙️ Mikrofon Testi ile ses seviyesini kontrol et; 🎧 Mikrofon Seç; `NORA_WAKE_THRESHOLD` değerini küçültmeyi dene; pocketsphinx kurulu mu? |
+| Yanlışlıkla tetikleniyor | `NORA_WAKE_THRESHOLD` değerini büyüt (örn. `1e-15`); mikrofon gürültüsünü azalt |
 | Ses geldi ama anlayamadı | Mikrofon seviyesi/gürültü; Windows varsayılan iletişim cihazı; `NORA_MICROPHONE_INDEX`; Google STT dil/anahtar sınırları |
 | Tray görünmüyor | Linux AppIndicator/extension; pet sağ tık menüsünü kullan |
 | Ekran/klavye çalışmıyor | Wayland kısıtları, macOS ekran kaydı/erişilebilirlik izinleri, X11 oturumu |
@@ -271,8 +281,9 @@ kamera, parlaklık ve çoklu monitör davranışı hedef masaüstünde doğrulan
 
 ## Bilinen sınırlar
 
-- Wake word yerel bir anahtar kelime modeli değil, bulut STT ile çalışır; gecikme ve
-  internet bağımlılığı vardır. Google’ın genel test anahtarı ileride değişebilir.
+- Yerel bekçi PocketSphinx’in İngilizce akustik modeliyle yalnızca `hey nora` ifadesini
+  tanır; Türkçe aksan/gürültüde hassasiyet ayarı gerekebilir. Komut transkripsiyonu hâlâ
+  Google STT kullanır; Google’ın genel test anahtarı ileride değişebilir.
 - `pyautogui` ekran görüntüsü öncelikli olarak birincil ekranı yakalar; pet çoklu
   monitörde mevcut ekranı algılar ama tüm sanal masaüstünü tek görüntüde analiz etmez.
 - Windows ses/parlaklık/kapatma birinci sınıf hedeflerdir; Linux/macOS araçları

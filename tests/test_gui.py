@@ -77,6 +77,7 @@ def test_app_offline_chat_and_command_flow(qapp, monkeypatch):
     app._send_message("not al: test notu")
     assert process_until(qapp, lambda: not app._busy)
     assert any("test notu" in n["text"] for n in app.tools.notes)
+    assert app.pet._bubble is not None and app.pet._bubble._speaker == "user"
     assert len(app._message_rows) >= 3
     app._reset_memory()
     assert len(app.brain.history) == 1
@@ -139,3 +140,13 @@ def test_ui_listening_signals_drive_pet(qapp):
     app._on_listening_stopped(5)
     assert app.pet.state != PetState.LISTENING
     app.shutdown()
+
+
+def test_user_speech_bubble_is_distinct(qapp):
+    pet = NoraPet()
+    pet._timer.stop()
+    pet.show_user_speech("merhaba nora")
+    assert pet._bubble is not None
+    assert pet._bubble._speaker == "user"
+    assert pet._bubble._text.startswith("Sen: ")
+    pet.shutdown()

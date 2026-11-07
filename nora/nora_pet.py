@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections import deque
 from enum import Enum, auto
 
 from PyQt5.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, pyqtSignal
@@ -52,10 +53,14 @@ class SpeechBubble(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setFocusPolicy(Qt.NoFocus)
         self._text = ""
+        self._speaker = "nora"
         self.setFixedSize(240, 76)
 
-    def set_text(self, text: str) -> None:
+    def set_text(self, text: str, speaker: str = "nora") -> None:
+        self._speaker = "user" if speaker == "user" else "nora"
         text = str(text).replace("\n", " ").strip()
+        if self._speaker == "user":
+            text = "Sen: " + text
         self._text = text[:60] + "..." if len(text) > 60 else text
         metrics = self.fontMetrics()
         rect = metrics.boundingRect(
@@ -63,7 +68,7 @@ class SpeechBubble(QWidget):
             Qt.TextWordWrap | Qt.AlignCenter,
             self._text,
         )
-        self.setFixedHeight(max(54, min(92, rect.height() + 26)))
+        self.setFixedHeight(max(54, min(96, rect.height() + 26)))
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -79,8 +84,12 @@ class SpeechBubble(QWidget):
         tail.lineTo(cx + 8, body.bottom() - 1)
         tail.closeSubpath()
         path.addPath(tail)
-        painter.setPen(QPen(QColor("#ff6b9d"), 1.5))
-        painter.setBrush(QColor("#fffafc"))
+        if self._speaker == "user":
+            painter.setPen(QPen(QColor("#7c4dff"), 1.6))
+            painter.setBrush(QColor("#f3ecff"))
+        else:
+            painter.setPen(QPen(QColor("#ff6b9d"), 1.5))
+            painter.setBrush(QColor("#fffafc"))
         painter.drawPath(path.simplified())
         painter.setPen(QColor("#3a204c"))
         font = QFont("Segoe UI", 9)
@@ -138,6 +147,7 @@ class NoraPet(QWidget):
         self._press_pos = QPoint()
         self._dragging = False
         self._bubble: SpeechBubble | None = None
+        self._speech_queue: deque[tuple[str, int, str]] = deque(maxlen=5)
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
         self._bubble_timer.timeout.connect(self._hide_bubble)
@@ -361,11 +371,30 @@ class NoraPet(QWidget):
                     )
         self.update()
 
-    def show_speech(self, text: str, duration: int = 5000) -> None:
+    def show_speech(
+        self, text: str, duration: int = 5000, speaker: str = "nora"
+    ) -> None:
+        text = str(text).strip()
+        if not text:
+            return
+        duration = max(1000, min(15000, int(duration)))
+        if speaker == "user":
+            # The user's own utterance takes priority over ambient Nora lines.
+            self._speech_queue.clear()
+            self._display_speech(text, duration, "user")
+        elif self._bubble is not None and self._bubble_timer.isActive():
+            self._speech_queue.append((text, duration, "nora"))
+        else:
+            self._display_speech(text, duration, "nora")
+
+    def show_user_speech(self, text: str, duration: int = 6000) -> None:
+        self.show_speech(text, duration, speaker="user")
+
+    def _display_speech(self, text: str, duration: int, speaker: str) -> None:
         if self._bubble is None:
             self._bubble = SpeechBubble()
-        self._bubble.set_text(text)
-        self._bubble_timer.start(max(1000, min(15000, int(duration))))
+        self._bubble.set_text(text, speaker)
+        self._bubble_timer.start(duration)
         self._update_bubble_position()
         if self.isVisible():
             self._bubble.show()
@@ -374,6 +403,9 @@ class NoraPet(QWidget):
     def _hide_bubble(self) -> None:
         if self._bubble:
             self._bubble.hide()
+        if self._speech_queue:
+            text, duration, speaker = self._speech_queue.popleft()
+            self._display_speech(text, duration, speaker)
 
     def _update_bubble_position(self) -> None:
         if not self._bubble or not self._bubble.isVisible():
@@ -410,6 +442,7 @@ class NoraPet(QWidget):
         self._timer.stop()
         self._click_timer.stop()
         self._bubble_timer.stop()
+        self._speech_queue.clear()
         if self._bubble:
             self._bubble.close()
         self.close()

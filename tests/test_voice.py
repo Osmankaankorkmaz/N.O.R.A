@@ -15,22 +15,46 @@ def test_tts_disabled_does_not_queue(qapp):
     voice.close()
 
 
-def test_wake_word_extracts_remainder_and_ignores_substrings(qapp, monkeypatch):
+def test_wake_phrase_is_exact_and_local():
+    assert NoraVoice._is_wake_hypothesis("hey nora")
+    assert NoraVoice._is_wake_hypothesis("HEY   NORA")
+    assert not NoraVoice._is_wake_hypothesis("nora")
+    assert not NoraVoice._is_wake_hypothesis("norayı severim")
+    assert not NoraVoice._is_wake_hypothesis("hey no ra")
+
+
+def test_local_wake_decoder_uses_exact_keyphrase(qapp):
+    pytest = __import__("pytest")
+    pytest.importorskip("pocketsphinx")
+    voice = NoraVoice(tts_enabled=False)
+    decoder = voice._make_wake_decoder()
+    assert decoder.get_kws("nora_wake") == "hey nora"
+    voice.close()
+
+
+def test_wake_loop_activates_without_cloud_stt(qapp, monkeypatch):
     voice = NoraVoice(tts_enabled=False)
     results = []
+    started = []
     done = threading.Event()
-    samples = iter([("Hey Nora chrome aç", ""), ("norayı severim", ""), ("nora", "")])
-    monkeypatch.setattr(voice, "_capture", lambda *a, **k: next(samples, ("", "")))
+    voice.listening_started.connect(started.append)
+
+    def fail_cloud(*a, **k):
+        raise AssertionError("wake watcher must not call cloud STT")
+
+    monkeypatch.setattr(voice, "_capture", fail_cloud)
+    sessions = iter([True, False, False])
+    monkeypatch.setattr(voice, "_local_wake_session", lambda: next(sessions, False))
 
     def callback(text):
         results.append(text)
-        if len(results) >= 2:
-            done.set()
+        done.set()
 
     voice.start_wake_word_listener(callback)
     assert done.wait(3)
     voice.stop_wake_word_listener()
-    assert results == ["chrome aç", ""]
+    assert results == [""]
+    assert not started  # background watcher is not command listening
     voice.close()
 
 
@@ -38,11 +62,11 @@ def test_wake_listener_pauses_while_speaking(qapp, monkeypatch):
     voice = NoraVoice(tts_enabled=False)
     called = []
     monkeypatch.setattr(
-        voice, "_capture", lambda *a, **k: called.append(True) or ("nora selam", "")
+        voice, "_local_wake_session", lambda: called.append(True) or True
     )
     with voice._speech_lock:
         voice._speech_pending = 1
-    voice.start_wake_word_listener(lambda text: called.append(text))
+    voice.start_wake_word_listener()
     time.sleep(0.3)
     assert not called
     with voice._speech_lock:

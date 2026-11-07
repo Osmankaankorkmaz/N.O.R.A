@@ -1,9 +1,9 @@
-"""Speech output, one-shot Turkish STT and a resilient wake-word listener.
+"""Speech output, local "Hey Nora" spotting, and explicit command listening.
 
-All microphone access is serialized.  The wake listener is a daemon thread and
-pauses while Nora speaks or a manual listening request owns the microphone.
-Audio is sent to Google Speech Recognition only when listening is enabled; Nora
-does not save recordings to disk.  Qt signals marshal results to the UI thread.
+The background wake watcher uses PocketSphinx locally: it does not transcribe
+conversation and does not send audio to Google.  Cloud STT starts only after the
+exact wake phrase is spotted or the user presses the microphone button.  All
+microphone access is serialized, and Qt signals marshal results to the UI thread.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
-_WAKE_RE = re.compile(r"(?<!\w)nora(?!\w)", re.IGNORECASE)
+WAKE_PHRASE = "hey nora"
+_WAKE_RE = re.compile(r"(?<!\w)hey\s+nora(?!\w)", re.IGNORECASE)
 _EMOJI_RE = re.compile(
     "[\U0001f000-\U0001faff\U00002600-\U000027bf\U0000fe00-\U0000fe0f\U0000200d]+"
 )
@@ -73,6 +74,10 @@ class NoraVoice(QObject):
                     "NORA_MICROPHONE_INDEX sayı olmalı; varsayılan mikrofon kullanılacak."
                 )
         self.last_capture_info: dict[str, Any] = {}
+        try:
+            self.wake_threshold = float(os.getenv("NORA_WAKE_THRESHOLD", "1e-20"))
+        except ValueError:
+            self.wake_threshold = 1e-20
 
     # --------------------------------------------------------------------- TTS
     @property
@@ -474,6 +479,68 @@ class NoraVoice(QObject):
         self._wake_thread.start()
         return True
 
+    @staticmethod
+    def _is_wake_hypothesis(text: str) -> bool:
+        normalized = (text or "").translate(str.maketrans("Iİ", "ıi")).lower()
+        return bool(_WAKE_RE.search(normalized))
+
+    def _make_wake_decoder(self) -> Any:
+        from pocketsphinx import Config, Decoder, set_loglevel
+
+        set_loglevel("ERROR")
+        config = Config()
+        config.set_int("-samprate", 16000)
+        config.set_float("-kws_threshold", self.wake_threshold)
+        decoder = Decoder(config)
+        if not decoder.lookup_word("nora"):
+            decoder.add_word("nora", "N AO R AH", True)
+        decoder.add_keyphrase("nora_wake", WAKE_PHRASE)
+        decoder.activate_search("nora_wake")
+        return decoder
+
+    def _wake_hyp_detected(self, decoder: Any) -> bool:
+        hyp = decoder.hyp()
+        return bool(hyp and self._is_wake_hypothesis(getattr(hyp, "hypstr", "")))
+
+    def _local_wake_session(self) -> bool:
+        """Block until the exact local keyphrase is heard; never call cloud STT."""
+        import speech_recognition as sr
+
+        decoder = self._make_wake_decoder()
+        with sr.Microphone(
+            sample_rate=16000, device_index=self.microphone_index
+        ) as source:
+            stream = source.stream
+            chunk = getattr(source, "CHUNK", 1024)
+            decoder.start_utt()
+            silent_chunks = 0
+            try:
+                while not self._wake_stop.is_set():
+                    if self._closed or self.is_speaking or self._listening:
+                        return False
+                    buf = stream.read(chunk, exception_on_overflow=False)
+                    if not buf:
+                        return False
+                    decoder.process_raw(buf, False, False)
+                    if self._wake_hyp_detected(decoder):
+                        return True
+                    if decoder.get_in_speech():
+                        silent_chunks = 0
+                    else:
+                        silent_chunks += 1
+                        if silent_chunks >= 15:
+                            decoder.end_utt()
+                            if self._wake_hyp_detected(decoder):
+                                return True
+                            decoder.start_utt()
+                            silent_chunks = 0
+                return False
+            finally:
+                try:
+                    decoder.end_utt()
+                except Exception:
+                    pass
+
     def _wake_loop(self) -> None:
         while not self._wake_stop.wait(0.05):
             if self._closed or self.is_speaking or self._listening:
@@ -484,43 +551,42 @@ class NoraVoice(QObject):
             try:
                 if self._closed or self.is_speaking or self._listening:
                     continue
-                text, error = self._capture(
-                    timeout=3,
-                    phrase_limit=4,
-                    ambient=0.3,
-                    energy=250,
-                    wake=True,
-                    request_id=0,
+                detected = self._local_wake_session()
+                if detected and not self._closed:
+                    # Local spotting only activates the assistant; the command
+                    # itself is captured afterwards by explicit cloud STT.
+                    self.wake_word_detected.emit("")
+                    if self._wake_callback:
+                        try:
+                            self._wake_callback("")
+                        except Exception:
+                            logger.exception("Wake word callback hatası")
+                    self._wake_stop.wait(0.5)
+            except ImportError:
+                self.voice_error.emit(
+                    "Yerel 'Hey Nora' için pocketsphinx kurulu değil senpai. requirements.txt'yi kur veya 🎤 düğmesini kullan. 🎙️"
                 )
-                if error:
-                    now = time.monotonic()
-                    if (
-                        error != self._last_wake_error
-                        or now - self._last_wake_error_at > 60
-                    ):
-                        self._last_wake_error = error
-                        self._last_wake_error_at = now
-                        self.voice_error.emit(error)
-                    self._wake_stop.wait(1)
-                    continue
-                if not text:
-                    continue
-                normalized = text.translate(str.maketrans("Iİ", "ıi")).lower()
-                match = _WAKE_RE.search(normalized)
-                if not match:
-                    continue
-                remainder = text[match.end() :].strip(" \t\r\n,.;:!?-")
-                self.wake_word_detected.emit(remainder)
-                if self._wake_callback:
-                    try:
-                        self._wake_callback(remainder)
-                    except Exception:
-                        logger.exception("Wake word callback hatası")
+                return
+            except OSError:
+                self._wake_error_rate_limited(
+                    "Yerel 'Hey Nora' mikrofonu açamadı senpai. Mikrofon izni/cihazını kontrol et. 🎙️"
+                )
+                self._wake_stop.wait(1)
             except Exception as exc:
-                logger.warning("Wake word döngüsü hatası: %s", type(exc).__name__)
+                logger.warning("Yerel wake word döngüsü hatası: %s", type(exc).__name__)
+                self._wake_error_rate_limited(
+                    "Yerel 'Hey Nora' bekçisiyle sorun yaşadım senpai. 🎤 düğmesi hâlâ çalışır. 🎙️"
+                )
                 self._wake_stop.wait(1)
             finally:
                 self._mic_lock.release()
+
+    def _wake_error_rate_limited(self, message: str) -> None:
+        now = time.monotonic()
+        if message != self._last_wake_error or now - self._last_wake_error_at > 60:
+            self._last_wake_error = message
+            self._last_wake_error_at = now
+            self.voice_error.emit(message)
 
     def stop_wake_word_listener(self) -> None:
         self._wake_stop.set()

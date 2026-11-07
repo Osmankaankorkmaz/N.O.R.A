@@ -415,7 +415,7 @@ class NoraApp(QWidget):
         self.tts_action = menu.addAction("Sesli yanıt")
         self.tts_action.setCheckable(True)
         self.tts_action.toggled.connect(self._toggle_tts)
-        self.wake_action = menu.addAction("Hey Nora dinleyicisi 🎙️")
+        self.wake_action = menu.addAction("Hey Nora bekçisi (yerel) 🎙️")
         self.wake_action.setCheckable(True)
         self.wake_action.toggled.connect(self._toggle_wake)
         self.proactive_action = menu.addAction("Proaktif konuşma")
@@ -644,9 +644,9 @@ class NoraApp(QWidget):
         active = self.voice.wake_word_active
         self.mic_indicator.setText("🎙️" if active else "🔇")
         self.mic_indicator.setToolTip(
-            "Hey Nora dinleyicisi AÇIK · ses Google STT'ye gönderilir"
+            "Yerel 'Hey Nora' bekçisi AÇIK · komut dinlemiyor, ses buluta gitmez"
             if active
-            else "Sürekli dinleme kapalı · yalnızca 🎤 ile dinlenir"
+            else "Hey Nora bekçisi kapalı · yalnızca 🎤 ile dinlenir"
         )
 
     def _toggle_tts(self, enabled: bool) -> None:
@@ -695,6 +695,7 @@ class NoraApp(QWidget):
             return
         self.proactive.user_interacted()
         self.add_message(text, "user")
+        self.pet.show_user_speech(text)
         self.pet.set_emotion("thinking")
         self._set_busy(True, "Düşünüyorum…")
         request_id = self._next_request()
@@ -1091,7 +1092,7 @@ class NoraApp(QWidget):
             speak=False,
         )
 
-    def _on_wake_word(self, remainder: str) -> None:
+    def _on_wake_word(self, remainder: str = "") -> None:
         if self._closing or self._busy or self._listening or self.voice.is_speaking:
             return
         self.proactive.user_interacted()
@@ -1099,13 +1100,10 @@ class NoraApp(QWidget):
         if remainder:
             self._send_message(remainder)
             return
-        self._wake_followup = True
-        text = "Efendim senpai? 🐾"
-        self.add_message(text, "bot")
-        self.pet.set_emotion("happy")
-        if not self.voice.speak(text):
-            self._wake_followup = False
-            self._start_listening()
+        # Do not speak first: TTS would occupy the microphone and could swallow
+        # the command immediately after "Hey Nora". Show a visual cue instead.
+        self.pet.show_speech("Efendim senpai? 🎙️", 2500)
+        self._start_listening()
 
     def _on_speaking_started(self) -> None:
         if self._closing:
@@ -1177,7 +1175,7 @@ class NoraApp(QWidget):
         self.voice.speak(text)
         if self.tray.isVisible():
             mic = (
-                "· 'Hey Nora' dinleyicisi açık 🎙️"
+                "· yerel 'Hey Nora' bekçisi açık 🎙️"
                 if self.voice.wake_word_active
                 else "· sürekli dinleme kapalı"
             )
