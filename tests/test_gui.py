@@ -108,3 +108,34 @@ def test_screen_analysis_without_key_does_not_capture(qapp, monkeypatch):
     assert not called
     assert not app._busy
     app.shutdown()
+
+
+def test_pet_listening_pose_is_sticky_and_renderable(qapp):
+    pet = NoraPet()
+    pet._timer.stop()
+    pet.set_listening(True)
+    assert pet.state == PetState.LISTENING
+    pet._choose_state()
+    assert pet.state == PetState.LISTENING
+    image = pet.grab().toImage()
+    assert any(
+        image.pixelColor(x, y).alpha() > 0
+        for x in range(80, 115, 3)
+        for y in range(40, 70, 3)
+    )
+    pet.set_speaking(True)
+    pet.set_speaking(False)
+    assert pet.state != PetState.LISTENING
+    pet.set_listening(False)
+    pet.shutdown()
+
+
+def test_ui_listening_signals_drive_pet(qapp):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    app._on_listening_started(5)
+    assert app.pet.state == PetState.LISTENING
+    app._on_listening_stopped(5)
+    assert app.pet.state != PetState.LISTENING
+    app.shutdown()

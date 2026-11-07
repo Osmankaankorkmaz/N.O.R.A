@@ -26,12 +26,19 @@ from .nora_personality import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CHAT_MODEL = "llama-3.3-70b-versatile"
-# The requested llama-3.2-90b-vision-preview was shut down on 2025-04-14.
+# Groq retired llama-3.3-70b-versatile for free/developer tiers on 2026-08-16.
 # https://console.groq.com/docs/deprecations
+DEFAULT_CHAT_MODEL = "openai/gpt-oss-120b"
+# The requested llama-3.2-90b-vision-preview was shut down on 2025-04-14.
 # https://console.groq.com/docs/vision
 DEFAULT_VISION_MODEL = "qwen/qwen3.8-27b"
 LEGACY_VISION_MODELS = {
+    "llama-3.2-90b-vision-preview": DEFAULT_VISION_MODEL,
+    "llama-3.2-11b-vision-preview": DEFAULT_VISION_MODEL,
+}
+MODEL_REPLACEMENTS = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
     "llama-3.2-90b-vision-preview": DEFAULT_VISION_MODEL,
     "llama-3.2-11b-vision-preview": DEFAULT_VISION_MODEL,
 }
@@ -58,10 +65,19 @@ class NoraBrain:
         client: Any = None,
         timeout: float = 20.0,
     ) -> None:
-        self.chat_model = chat_model or os.getenv("NORA_CHAT_MODEL", DEFAULT_CHAT_MODEL)
-        requested_vision = vision_model or os.getenv(
-            "NORA_VISION_MODEL", DEFAULT_VISION_MODEL
-        )
+        self.chat_model = (
+            chat_model or os.getenv("NORA_CHAT_MODEL") or DEFAULT_CHAT_MODEL
+        ).strip()
+        if self.chat_model in {"llama-3.3-70b-versatile", "llama-3.1-8b-instant"}:
+            logger.warning(
+                "%s free/developer hesaplarında emekli; önerilen model %s. "
+                "Enterprise sözleşmen yoksa NORA_CHAT_MODEL değerini değiştir.",
+                self.chat_model,
+                MODEL_REPLACEMENTS[self.chat_model],
+            )
+        requested_vision = (
+            vision_model or os.getenv("NORA_VISION_MODEL") or DEFAULT_VISION_MODEL
+        ).strip()
         self.vision_model = LEGACY_VISION_MODELS.get(requested_vision, requested_vision)
         if self.vision_model != requested_vision:
             logger.warning(
@@ -115,6 +131,13 @@ class NoraBrain:
             return f"Groq · {self.chat_model}"
         return f"Çevrimdışı · temel komutlar ({self._unavailable_reason or 'bağlantı kapalı'})"
 
+    @staticmethod
+    def _reasoning_kwargs(model: str) -> dict[str, Any]:
+        # Keep the desktop reply short and do not display hidden reasoning.
+        if model.startswith("openai/gpt-oss"):
+            return {"reasoning_effort": "low", "include_reasoning": False}
+        return {}
+
     def _messages(self) -> list[dict[str, Any]]:
         with self._lock:
             return [self.history[0], *self.history[1:][-HISTORY_LIMIT:]]
@@ -150,6 +173,7 @@ class NoraBrain:
                 temperature=0.85,
                 max_completion_tokens=800,
                 top_p=0.9,
+                **self._reasoning_kwargs(self.chat_model),
             )
             raw = response.choices[0].message.content or ""
             text, emotion, command = parse_response(raw)
@@ -178,8 +202,7 @@ class NoraBrain:
                     and self.history[-1].get("content") == message
                 ):
                     self.history.pop()
-            logger.warning("Groq sohbet isteği başarısız: %s", type(exc).__name__)
-            return self._connection_error(exc)
+            return self._connection_error(exc, self.chat_model)
 
     def analyze_image(self, image_base64: str, prompt: str | None = None) -> ChatReply:
         if not self.available:
@@ -248,6 +271,7 @@ class NoraBrain:
                 temperature=0.85,
                 max_completion_tokens=800,
                 top_p=0.9,
+                **self._reasoning_kwargs(self.vision_model),
             )
             raw = response.choices[0].message.content or ""
             text, emotion, _ = parse_response(raw)
@@ -255,8 +279,7 @@ class NoraBrain:
                 text or "Hımm, görüntüde anlatacak bir şey bulamadım.", emotion
             )
         except Exception as exc:
-            logger.warning("Groq görsel isteği başarısız: %s", type(exc).__name__)
-            return self._connection_error(exc)
+            return self._connection_error(exc, self.vision_model)
 
     def reset_memory(self) -> None:
         with self._lock:
@@ -275,22 +298,109 @@ class NoraBrain:
                 logger.debug("Groq istemcisi kapatılırken hata", exc_info=True)
 
     @staticmethod
-    def _connection_error(exc: Exception) -> ChatReply:
+    def _provider_detail(exc: Exception) -> tuple[str, str]:
+        """Return a bounded, redacted provider message and error code."""
+        body = getattr(exc, "body", None)
+        message = ""
+        code = ""
+        if isinstance(body, dict):
+            error = body.get("error")
+            if isinstance(error, dict):
+                message = str(error.get("message") or "")
+                code = str(error.get("code") or error.get("type") or "")
+            elif isinstance(error, str):
+                message = error
+        if not message:
+            # Do not echo arbitrary exception text (it may contain local paths,
+            # request material, or secrets). Provider API errors carry .message.
+            message = str(getattr(exc, "message", "") or "")
+        message = re.sub(r"gsk_[A-Za-z0-9_\-]+", "[gizli anahtar]", message)
+        message = re.sub(r"(?i)bearer\s+[A-Za-z0-9._\-]+", "Bearer [gizli]", message)
+        message = re.sub(r"(?i)api[_-]?key\s*[:=]\s*\S+", "api_key=[gizli]", message)
+        message = " ".join(message.split())[:280]
+        return message, code[:80]
+
+    def _connection_error(self, exc: Exception, model: str | None = None) -> ChatReply:
         status = getattr(exc, "status_code", None)
         name = type(exc).__name__.lower()
+        detail, code = self._provider_detail(exc)
+        logger.warning(
+            "Groq isteği başarısız model=%s status=%s tip=%s kod=%s ayrıntı=%s",
+            model or "?",
+            status or "?",
+            type(exc).__name__,
+            code or "?",
+            detail or "?",
+        )
         if status == 401 or "authentication" in name:
             text = "Pff, Groq anahtarı kabul edilmedi senpai. GROQ_API_KEY değerini kontrol et. 🔑"
+        elif status == 403 or "permission" in name:
+            text = "Bu anahtarın modele erişimi yok gibi senpai. Groq proje/plan izinlerini kontrol et. 🔑"
         elif status == 429 or "ratelimit" in name:
             text = "Biraz hızlı gittik senpai. Groq limitine takıldık, biraz sonra tekrar dene. 🐾"
         elif status == 404 or "notfound" in name:
-            text = "Bu model artık yok gibi senpai. NORA_CHAT_MODEL / NORA_VISION_MODEL ayarını kontrol et. 😾"
+            replacement = MODEL_REPLACEMENTS.get(model or "")
+            lowered = detail.lower()
+            retired = code in {"model_decommissioned", "model_not_found"} or any(
+                token in lowered
+                for token in (
+                    "decommissioned",
+                    "no longer supported",
+                    "does not exist",
+                    "not found",
+                )
+            )
+            if retired:
+                text = (
+                    f"Groq bu modeli kapatmış senpai: {model or 'bilinmeyen model'}. "
+                    f"Önerilen: {replacement or 'güncel bir Groq modeli'}. "
+                    "NORA_CHAT_MODEL / NORA_VISION_MODEL ayarını değiştir veya sağ tık → Groq Bağlantısı ile kontrol et. 😾"
+                )
+            else:
+                text = (
+                    f"Groq 404 döndü senpai (model: {model or '?'}). Model adı veya anahtarın model erişimi sorunlu olabilir. "
+                    "Sağ tık → Groq Bağlantısı ile listedeki modelleri kontrol et. 😾"
+                )
         elif "timeout" in name or "connection" in name:
             text = (
                 "Bağlantıya ulaşamadım senpai. İnterneti kontrol et, ben buradayım. 🐾"
             )
         else:
             text = "Heh, beynimle bağlantıda küçük bir pürüz çıktı. Bir daha dener misin senpai?"
+        if detail and status not in {401, 403}:
+            text += f"\nGroq: {detail}"
+
         return ChatReply(text, "sad", error=True)
+
+    def diagnose_connection(self) -> str:
+        """List models visible to this key; run in a worker, never on UI thread."""
+        if not self.available:
+            return f"Groq kapalı senpai. {self.status}"
+        try:
+            response = self._client.models.list()
+            data = getattr(response, "data", response) or []
+            ids = sorted({str(getattr(item, "id", item)) for item in data})
+        except Exception as exc:
+            detail, code = self._provider_detail(exc)
+            logger.warning(
+                "Groq model listesi alınamadı: %s %s", type(exc).__name__, code
+            )
+            return f"Groq model listesi alınamadı senpai. {detail or 'Bağlantıyı/anahtarı kontrol et.'} 🐾"
+        lines = ["Groq bağlantısı tamam senpai~ 🩺"]
+        for label, model in (
+            ("Sohbet", self.chat_model),
+            ("Vision", self.vision_model),
+        ):
+            ok = model in ids
+            lines.append(f"{label}: {model} {'✓ listede' if ok else '✗ listede yok'}")
+            if not ok:
+                replacement = MODEL_REPLACEMENTS.get(model)
+                if replacement:
+                    lines.append(f"  Önerilen: {replacement}")
+        lines.append(f"Anahtarınla erişilebilen model sayısı: {len(ids)}")
+        if ids:
+            lines.append("İlk modeller: " + ", ".join(ids[:8]))
+        return "\n".join(lines)
 
     def _offline_reply(self, message: str) -> ChatReply:
         """Small transparent fallback, not a replacement for the AI brain."""

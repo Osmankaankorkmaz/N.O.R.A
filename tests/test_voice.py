@@ -73,3 +73,92 @@ def test_listen_async_reserves_microphone_before_thread(qapp, monkeypatch):
         time.sleep(0.02)
     assert not voice.is_listening
     voice.close()
+
+
+class _FakeAudio:
+    sample_rate = 16000
+    frame_data = b"\x00\x10" * 800  # little-endian 16-bit samples, amplitude 4096
+
+
+class _FakeRecognizer:
+    def __init__(self):
+        self.energy_threshold = 250
+        self.timeout = False
+
+    def adjust_for_ambient_noise(self, source, duration=0.5):
+        pass
+
+    def listen(self, source, timeout=6, phrase_time_limit=10):
+        if self.timeout:
+            import speech_recognition as sr
+
+            raise sr.WaitTimeoutError()
+        return _FakeAudio()
+
+    def recognize_google(self, audio, language="tr-TR", endpoint=None):
+        return "nora selam"
+
+
+class _FakeMicrophone:
+    def __init__(self, sample_rate=16000, device_index=None):
+        self.device_index = device_index
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    @staticmethod
+    def list_microphone_names():
+        return ["Test Mic"]
+
+
+def _install_fake_sr(monkeypatch, recognizer):
+    import sys
+    from types import SimpleNamespace
+    import speech_recognition as real_sr
+
+    fake = SimpleNamespace(
+        Recognizer=lambda: recognizer,
+        Microphone=_FakeMicrophone,
+        WaitTimeoutError=real_sr.WaitTimeoutError,
+        UnknownValueError=real_sr.UnknownValueError,
+        RequestError=real_sr.RequestError,
+    )
+    monkeypatch.setitem(sys.modules, "speech_recognition", fake)
+
+
+def test_capture_emits_listening_signals(qapp, monkeypatch):
+    voice = NoraVoice(tts_enabled=False)
+    rec = _FakeRecognizer()
+    _install_fake_sr(monkeypatch, rec)
+    started, stopped = [], []
+    voice.listening_started.connect(started.append)
+    voice.listening_stopped.connect(stopped.append)
+    text, error = voice._capture(6, 10, 0.1, request_id=5)
+    assert text == "nora selam" and not error
+    assert started == [5] and stopped == [5]
+    assert voice.last_capture_info["bytes"] > 0
+    voice.close()
+
+
+def test_manual_timeout_is_reported_but_wake_timeout_is_silent(qapp, monkeypatch):
+    voice = NoraVoice(tts_enabled=False)
+    rec = _FakeRecognizer()
+    rec.timeout = True
+    _install_fake_sr(monkeypatch, rec)
+    text, error = voice._capture(6, 10, 0.1, wake=False, request_id=5)
+    assert not text and "ses algılamadı" in error
+    text, error = voice._capture(3, 4, 0.1, wake=True, request_id=0)
+    assert not text and not error
+    voice.close()
+
+
+def test_microphone_test_is_local_and_reports_level(qapp, monkeypatch):
+    voice = NoraVoice(tts_enabled=False)
+    _install_fake_sr(monkeypatch, _FakeRecognizer())
+    result = voice.test_microphone(timeout=1)
+    assert "Sesini algıladım" in result
+    assert voice.last_capture_info["heard"] is True
+    voice.close()

@@ -4,12 +4,14 @@ Nora; masaüstünde gezen, sohbet eden, sesli komut alan, ekran/kamera analizi y
 sistem araçlarını çalıştıran Türkçe bir PyQt5 asistanıdır. Karakterin tamamı
 **QPainter ile kod içinde çizilir**; harici sprite, resim veya ses dosyası gerekmez.
 
-> **Önemli model notu:** İlk proje belgesindeki `llama-3.2-90b-vision-preview`
-> 14 Nisan 2025’te kapatıldı. Bu uygulama onun yerine Groq’un güncel resmî vision
-> belgesinde listelenen `qwen/qwen3.8-27b` modelini varsayılan kullanır ve eski model
-> adını otomatik olarak yeni modele yönlendirir. İstersen `NORA_VISION_MODEL` ile
-> değiştirebilirsin. Sohbet modeli belgedeki gibi `llama-3.3-70b-versatile` kaldı.
-> Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [1](https://console.groq.com/docs/vision)
+> **Önemli model notu:** `llama-3.3-70b-versatile` Groq’un free/developer
+> hesapları için **16 Ağustos 2026’da emekliye ayrıldı**; önerilen yerine
+> `openai/gpt-oss-120b` geçti. Varsayılan sohbet modeli artık budur. Enterprise
+> sözleşmen varsa `NORA_CHAT_MODEL` ile eski modeli açıkça seçebilirsin. Vision tarafında
+> eski `llama-3.2-90b-vision-preview` yerine `qwen/qwen3.8-27b` kullanılır.
+> `NotFoundError` artık güvenli Groq hata ayrıntısını gösterir; sağ tık →
+> **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler.
+> Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [1](https://console.groq.com/docs/vision)
 
 ---
 
@@ -19,7 +21,9 @@ sistem araçlarını çalıştıran Türkçe bir PyQt5 asistanıdır. Karakterin
   el sallama, sürüklenip düşme, göz kırpma, kuyruk/saç animasyonu ve duygu efektleri
 - 💬 Ayrı, taşınabilir, koyu mor/pembe sohbet penceresi; seçilebilir mesaj balonları
 - 🧠 Groq sohbeti, oturum içi son 30 mesajlık hafıza, duygu ve JSON komut protokolü
-- 🎙️ “Hey Nora” wake word dinleyicisi, tek seferlik Türkçe STT, pyttsx3 TTS
+- 🎙️ “Hey Nora” wake word dinleyicisi, tek seferlik Türkçe STT, pyttsx3 TTS;
+  dinlerken **elini kulağına götürür**, başını hafif eğer ve pembe ses dalgaları çıkarır
+- 🎧 Mikrofon cihazı seçimi ve yerel **Mikrofon Testi** (ses seviyesi/algılama kontrolü)
 - 📸 Ekran görüntüsü analizi — Nora’nın kendi pencereleri görüntüden önce gizlenir
 - 📷 Kamera analizi — kare yakalandıktan sonra kamera hemen serbest bırakılır
 - 💻 CPU/RAM/disk/batarya bilgisi ve proaktif sistem uyarıları
@@ -126,7 +130,7 @@ Değerleri kabuk ortamına aktar veya IDE çalıştırma ayarlarına ekle.
 | Değişken | Varsayılan | Açıklama |
 |---|---:|---|
 | `GROQ_API_KEY` | yok | Groq anahtarı. Koda gömme, depoya commit’leme. |
-| `NORA_CHAT_MODEL` | `llama-3.3-70b-versatile` | Sohbet modeli |
+| `NORA_CHAT_MODEL` | `openai/gpt-oss-120b` | Sohbet modeli |
 | `NORA_VISION_MODEL` | `qwen/qwen3.8-27b` | Ekran/kamera analiz modeli |
 | `NORA_WAKE_WORD` | `1` | Sürekli “Hey Nora” dinleyicisi |
 | `NORA_TTS` | `1` | Sesli yanıt |
@@ -134,6 +138,7 @@ Değerleri kabuk ortamına aktar veya IDE çalıştırma ayarlarına ekle.
 | `NORA_OFFLINE` | `0` | Groq’a bağlanma; yalnızca temel deterministik komutlar |
 | `NORA_ALLOW_CODE` | `0` | Python kod çalıştırmaya izin ver; her kod yine onay ister |
 | `NORA_LOG_LEVEL` | `INFO` | Log ayrıntısı |
+| `NORA_MICROPHONE_INDEX` | boş | PyAudio giriş cihazı indeksi; boşsa varsayılan cihaz |
 
 Anahtar yoksa uygulama çökmez; çevrimdışı temel komut moduna geçer ve bunu açıkça
 söyler. Serbest AI sohbeti ve görsel analiz için anahtar gerekir.
@@ -160,6 +165,8 @@ python -m nora.main --version
 - 📸 ekran analizi, 📷 kamera, 🎤 tek seferlik sesli komut, 💻 sistem bilgisi.
 - Hızlı butonlar: 🔍 Ara, ⏰ Saat, 📝 Notlar, 🌤️ Hava.
 - “Hey Nora chrome aç” → doğrudan komut; sadece “Nora” → “Efendim senpai?” + dinleme.
+- Nora dinlerken elini kulağına götürür; 🎙️ **Mikrofon Testi** sesi Google’a göndermeden
+  yerel seviye ölçer, 🎧 **Mikrofon Seç** giriş cihazını değiştirir.
 - Sohbeti kapatmak uygulamayı kapatmaz. Tamamen kapatmak için tray/sağ tık → **Kapat**.
 
 Örnek ifadeler:
@@ -252,11 +259,13 @@ kamera, parlaklık ve çoklu monitör davranışı hedef masaüstünde doğrulan
 | `PyAudio` kurulmuyor | PortAudio başlıkları: `portaudio19-dev` / `brew install portaudio`; Windows’ta güncel wheel veya pipwin |
 | Ses yok | Windows SAPI sesi, Linux `espeak-ng`, macOS sistem sesi; tray’de “Sesli yanıt” açık mı? |
 | Mikrofon yok | OS mikrofon izni, doğru cihaz, PyAudio; 🎙️ dinleyiciyi kapatıp 🎤 ile dene |
-| “Hey Nora” tetiklenmiyor | İnternet (Google STT), mikrofon izni, Nora konuşurken dinlemenin duraklaması |
+| “Hey Nora” tetiklenmiyor | Önce 🎙️ Mikrofon Testi: ses algılanıyor mu? 🎧 Mikrofon Seç ile doğru giriş cihazını seç; Windows Ses → Giriş seviyesi; internet (Google STT); Nora konuşurken dinleme duraklar |
+| Ses geldi ama anlayamadı | Mikrofon seviyesi/gürültü; Windows varsayılan iletişim cihazı; `NORA_MICROPHONE_INDEX`; Google STT dil/anahtar sınırları |
 | Tray görünmüyor | Linux AppIndicator/extension; pet sağ tık menüsünü kullan |
 | Ekran/klavye çalışmıyor | Wayland kısıtları, macOS ekran kaydı/erişilebilirlik izinleri, X11 oturumu |
 | Parlaklık değişmiyor | Harici ekran/DDR desteği değişir; `screen-brightness-control` uyumluluğu |
-| Groq model hatası | `NORA_CHAT_MODEL` / `NORA_VISION_MODEL` güncel mi? Eski vision preview kapatıldı [1](https://console.groq.com/docs/deprecations) |
+| Groq `NotFoundError` | Sağ tık → 🩺 Groq Bağlantısı. `llama-3.3-70b-versatile` free/dev için 16.08.2026’da kapatıldı; `openai/gpt-oss-120b` kullan [1](https://console.groq.com/docs/deprecations) |
+| `comtypes` INFO logları | Windows COM önbelleği bilgilendirmesidir; artık WARNING seviyesine çekildi, hata değildir |
 | `libGL.so.1` hatası | Linux’ta `libgl1`/Mesa kur; sanal makinede offscreen test için Qt GUI paketleri gerekir |
 | OpenCV çakışması | Aynı ortamda hem `opencv-python` hem `opencv-python-headless` kurma; birini seç |
 

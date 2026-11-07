@@ -164,6 +164,7 @@ class NoraApp(QWidget):
         self._busy = False
         self._listening = False
         self._wake_followup = False
+        self._resume_wake_after_audio = False
         self._request_seq = 0
         self._active_request = 0
         self._workers: set[QThread] = set()
@@ -390,6 +391,9 @@ class NoraApp(QWidget):
         menu.addAction("Sohbet Aç", self.show_chat)
         menu.addAction("Ekran Analiz", self._analyze_screen)
         menu.addAction("Sesli Komut", self._start_listening)
+        menu.addAction("🎙️ Mikrofon Testi", self._test_microphone)
+        menu.addAction("🎧 Mikrofon Seç", self._select_microphone)
+        menu.addAction("🩺 Groq Bağlantısı", self._check_groq)
         emotions = menu.addMenu("Duygular")
         emotions.setStyleSheet(self._menu_style())
         labels = {
@@ -444,6 +448,8 @@ class NoraApp(QWidget):
         self.voice.speaking_finished.connect(self._on_speaking_finished)
         self.voice.speech_error.connect(self._on_voice_error)
         self.voice.voice_error.connect(self._on_voice_error)
+        self.voice.listening_started.connect(self._on_listening_started)
+        self.voice.listening_stopped.connect(self._on_listening_stopped)
         self.voice.listening_finished.connect(self._on_listen_done)
         self.voice.wake_word_detected.connect(self._on_wake_word)
         self.tools.timer_finished.connect(self._on_timer)
@@ -617,6 +623,9 @@ class NoraApp(QWidget):
         menu.addAction("📸 Ekran Analiz", self._analyze_screen)
         menu.addAction("📷 Kamera", self._analyze_camera)
         menu.addAction("🎤 Sesli Komut", self._start_listening)
+        menu.addAction("🎙️ Mikrofon Testi", self._test_microphone)
+        menu.addAction("🎧 Mikrofon Seç", self._select_microphone)
+        menu.addAction("🩺 Groq Bağlantısı", self._check_groq)
         menu.addAction("💻 Sistem Bilgisi", self._show_system_info)
         menu.addAction("📝 Notlarım", self._show_notes)
         menu.addAction("🌤️ Hava Durumu", self._quick_weather)
@@ -946,14 +955,17 @@ class NoraApp(QWidget):
         self.show_chat()
         self.proactive.user_interacted()
         self._listening = True
-        self._set_busy(True, "Dinliyorum senpai…")
+        self._pause_wake_for_audio()
+        self._set_busy(True, "Mikrofon açılıyor…")
         self.mic_button.setStyleSheet("background: #e53950; border-color: #ff8fa3;")
-        self.pet.set_emotion("surprised")
+        self.pet.set_listening(True)
         request_id = self._next_request()
         if not self.voice.listen_async(request_id):
             self._listening = False
             self.mic_button.setStyleSheet("")
+            self.pet.set_listening(False)
             self._set_busy(False)
+            self._resume_wake_after_audio_capture()
             self.add_message(
                 "Şu an dinleyemiyorum senpai. Mikrofon meşgul veya ses açık. 🎤", "bot"
             )
@@ -964,6 +976,7 @@ class NoraApp(QWidget):
             return
         self._listening = False
         self.mic_button.setStyleSheet("")
+        self.pet.set_listening(False)
         self._set_busy(False)
         self.proactive.user_interacted()
         if text:
@@ -973,7 +986,110 @@ class NoraApp(QWidget):
             self.add_message(message, "bot")
             self.pet.set_emotion("sad")
             self.voice.speak(message)
+        self._resume_wake_after_audio_capture()
         self._sync_pause()
+
+    def _pause_wake_for_audio(self) -> None:
+        if self.voice.wake_word_active:
+            self._resume_wake_after_audio = True
+            self.voice.stop_wake_word_listener()
+            self._update_mic_indicator()
+
+    def _resume_wake_after_audio_capture(self) -> None:
+        if self._resume_wake_after_audio:
+            self._resume_wake_after_audio = False
+            if self.wake_action.isChecked() and not self._closing:
+                self.voice.start_wake_word_listener()
+            self._update_mic_indicator()
+
+    def _on_listening_started(self, request_id: int) -> None:
+        if self._closing:
+            return
+        self.pet.set_listening(True)
+        if request_id > 0:
+            self.status_label.setText("Dinliyorum senpai… konuşabilirsin 🎙️")
+        else:
+            self.mic_indicator.setToolTip("Nora şu an mikrofondan dinliyor 🎙️")
+
+    def _on_listening_stopped(self, request_id: int) -> None:
+        if self._closing:
+            return
+        self.pet.set_listening(False)
+        if request_id > 0 and self._listening:
+            self.status_label.setText("Sesini işliyorum…")
+            self.pet.set_emotion("thinking")
+        self._update_mic_indicator()
+
+    def _test_microphone(self) -> None:
+        if self._closing or self._busy or self._listening:
+            return
+        self.show_chat()
+        self._pause_wake_for_audio()
+        self._set_busy(True, "Mikrofon test ediliyor… konuş 🎙️")
+        self.pet.set_listening(True)
+        request_id = self._next_request()
+        worker = ToolWorker(self.voice.test_microphone, request_id)
+        worker.done.connect(self._on_mic_test_done)
+        self._track_worker(worker)
+        worker.start()
+
+    def _on_mic_test_done(self, request_id: int, ok: bool, result: Any) -> None:
+        if self._closing or request_id != self._active_request:
+            return
+        self.pet.set_listening(False)
+        self._set_busy(False)
+        self.add_message(
+            str(result or "Mikrofon testi tamamlanamadı senpai. 🎤"), "bot"
+        )
+        self.pet.set_emotion("happy" if ok else "sad")
+        self._resume_wake_after_audio_capture()
+
+    def _select_microphone(self) -> None:
+        if self._closing or self._busy or self._listening:
+            return
+        self.show_chat()
+        names = self.voice.list_microphones()
+        if not names:
+            self.add_message(
+                "Mikrofon listesi alınamadı senpai. PyAudio ve mikrofon iznini kontrol et. 🎤",
+                "bot",
+            )
+            return
+        items = ["Varsayılan mikrofon"] + [
+            f"{i}: {name}" for i, name in enumerate(names)
+        ]
+        current = (
+            0
+            if self.voice.microphone_index is None
+            else self.voice.microphone_index + 1
+        )
+        current = max(0, min(current, len(items) - 1))
+        choice, ok = QInputDialog.getItem(
+            self.chat_window, "Mikrofon Seç", "Giriş cihazı:", items, current, False
+        )
+        if not ok:
+            return
+        index = None if choice == items[0] else items.index(choice) - 1
+        self.voice.set_microphone_index(index)
+        was_wake = self.voice.wake_word_active
+        if was_wake:
+            self.voice.stop_wake_word_listener()
+            self.voice.start_wake_word_listener()
+        self._update_mic_indicator()
+        self.add_message(
+            f"Mikrofon seçildi: {choice}. Test etmek için 🎙️ Mikrofon Testi'ni kullan senpai. 🎧",
+            "bot",
+        )
+
+    def _check_groq(self) -> None:
+        if self._closing or self._busy:
+            return
+        self.show_chat()
+        self._run_tool(
+            self.brain.diagnose_connection,
+            "Groq bağlantısı kontrol ediliyor…",
+            speak=False,
+        )
 
     def _on_wake_word(self, remainder: str) -> None:
         if self._closing or self._busy or self._listening or self.voice.is_speaking:

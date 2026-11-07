@@ -9,6 +9,7 @@ does not save recordings to disk.  Qt signals marshal results to the UI thread.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import re
 import threading
@@ -35,6 +36,8 @@ class NoraVoice(QObject):
     speaking_finished = pyqtSignal()
     speech_error = pyqtSignal(str)
     voice_error = pyqtSignal(str)
+    listening_started = pyqtSignal(int)  # >0 manual request, 0 background wake capture
+    listening_stopped = pyqtSignal(int)
     listening_finished = pyqtSignal(int, str, str)  # request id, transcript, error
     wake_word_detected = pyqtSignal(str)  # words after "Nora", possibly empty
 
@@ -60,6 +63,16 @@ class NoraVoice(QObject):
         self._wake_callback: Callable[[str], None] | None = None
         self._last_wake_error = ""
         self._last_wake_error_at = 0.0
+        self.microphone_index: int | None = None
+        raw_index = os.getenv("NORA_MICROPHONE_INDEX", "").strip()
+        if raw_index:
+            try:
+                self.microphone_index = int(raw_index)
+            except ValueError:
+                logger.warning(
+                    "NORA_MICROPHONE_INDEX sayı olmalı; varsayılan mikrofon kullanılacak."
+                )
+        self.last_capture_info: dict[str, Any] = {}
 
     # --------------------------------------------------------------------- TTS
     @property
@@ -231,9 +244,25 @@ class NoraVoice(QObject):
         recognizer = sr.Recognizer()
         recognizer.energy_threshold = energy
         recognizer.dynamic_energy_threshold = True
-        recognizer.pause_threshold = 0.7
+        recognizer.pause_threshold = 0.6
+        recognizer.non_speaking_duration = 0.4
+        recognizer.dynamic_energy_adjustment_damping = 0.15
+        recognizer.dynamic_energy_ratio = 1.5
         recognizer.operation_timeout = 8
         return recognizer
+
+    def set_microphone_index(self, index: int | None) -> None:
+        self.microphone_index = index
+
+    @staticmethod
+    def list_microphones() -> list[str]:
+        try:
+            import speech_recognition as sr
+
+            return list(sr.Microphone.list_microphone_names())
+        except Exception as exc:
+            logger.warning("Mikrofon listesi alınamadı: %s", type(exc).__name__)
+            return []
 
     def _capture(
         self,
@@ -243,6 +272,7 @@ class NoraVoice(QObject):
         energy: int = 250,
         *,
         wake: bool = False,
+        request_id: int | None = None,
     ) -> tuple[str, str]:
         try:
             import speech_recognition as sr
@@ -253,7 +283,9 @@ class NoraVoice(QObject):
             )
         try:
             recognizer = self._recognizer(energy)
-            with sr.Microphone(sample_rate=16000) as source:
+            with sr.Microphone(
+                sample_rate=16000, device_index=self.microphone_index
+            ) as source:
                 recognizer.adjust_for_ambient_noise(source, duration=ambient)
                 if (
                     self._closed
@@ -261,19 +293,36 @@ class NoraVoice(QObject):
                     or (wake and self._wake_stop.is_set())
                 ):
                     return "", ""
+                if request_id is not None:
+                    self.listening_started.emit(request_id)
                 audio = recognizer.listen(
                     source, timeout=timeout, phrase_time_limit=phrase_limit
                 )
             if self._closed:
                 return "", ""
+            self.last_capture_info = {
+                "device_index": self.microphone_index,
+                "sample_rate": getattr(audio, "sample_rate", None),
+                "bytes": len(getattr(audio, "frame_data", b"") or b""),
+                "energy_threshold": recognizer.energy_threshold,
+            }
             text = recognizer.recognize_google(
                 audio, language="tr-TR", endpoint=_GOOGLE_ENDPOINT
             )
             return str(text).strip(), ""
         except sr.WaitTimeoutError:
-            return "", ""
+            logger.debug("Mikrofon dinleme zaman aşımı (wake=%s)", wake)
+            if wake:
+                return "", ""
+            return (
+                "",
+                "Mikrofon ses algılamadı senpai. Mikrofon seçimini/seviyesini kontrol et; sağ tık → Mikrofon Testi'ni dene. 🎤",
+            )
         except sr.UnknownValueError:
-            return "", "Seni duyamadım senpai. Biraz daha net konuşur musun? 🎤"
+            return (
+                "",
+                "Ses geldi ama Google anlayamadı senpai. Biraz daha net konuşur musun? 🎤",
+            )
         except sr.RequestError:
             return (
                 "",
@@ -290,18 +339,79 @@ class NoraVoice(QObject):
                 "",
                 "Mikrofonla küçük bir sorun yaşadım senpai. Tekrar dener misin? 🎤",
             )
+        finally:
+            if request_id is not None:
+                self.listening_stopped.emit(request_id)
 
-    def listen_once(self, timeout: float = 6, phrase_time_limit: float = 10) -> str:
-        if (
-            self._closed
-            or self.is_speaking
-            or not self._mic_lock.acquire(blocking=False)
-        ):
+    def test_microphone(self, timeout: float = 3) -> str:
+        """Local-only microphone level test; does not upload audio."""
+        if self._closed or self.is_speaking or not self._mic_lock.acquire(timeout=1.5):
+            return "Mikrofon şu an meşgul senpai. Konuşmamı/dinlememi bekle, sonra tekrar dene. 🎤"
+        try:
+            import speech_recognition as sr
+
+            recognizer = self._recognizer()
+            with sr.Microphone(
+                sample_rate=16000, device_index=self.microphone_index
+            ) as source:
+                recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                try:
+                    audio = recognizer.listen(
+                        source, timeout=timeout, phrase_time_limit=timeout
+                    )
+                except sr.WaitTimeoutError:
+                    return (
+                        f"Mikrofon açıldı ama {timeout:g} saniyede ses algılanmadı senpai. "
+                        f"Cihaz: {self.microphone_index if self.microphone_index is not None else 'varsayılan'}. "
+                        "Windows Ses ayarlarından giriş cihazını/seviyesini kontrol et veya Mikrofon Seç'i dene. 🎤"
+                    )
+            raw = audio.frame_data or b""
+            peak = rms = 0
+            if raw:
+                import array
+
+                samples = array.array("h")
+                samples.frombytes(raw[: len(raw) // 2 * 2])
+                if samples:
+                    peak = max(abs(x) for x in samples)
+                    rms = int((sum(x * x for x in samples) / len(samples)) ** 0.5)
+            heard = peak > max(300, recognizer.energy_threshold * 0.5)
+            self.last_capture_info = {
+                "device_index": self.microphone_index,
+                "peak": peak,
+                "rms": rms,
+                "energy_threshold": recognizer.energy_threshold,
+                "heard": heard,
+            }
+            return (
+                f"Mikrofon testi: cihaz {self.microphone_index if self.microphone_index is not None else 'varsayılan'}, "
+                f"peak={peak}, rms={rms}, eşik≈{recognizer.energy_threshold:.0f}. "
+                + (
+                    "Sesini algıladım senpai~ 🎤"
+                    if heard
+                    else "Ses çok zayıf; giriş seviyesini/cihazı kontrol et. 🎤"
+                )
+            )
+        except Exception as exc:
+            logger.warning("Mikrofon testi hatası: %s", type(exc).__name__)
+            return "Mikrofon test edilemedi senpai. PyAudio, mikrofon izni ve cihazı kontrol et. 🎤"
+        finally:
+            self._mic_lock.release()
+
+    def listen_once(
+        self,
+        timeout: float = 6,
+        phrase_time_limit: float = 10,
+        request_id: int | None = None,
+    ) -> str:
+        if self._closed or self.is_speaking or not self._mic_lock.acquire(timeout=1.5):
             self._last_listen_error = "Şu an konuşuyorum veya mikrofon meşgul senpai."
             return ""
         self._listening = True
         try:
-            text, error = self._capture(timeout, phrase_time_limit, ambient=0.5)
+            text, error = self._capture(
+                timeout, phrase_time_limit, ambient=0.5, request_id=request_id
+            )
             self._last_listen_error = error
             if error:
                 self.voice_error.emit(error)
@@ -322,7 +432,7 @@ class NoraVoice(QObject):
 
         def run() -> None:
             try:
-                text = self.listen_once()
+                text = self.listen_once(request_id=request_id)
                 error = self._last_listen_error
             except Exception as exc:
                 logger.exception("Dinleme thread hatası: %s", type(exc).__name__)
@@ -375,7 +485,12 @@ class NoraVoice(QObject):
                 if self._closed or self.is_speaking or self._listening:
                     continue
                 text, error = self._capture(
-                    timeout=3, phrase_limit=4, ambient=0.3, energy=250, wake=True
+                    timeout=3,
+                    phrase_limit=4,
+                    ambient=0.3,
+                    energy=250,
+                    wake=True,
+                    request_id=0,
                 )
                 if error:
                     now = time.monotonic()

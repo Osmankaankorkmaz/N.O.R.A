@@ -168,3 +168,54 @@ def test_close_is_idempotent():
     brain.close()
     assert client.closed
     assert not brain.available
+
+
+def test_default_chat_model_is_current_replacement():
+    assert DEFAULT_CHAT_MODEL == "openai/gpt-oss-120b"
+    brain = NoraBrain(client=FakeClient())
+    assert brain.chat_model == DEFAULT_CHAT_MODEL
+    reply = brain.chat("selam")
+    call = brain._client.chat.completions.calls[0]
+    assert call["reasoning_effort"] == "low"
+    assert call["include_reasoning"] is False
+    assert reply.text
+
+
+def test_decommissioned_404_is_actionable_and_redacted():
+    class NotFound(Exception):
+        status_code = 404
+        body = {
+            "error": {
+                "code": "model_decommissioned",
+                "message": "The model `llama-3.3-70b-versatile` has been decommissioned. key gsk_secret123",
+            }
+        }
+
+    client = FakeClient()
+
+    def fail(**kwargs):
+        raise NotFound("raw should not leak")
+
+    client.chat.completions.create = fail
+    brain = NoraBrain(client=client, chat_model="llama-3.3-70b-versatile")
+    reply = brain.chat("selam")
+    assert reply.error
+    assert "openai/gpt-oss-120b" in reply.text
+    assert "gsk_secret123" not in reply.text
+    assert "raw should not leak" not in reply.text
+
+
+def test_diagnose_connection_lists_model_availability():
+    client = FakeClient()
+    client.models = SimpleNamespace(
+        list=lambda: SimpleNamespace(
+            data=[
+                SimpleNamespace(id=DEFAULT_CHAT_MODEL),
+                SimpleNamespace(id=DEFAULT_VISION_MODEL),
+            ]
+        )
+    )
+    brain = NoraBrain(client=client)
+    text = brain.diagnose_connection()
+    assert "✓ listede" in text
+    assert DEFAULT_CHAT_MODEL in text
