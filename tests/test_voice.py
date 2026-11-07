@@ -1,7 +1,7 @@
 import threading
 import time
 
-from nora.nora_voice import NoraVoice, speech_text
+from nora.nora_voice import NoraVoice, speech_text, split_speech
 
 
 def test_speech_text_strips_emoji_and_tags_already_removed():
@@ -234,4 +234,101 @@ def test_missing_local_model_does_not_fallback_to_cloud(qapp, monkeypatch):
     )
     text, error = voice._capture(1, 2, 0.1)
     assert not text and "model yok" in error
+    voice.close()
+
+
+def test_speech_text_cleans_markdown_and_keeps_long_replies():
+    cleaned = speech_text(
+        "**Merhaba** [link](https://example.com) `kod` 💕\n```python\nprint(1)\n```"
+    )
+    assert "Merhaba" in cleaned and "link" in cleaned and "kod" in cleaned
+    assert "https://" not in cleaned and "```" not in cleaned and "💕" not in cleaned
+    long_text = "Bu uzun bir yanıt cümlesi. " * 200
+    assert len(speech_text(long_text)) > 1200
+    chunks = split_speech(speech_text(long_text))
+    assert len(chunks) > 1
+    assert " ".join(chunks) == speech_text(long_text)
+
+
+class _FakeTTSEngine:
+    def __init__(self, fail_times=0):
+        self.said = []
+        self.properties = {}
+        self.fail_times = fail_times
+        self.runs = 0
+
+    def setProperty(self, name, value):
+        self.properties[name] = value
+
+    def getProperty(self, name):
+        if name == "voices":
+            return []
+        return self.properties.get(name)
+
+    def say(self, text):
+        self.said.append(text)
+
+    def runAndWait(self):
+        self.runs += 1
+        if self.runs <= self.fail_times:
+            raise RuntimeError("engine busy")
+
+    def stop(self):
+        pass
+
+
+def _wait_voice(qapp, voice, predicate, timeout=3.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_tts_worker_speaks_all_chunks_and_clears_pending(qapp, monkeypatch):
+    voice = NoraVoice(tts_enabled=True)
+    engine = _FakeTTSEngine()
+    monkeypatch.setattr(voice, "_make_engine", lambda: engine)
+    started, finished = [], []
+    voice.speaking_started.connect(lambda: started.append(True))
+    voice.speaking_finished.connect(lambda: finished.append(True))
+    text = "Sesli yanıt cümlesi. " * 120
+    assert voice.speak(text)
+    assert _wait_voice(
+        qapp,
+        voice,
+        lambda: not voice.is_speaking and engine.runs > 1 and bool(finished),
+    )
+    qapp.processEvents()
+    assert " ".join(engine.said) == speech_text(text)
+    assert started and finished
+    assert voice.diagnose_speech().startswith("Sesli yanıt açık")
+    voice.close()
+
+
+def test_tts_worker_retries_with_fresh_engine(qapp, monkeypatch):
+    voice = NoraVoice(tts_enabled=True)
+    engines = [_FakeTTSEngine(fail_times=1), _FakeTTSEngine()]
+    monkeypatch.setattr(voice, "_make_engine", lambda: engines.pop(0))
+    errors = []
+    voice.speech_error.connect(errors.append)
+    assert voice.speak("Tek denemede bozulursa yeniden dene.")
+    assert _wait_voice(qapp, voice, lambda: not voice.is_speaking and len(engines) == 0)
+    assert voice._engine is not None and voice._engine.said
+    assert not errors
+    assert not voice.last_speech_error
+    voice.close()
+
+
+def test_tts_failure_is_visible_not_silent(qapp, monkeypatch):
+    voice = NoraVoice(tts_enabled=True)
+    monkeypatch.setattr(voice, "_make_engine", lambda: _FakeTTSEngine(fail_times=10))
+    errors = []
+    voice.speech_error.connect(errors.append)
+    assert voice.speak("Bu yanıt sesli gelmeli.")
+    assert _wait_voice(qapp, voice, lambda: not voice.is_speaking and bool(errors))
+    assert "Ses motorunu açamadım" in errors[-1]
+    assert voice.last_speech_error
     voice.close()

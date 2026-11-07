@@ -332,3 +332,56 @@ def test_clipboard_is_not_uploaded_without_confirmation(qapp, tmp_path, monkeypa
     app._execute_command({"command": "clipboard_help", "action": "summarize"})
     assert not app._workers
     app.shutdown()
+
+
+def test_bot_messages_use_central_spoken_reply_policy(qapp, monkeypatch):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    spoken = []
+    app.voice.tts_enabled = True
+    monkeypatch.setattr(
+        app.voice, "speak", lambda text, *a, **k: spoken.append(text) or True
+    )
+    app.add_message("Merhaba senpai", "bot")
+    app.add_message("Benim yazdığım", "user")
+    app._report("Uzun yanıt. " * 80)
+    app._report("Sessiz veri dökümü", speak=False)
+    assert spoken == ["Merhaba senpai", ("Uzun yanıt. " * 80).strip()]
+    app.shutdown()
+
+
+def test_chat_and_tool_replies_are_spoken_without_length_cap(qapp, monkeypatch):
+    from nora.nora_brain import ChatReply
+
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    spoken = []
+    app.voice.tts_enabled = True
+    monkeypatch.setattr(
+        app.voice, "speak", lambda text, *a, **k: spoken.append(text) or True
+    )
+    app._active_request = 7
+    app._on_chat_done(7, ChatReply(text="Sesli sohbet yanıtı", emotion="happy"))
+    app._active_request = 8
+    app._on_tool_done(8, True, "Araç sonucu. " * 60, True)
+    assert spoken == ["Sesli sohbet yanıtı", ("Araç sonucu. " * 60).strip()]
+    app.shutdown()
+
+
+def test_tts_indicator_and_mode_restore_are_visible(qapp, monkeypatch):
+    app = NoraApp(NoraOptions(wake_word=False, tts=True, proactive=False, offline=True))
+    monkeypatch.setattr(app.voice, "speak", lambda *a, **k: True)
+    assert app.speaker_indicator.text() == "🔊"
+    app._toggle_tts(False)
+    assert app.speaker_indicator.text() == "🔇"
+    assert app.store.preference("tts") is False
+    app._toggle_tts(True)
+    app._activate_mode("focus")
+    assert app.voice.tts_enabled is False
+    assert app.speaker_indicator.text() == "🔇"
+    app._activate_mode("normal")
+    assert app.voice.tts_enabled is True
+    assert app.speaker_indicator.text() == "🔊"
+    app.shutdown()

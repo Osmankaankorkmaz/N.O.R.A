@@ -70,6 +70,8 @@ KOMUTLAR (JSON alan adlarını aynen kullan):
 {"command":"reminder","action":"list"}  // cancel requires id
 {"command":"task","action":"add","text":"raporu bitir"}  // list/complete/reopen/delete/from_note use id
 {"command":"settings","action":"set","key":"tone","value":"sweet"}
+{"command":"settings","action":"set","key":"tts","value":true}  // sesli yanıtı aç/kapat
+{"command":"speech_test"}  // sesli yanıt durumunu ve ses motorunu test et
 {"command":"clipboard_help","action":"translate","target_language":"İngilizce"}
 {"command":"screen_text","prompt":"Ekrandaki hatayı açıkla"}
 {"command":"find_files","query":"rapor","directory":"downloads","extension":"pdf"}

@@ -493,6 +493,23 @@ def parse_direct_command(
     match = re.fullmatch(r"([\w-]+)\s*(?:numaralı\s*)?notu sil", low)
     if match:
         return _cmd("note", action="delete", id=match.group(1))
+    if low in {
+        "sesli konuş",
+        "sesli yanıtı aç",
+        "sesli yanıtları aç",
+        "sesli cevap ver",
+        "konuşmaya başla",
+    }:
+        return _cmd("settings", action="set", key="tts", value=True)
+    if low in {
+        "sesli yanıtı kapat",
+        "sesli yanıtları kapat",
+        "sesli cevap verme",
+        "sessiz konuş",
+    }:
+        return _cmd("settings", action="set", key="tts", value=False)
+    if low in {"ses testi", "sesli yanıt testi", "ses durumu", "neden konuşmuyorsun"}:
+        return _cmd("speech_test")
     if low in {"mikrofonu tamamen kapat", "hey nora bekçisini kapat"}:
         return _cmd("settings", action="set", key="wake_word", value=False)
     if low in {"hey nora bekçisini aç", "yerel mikrofon bekçisini aç"}:

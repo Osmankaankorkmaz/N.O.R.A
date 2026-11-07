@@ -128,3 +128,21 @@ def test_file_move_and_routine_name():
 def test_new_command_schemas_reject_unsafe_values(command):
     with pytest.raises(CommandError):
         normalize_command(command)
+
+
+def test_direct_speech_controls_and_test():
+    assert parse_direct_command("sesli konuş").command == {
+        "command": "settings",
+        "action": "set",
+        "key": "tts",
+        "value": True,
+    }
+    assert parse_direct_command("sesli yanıtı kapat").command == {
+        "command": "settings",
+        "action": "set",
+        "key": "tts",
+        "value": False,
+    }
+    assert parse_direct_command("neden konuşmuyorsun").command == {
+        "command": "speech_test"
+    }

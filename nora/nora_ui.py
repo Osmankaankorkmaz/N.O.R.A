@@ -283,6 +283,7 @@ class NoraApp(QWidget):
         if proactive_enabled:
             self.proactive.start()
         self._update_mic_indicator()
+        self._update_tts_indicator()
         try:
             self.store.update_preferences(
                 {"wake_word": bool(wake), "tts": tts, "proactive": proactive_enabled}
@@ -364,6 +365,10 @@ class NoraApp(QWidget):
         self.mic_indicator.setFont(self._emoji_font(10))
         self.mic_indicator.setToolTip("Mikrofon durumu")
         header_layout.addWidget(self.mic_indicator)
+        self.speaker_indicator = QLabel("🔊")
+        self.speaker_indicator.setFont(self._emoji_font(10))
+        self.speaker_indicator.setToolTip("Sesli yanıt durumu")
+        header_layout.addWidget(self.speaker_indicator)
         header_layout.addStretch()
         for text, tip, slot in (
             ("📸", "Ekran görüntüsü al ve analiz et", self._analyze_screen),
@@ -618,6 +623,7 @@ class NoraApp(QWidget):
         menu.addAction("Ekran Analiz", self._analyze_screen)
         menu.addAction("Sesli Komut", self._start_listening)
         menu.addAction("🎙️ Mikrofon Testi", self._test_microphone)
+        menu.addAction("🔊 Sesli Yanıt Testi", self._test_speech)
         menu.addAction("🎧 Mikrofon Seç", self._select_microphone)
         menu.addAction("🩺 Groq Bağlantısı", self._check_groq)
         emotions = menu.addMenu("Duygular")
@@ -732,10 +738,13 @@ class NoraApp(QWidget):
         if not busy:
             QTimer.singleShot(0, self._drain_commands)
 
-    def add_message(self, text: str, sender: str = "bot") -> None:
-        text = str(text).strip()
-        if not text:
+    def add_message(
+        self, text: str, sender: str = "bot", *, speak: bool = True
+    ) -> None:
+        original = str(text).strip()
+        if not original:
             return
+        text = original
         if len(text) > 8000:
             text = text[:8000] + "…"
         row = QWidget()
@@ -755,6 +764,64 @@ class NoraApp(QWidget):
             self.message_layout.removeWidget(old)
             old.deleteLater()
         QTimer.singleShot(0, self._scroll_to_bottom)
+        if sender == "bot" and speak:
+            self._say(original)
+
+    def _say(self, text: str) -> bool:
+        if self._closing:
+            return False
+        if not self.voice.tts_enabled:
+            self._update_tts_indicator()
+            return False
+        return self.voice.speak(str(text))
+
+    def _update_tts_indicator(self) -> None:
+        if not hasattr(self, "speaker_indicator"):
+            return
+        enabled = bool(self.voice.tts_enabled)
+        volume = self.store.preference("speech_volume")
+        mode = self.modes.current
+        if enabled and volume > 0:
+            self.speaker_indicator.setText("🔊")
+            tip = "Sesli yanıt açık."
+        else:
+            self.speaker_indicator.setText("🔇")
+            reasons = []
+            if not enabled:
+                reasons.append(
+                    {
+                        "focus": "Odak modu",
+                        "quiet": "Sessiz mod",
+                        "game": "Oyun modu",
+                    }.get(mode, "Sesli yanıt")
+                    + " kapalı"
+                )
+            if volume <= 0:
+                reasons.append("Ses düzeyi 0")
+            tip = (
+                " · ".join(reasons)
+                + ". 'sesli yanıtı aç' diyebilir veya tepsi menüsünden açabilirsin."
+            )
+        self.speaker_indicator.setToolTip(tip)
+        if hasattr(self, "tray"):
+            self.tray.setToolTip(f"Nora 💕 · {tip}")
+
+    def _test_speech(self) -> None:
+        self.show_chat()
+        self.add_message(self.voice.diagnose_speech(), "bot", speak=False)
+        if not self.voice.tts_enabled:
+            self.add_message(
+                "Sesli yanıt şu an kapalı senpai. 'sesli yanıtı aç' de ya da tepsideki 🔊 kutusunu işaretle. Odak/sessiz moddaysan 'normal mod' de. 🎧",
+                "bot",
+                speak=False,
+            )
+            return
+        if not self._say(
+            "Ses testi yapıyorum senpai. Beni duyuyorsan sesli yanıtlar çalışıyor demektir. "
+        ):
+            self.add_message(
+                "Ses motoru kuyruğa yanıt ekleyemedi. 🔊", "bot", speak=False
+            )
 
     def _scroll_to_bottom(self) -> None:
         bar = self.scroll.verticalScrollBar()
@@ -900,6 +967,7 @@ class NoraApp(QWidget):
             self.store.set_preference("tts", bool(enabled))
         except ValueError as exc:
             self.status_label.setText(str(exc)[:70])
+        self._update_tts_indicator()
         self._sync_pause()
 
     def _toggle_wake(self, enabled: bool) -> None:
@@ -1015,7 +1083,6 @@ class NoraApp(QWidget):
         self._set_busy(False)
         self.add_message(reply.text, "bot")
         self.pet.set_emotion(reply.emotion)
-        self.voice.speak(reply.text)
         if reply.command and not reply.error:
             self._execute_command(reply.command)
         self._sync_pause()
@@ -1045,10 +1112,8 @@ class NoraApp(QWidget):
             return
         self._set_busy(False)
         text = str(result) if result is not None else "İşlem tamamlandı senpai. 🐾"
-        self.add_message(text, "bot")
+        self.add_message(text, "bot", speak=speak)
         self.pet.set_emotion("happy" if ok else "sad")
-        if speak and len(text) <= 300:
-            self.voice.speak(text)
 
     def _execute_command(self, command: dict[str, Any]) -> None:
         try:
@@ -1074,6 +1139,8 @@ class NoraApp(QWidget):
             self._reminder_command(cmd)
         elif name == "task":
             self._task_command(cmd)
+        elif name == "speech_test":
+            self._test_speech()
         elif name == "settings":
             if cmd["action"] == "list":
                 prefs = self.store.preferences
@@ -1146,7 +1213,7 @@ class NoraApp(QWidget):
                 else self.game.guess(cmd.get("answer", ""))
             )
             self.show_chat()
-            self._report(result, speak=False)
+            self._report(result)
         elif name == "screenshot":
             self._analyze_screen(cmd.get("prompt"))
         elif name == "camera":
@@ -1198,8 +1265,6 @@ class NoraApp(QWidget):
                 else self.tools.list_notes()
             )
             self.add_message(result, "bot")
-            if cmd["action"] == "add":
-                self.voice.speak(result)
         elif name == "set_timer":
             self._reminder_command(
                 {
@@ -1243,11 +1308,10 @@ class NoraApp(QWidget):
 
     # ------------------------------------------------------- personal features
     def _report(self, text: str, *, speak: bool = True, bubble: bool = True) -> None:
-        self.add_message(str(text), "bot")
+        self.add_message(str(text), "bot", speak=speak)
         if bubble:
             self.pet.show_speech(str(text), 5500)
-        if speak and len(str(text)) <= 300:
-            self.voice.speak(str(text))
+        # add_message above already enforces the central spoken-reply policy.
 
     def _queue_commands(self, commands: list[dict[str, Any]]) -> None:
         self._pending_commands.extend(
@@ -1295,8 +1359,9 @@ class NoraApp(QWidget):
             self._apply_mode_appearance()
             self._refresh_personal_context()
             self._update_mic_indicator()
+            self._update_tts_indicator()
         except (ValueError, CommandError) as exc:
-            self._report(f"Ayar uygulanamadı senpai: {exc}", speak=False)
+            self._report(f"Ayar uygulanamadı senpai: {exc}")
 
     def _apply_mode_appearance(self) -> None:
         mode = self.modes.current
@@ -1307,6 +1372,7 @@ class NoraApp(QWidget):
                 else False
             }
         )
+        self._update_tts_indicator()
         if mode != "normal":
             self.status_label.setText(
                 {
@@ -1336,7 +1402,7 @@ class NoraApp(QWidget):
                 message = "Normal moda döndüm; mod öncesi ses/proaktif ayarlarını geri yükledim. 🐾"
             self._report(message)
         except ValueError as exc:
-            self._report(str(exc), speak=False)
+            self._report(str(exc))
 
     def _memory_command(self, cmd: dict[str, Any]) -> None:
         action = cmd["action"]
@@ -1378,9 +1444,9 @@ class NoraApp(QWidget):
                     else "Henüz kişisel bilgi kaydetmedim. 'Bunu hatırla: kahvem = şekersiz' diyebilirsin. Sohbetini kendiliğinden kaydetmiyorum."
                 )
             self._refresh_personal_context()
-            self._report(result, speak=False)
+            self._report(result, speak=action != "list")
         except ValueError as exc:
-            self._report(str(exc), speak=False)
+            self._report(str(exc))
 
     def _reminder_command(self, cmd: dict[str, Any]) -> None:
         try:
@@ -1402,9 +1468,9 @@ class NoraApp(QWidget):
                     cmd["text"], due, cmd.get("recurrence", "none")
                 )
                 result = f"⏰ {due:%d.%m.%Y %H:%M} için kaydettim: {item['text']} [{item['id']}]. Nora yeniden başlasa da kalır."
-            self._report(result, speak=False)
+            self._report(result, speak=cmd["action"] != "list")
         except (ValueError, TypeError) as exc:
-            self._report(f"Hatırlatıcı kaydedilemedi: {exc}", speak=False)
+            self._report(f"Hatırlatıcı kaydedilemedi: {exc}")
 
     def _task_command(self, cmd: dict[str, Any]) -> None:
         try:
@@ -1437,9 +1503,9 @@ class NoraApp(QWidget):
                     if self.store.complete_task(cmd["id"], action == "complete")
                     else "Görev bulunamadı."
                 )
-            self._report(result, speak=False)
+            self._report(result, speak=action != "list")
         except ValueError as exc:
-            self._report(str(exc), speak=False)
+            self._report(str(exc))
 
     def _routine_command(self, cmd: dict[str, Any]) -> None:
         try:
@@ -1474,9 +1540,9 @@ class NoraApp(QWidget):
                     return
                 self._queue_commands(steps)
                 result = f"'{cmd['name']}' rutinini başlattım senpai. 🔁"
-            self._report(result, speak=False)
+            self._report(result, speak=cmd["action"] != "list")
         except (ValueError, CommandError) as exc:
-            self._report(str(exc), speak=False)
+            self._report(str(exc))
 
     def _create_routine(self) -> None:
         self.show_chat()
@@ -1509,7 +1575,7 @@ class NoraApp(QWidget):
                 {"command": "routine", "action": "add", "name": name, "steps": steps}
             )
         except (ValueError, CommandError) as exc:
-            self._report(str(exc), speak=False)
+            self._report(str(exc))
 
     def _clipboard_help(self, cmd: dict[str, Any]) -> None:
         text = self.tools.clipboard_paste()
@@ -1723,7 +1789,7 @@ class NoraApp(QWidget):
             )
         except (ValueError, TypeError, KeyError) as exc:
             result = str(exc)
-        self._report(result, speak=False)
+        self._report(result)
 
     def _find_files_dialog(self) -> None:
         self.show_chat()
@@ -1751,7 +1817,7 @@ class NoraApp(QWidget):
             )
             summary = "\n".join(f"{source} → {target}" for source, target in moves)
             if not moves:
-                self._report("Taşınacak dosya yok. " + " ".join(conflicts), speak=False)
+                self._report("Taşınacak dosya yok. " + " ".join(conflicts))
                 return
             if self._confirm(
                 "Dosyaları taşı",
@@ -1764,10 +1830,9 @@ class NoraApp(QWidget):
                         cmd["selection"], cmd["destination"], cmd["folder"]
                     ),
                     "Dosyalar taşınıyor…",
-                    speak=False,
                 )
         except ValueError as exc:
-            self._report(str(exc), speak=False)
+            self._report(str(exc))
 
     def _desktop_layout_command(self, cmd: dict[str, Any]) -> None:
         try:
@@ -1804,10 +1869,9 @@ class NoraApp(QWidget):
                     self._run_tool(
                         lambda: self.desktop_layouts.restore(entries),
                         "Pencereler eski konumuna alınıyor…",
-                        speak=False,
                     )
         except ValueError as exc:
-            self._report(str(exc), speak=False)
+            self._report(str(exc))
 
     def _on_layout_saved(
         self, request_id: int, ok: bool, entries: Any, name: str
@@ -1822,7 +1886,7 @@ class NoraApp(QWidget):
             result = f"'{name}' pencere düzenini yerelde kaydettim ({len(entries)} pencere). Geri yüklemeden önce yine onay isterim. 🖥️"
         except (ValueError, TypeError, KeyError) as exc:
             result = str(exc)
-        self._report(result, speak=False)
+        self._report(result)
 
     def _on_double_click(self) -> None:
         action = self.store.preference("double_click_action")
@@ -1945,7 +2009,6 @@ class NoraApp(QWidget):
         self._set_busy(False)
         self.add_message(reply.text, "bot")
         self.pet.set_emotion(reply.emotion)
-        self.voice.speak(reply.text)
 
     # --------------------------------------------------------------------- voice
     def _start_listening(self) -> None:
@@ -1984,7 +2047,6 @@ class NoraApp(QWidget):
             message = error or "Seni duyamadım senpai. Bir daha dener misin? 🎤"
             self.add_message(message, "bot")
             self.pet.set_emotion("sad")
-            self.voice.speak(message)
         self._resume_wake_after_audio_capture()
         self._sync_pause()
 
@@ -2107,12 +2169,16 @@ class NoraApp(QWidget):
         if self._closing:
             return
         self.pet.set_speaking(True)
+        if hasattr(self, "speaker_indicator"):
+            self.speaker_indicator.setText("🔊")
+            self.speaker_indicator.setToolTip("Nora konuşuyor…")
         self._sync_pause()
 
     def _on_speaking_finished(self) -> None:
         if self._closing:
             return
         self.pet.set_speaking(False)
+        self._update_tts_indicator()
         if (
             self._wake_followup
             and not self.voice.is_speaking
@@ -2127,6 +2193,8 @@ class NoraApp(QWidget):
         if self._closing:
             return
         self.mic_indicator.setToolTip(message)
+        if hasattr(self, "speaker_indicator"):
+            self.speaker_indicator.setToolTip(message)
         if message not in self._notified_errors:
             self._notified_errors.add(message)
             if self.tray.isVisible():
@@ -2141,9 +2209,9 @@ class NoraApp(QWidget):
         if self._closing or self._busy or self._listening or self.voice.is_speaking:
             return
         self.pet.show_speech(text, 6500)
-        self.voice.speak(text)
+        self._say(text)
         if self.chat_window.isVisible():
-            self.add_message(text, "bot")
+            self.add_message(text, "bot", speak=False)
 
     def _on_timer(self, message: str) -> None:
         if self._closing:
@@ -2151,9 +2219,9 @@ class NoraApp(QWidget):
         text = f"⏰ {message}"
         self.pet.show_speech(text, 8000)
         self.pet.set_emotion("surprised")
-        self.voice.speak(text)
+        self._say(text)
         if self.chat_window.isVisible():
-            self.add_message(text, "bot")
+            self.add_message(text, "bot", speak=False)
         if self.tray.isVisible():
             self.tray.showMessage(
                 "Nora · Hatırlatıcı", text, QSystemTrayIcon.Information, 8000
@@ -2170,16 +2238,16 @@ class NoraApp(QWidget):
                 "Heh, şu an çevrimdışı temel komut modundayım. Serbest sohbet için GROQ_API_KEY ayarla senpai. 🐾",
                 "bot",
             )
-        self.voice.speak(text)
         if self.tray.isVisible():
             mic = (
                 "· yerel 'Hey Nora' bekçisi açık 🎙️"
                 if self.voice.wake_word_active
                 else "· sürekli dinleme kapalı"
             )
+            silent = "" if self.voice.tts_enabled else " · sesli yanıt kapalı 🔇"
             self.tray.showMessage(
                 "Nora burada 💕",
-                f"Masaüstündeyim {mic}",
+                f"Masaüstündeyim {mic}{silent}",
                 QSystemTrayIcon.Information,
                 4000,
             )
@@ -2199,7 +2267,6 @@ class NoraApp(QWidget):
         text = f"Saat {now:%H:%M}, senpai. Tarih {now:%d.%m.%Y}. ⏰"
         self.add_message(text, "bot")
         self.pet.show_speech(text, 4500)
-        self.voice.speak(text)
 
     def _show_notes(self) -> None:
         self.show_chat()

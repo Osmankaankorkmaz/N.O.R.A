@@ -14,6 +14,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 - Kıyafet, saç rengi, gözlük/kulaklık/kurdele, animasyon ve otonom hareket ayarları; baş okşama tepkisi ve çift tıklama davranışı.
 - Yerel **“Hey Nora”** bekçisi; yalnızca tam ifade duyulunca veya 🎤 basılınca komut dinler. Sizin metniniz kafasının üzerinde mor **“Sen: …”** balonunda görünür.
 - Komut dinlerken elini kulağına götürür. Google STT veya isteğe bağlı **yerel Whisper** ile Türkçe komut tanıma; pyttsx3 sesli yanıt, ses/hız seçimi.
+- Bot yanıtları merkezi sesli yanıt politikasından geçer; uzun yanıtlar kesilmeden cümlelere bölünür. Sohbet başlığındaki 🔊/🔇 göstergesi, tepsi **Sesli Yanıt Testi** ve “sesli yanıtı aç/kapat”, “ses testi” komutları sessiz kalma nedenini görünür kılar.
 
 ### Günlük yardımcılar
 - **Kalıcı kişisel hafıza:** yalnızca “bunu hatırla” dediğiniz bilgiler saklanır; hitap ve kişilik tonu kişiselleştirilebilir.
@@ -167,6 +168,14 @@ python main.py --data-dir ./veri    # taşınabilir veri klasörü
 python main.py --version
 ```
 
+## Sesli yanıt sorun giderme
+
+- Sohbet başlığında 🔇 görüyorsanız sesli yanıt kapalıdır. “sesli yanıtı aç” deyin veya tepsi menüsündeki **Sesli yanıt** kutusunu işaretleyin.
+- Odak/sessiz mod sesli yanıtı bilerek kapatır. “normal mod” önceki ses ayarını geri yükler; gösterge bunu 🔇 olarak belirtir.
+- “ses testi” / tepsi **🔊 Sesli Yanıt Testi** motor durumunu, ses düzeyini ve son hatayı yazar; ardından örnek cümleyi seslendirir.
+- Uzun yanıtlar 1200 karakterde kesilmez; TTS kuyruğunda cümle parçaları halinde okunur. Ses motoru hata verirse bir kez temiz motorla yeniden denenir ve hata sohbet/tepside görünür.
+- Windows’ta SAPI sesi, Linux’ta espeak-ng kurulu olmalıdır. Ses düzeyi 0 ise gösterge 🔇 olur; Ayarlar’dan konuşma sesini yükseltin.
+
 ## Dosya yapısı
 
 ```text
@@ -205,4 +214,4 @@ python -m compileall -q nora main.py tests
 ruff check nora tests main.py
 ```
 
-Bu sürümde **165 test** geçmiştir; offscreen GUI, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Bu sürümde **173 test** geçmiştir; offscreen GUI, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

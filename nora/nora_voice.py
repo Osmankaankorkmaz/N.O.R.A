@@ -12,6 +12,7 @@ import logging
 import os
 import queue
 import re
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -29,7 +30,52 @@ _GOOGLE_ENDPOINT = "https://www.google.com/speech-api/v2/recognize"
 
 
 def speech_text(text: str) -> str:
-    return re.sub(r"\s+", " ", _EMOJI_RE.sub("", text or "")).strip()[:1200]
+    """Clean assistant text for TTS without silently dropping long replies."""
+    value = str(text or "")
+    value = re.sub(
+        r"```.*?```", " Kod bloğunu sohbete yazdım. ", value, flags=re.DOTALL
+    )
+    value = re.sub(r"`([^`]*)`", r"\1", value)
+    value = re.sub(r"!?\[([^\]]+)\]\([^)]*\)", r"\1", value)
+    value = re.sub(r"https?://\S+", " bağlantı ", value)
+    value = re.sub(r"[*_#>|]+", " ", value)
+    value = _EMOJI_RE.sub("", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value[:12000]
+
+
+def split_speech(text: str, limit: int = 900) -> list[str]:
+    """Sentence-aware chunks so long answers are fully spoken, not truncated."""
+    text = str(text or "").strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for sentence in re.split(r"(?<=[.!?…])\s+", text):
+        if not sentence:
+            continue
+        if len(sentence) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            while len(sentence) > limit:
+                cut = sentence.rfind(" ", 0, limit)
+                if cut < limit // 2:
+                    cut = limit
+                chunks.append(sentence[:cut].strip())
+                sentence = sentence[cut:].strip()
+            if sentence:
+                current = sentence
+        elif current and len(current) + len(sentence) + 1 > limit:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}".strip()
+    if current:
+        chunks.append(current)
+    return [chunk for chunk in chunks if chunk]
 
 
 class NoraVoice(QObject):
@@ -72,6 +118,7 @@ class NoraVoice(QObject):
         self._tts_stop = threading.Event()
         self._tts_thread: threading.Thread | None = None
         self._engine: Any = None
+        self.last_speech_error = ""
         self._mic_lock = threading.Lock()
         self._listen_request_lock = threading.Lock()
         self._listening = False
@@ -128,22 +175,67 @@ class NoraVoice(QObject):
         on_start: Callable | None = None,
         on_end: Callable | None = None,
     ) -> bool:
-        text = speech_text(text)
-        if self._closed or not self.tts_enabled or not text:
+        cleaned = speech_text(text)
+        if self._closed or not self.tts_enabled or not cleaned:
+            return False
+        chunks = split_speech(cleaned)
+        if not chunks:
             return False
         with self._speech_lock:
             self._speech_pending += 1
             generation = self._speech_generation
         try:
             self._ensure_tts_thread()
-            self._speech_queue.put((generation, text, on_start, on_end))
+            self._speech_queue.put((generation, chunks, on_start, on_end))
         except Exception as exc:
             with self._speech_lock:
                 self._speech_pending = max(0, self._speech_pending - 1)
+            self.last_speech_error = f"TTS kuyruğu başlatılamadı: {type(exc).__name__}"
             logger.warning("TTS thread başlatılamadı: %s", type(exc).__name__)
             self.speech_error.emit("Ses motorunu başlatamadım senpai. 🔊")
             return False
         return True
+
+    @staticmethod
+    def _com_initialize() -> bool:
+        if sys.platform != "win32":
+            return False
+        try:
+            import ctypes
+
+            result = ctypes.windll.ole32.CoInitializeEx(None, 2)
+            return result in (0, 1)
+        except Exception:
+            logger.debug("COM başlatılamadı", exc_info=True)
+            return False
+
+    @staticmethod
+    def _com_uninitialize(initialized: bool) -> None:
+        if not initialized or sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            ctypes.windll.ole32.CoUninitialize()
+        except Exception:
+            logger.debug("COM kapatılamadı", exc_info=True)
+
+    def diagnose_speech(self) -> str:
+        with self._speech_lock:
+            settings = dict(self._tts_settings)
+            pending = self._speech_pending
+        state = "açık" if self.tts_enabled else "kapalı"
+        if settings["volume"] <= 0:
+            state += " ama ses düzeyi 0"
+        return (
+            f"Sesli yanıt {state} · hız {settings['rate']} · düzey {settings['volume']:.2f} · "
+            f"kuyruk {pending} · motor {'hazır' if self._engine is not None else 'henüz başlatılmadı'}. "
+            + (
+                f"Son hata: {self.last_speech_error}"
+                if self.last_speech_error
+                else "Ses motoru hatası görünmüyor."
+            )
+        )
 
     def _make_engine(self) -> Any:
         import pyttsx3
@@ -204,52 +296,99 @@ class NoraVoice(QObject):
             )
         return engine
 
-    def _tts_worker(self) -> None:
-        while not self._tts_stop.is_set():
-            item = self._speech_queue.get()
-            if item is None:
-                break
-            generation, text, on_start, on_end = item
+    def _apply_engine_settings(self, engine: Any, settings: dict[str, Any]) -> None:
+        engine.setProperty("rate", settings["rate"])
+        engine.setProperty("volume", settings["volume"])
+        voice_id = settings.get("voice_id", "")
+        if not voice_id:
+            return
+        try:
+            voices = engine.getProperty("voices") or []
+            if any(getattr(voice, "id", "") == voice_id for voice in voices):
+                engine.setProperty("voice", voice_id)
+            else:
+                self.last_speech_error = (
+                    "Seçili ses bulunamadı; varsayılan ses kullanıldı."
+                )
+                self.speech_error.emit(
+                    "Seçili konuşma sesi bulunamadı senpai; varsayılan sesle deniyorum. 🔊"
+                )
+        except Exception:
+            logger.debug("Ses seçimi uygulanamadı", exc_info=True)
+
+    def _speak_chunks(self, generation: int, chunks: list[str]) -> None:
+        last_error: Exception | None = None
+        for attempt in range(2):
             try:
-                with self._speech_lock:
-                    current = generation == self._speech_generation and not self._closed
-                if not current:
-                    continue
                 if self._engine is None:
                     self._engine = self._make_engine()
                 with self._speech_lock:
                     settings = dict(self._tts_settings)
-                for key, value in (
-                    ("rate", settings["rate"]),
-                    ("volume", settings["volume"]),
-                ):
-                    self._engine.setProperty(key, value)
-                if settings["voice_id"]:
-                    self._engine.setProperty("voice", settings["voice_id"])
-                self.speaking_started.emit()
-                if on_start:
-                    try:
-                        on_start()
-                    except Exception:
-                        logger.exception("TTS başlangıç callback hatası")
-                self._engine.say(text)
-                self._engine.runAndWait()
+                self._apply_engine_settings(self._engine, settings)
+                for chunk in chunks:
+                    with self._speech_lock:
+                        if self._closed or generation != self._speech_generation:
+                            return
+                    self._engine.say(chunk)
+                    self._engine.runAndWait()
+                self.last_speech_error = ""
+                return
             except Exception as exc:
-                logger.warning("Ses motoru hatası: %s", type(exc).__name__)
-                self.speech_error.emit(
-                    "Ses motorunu açamadım senpai. Windows SAPI veya espeak-ng kurulumunu kontrol et. 🔊"
+                last_error = exc
+                logger.warning(
+                    "Ses motoru hatası (deneme %s): %s", attempt + 1, type(exc).__name__
                 )
-                self._engine = None
-            finally:
-                if on_end:
+                engine, self._engine = self._engine, None
+                if engine is not None:
                     try:
-                        on_end()
+                        engine.stop()
                     except Exception:
-                        logger.exception("TTS bitiş callback hatası")
-                with self._speech_lock:
-                    self._speech_pending = max(0, self._speech_pending - 1)
-                self.speaking_finished.emit()
-                self._speech_queue.task_done()
+                        logger.debug("Bozuk ses motoru durdurulamadı", exc_info=True)
+        self.last_speech_error = (
+            f"Ses motoru yanıt vermedi: {type(last_error).__name__}"
+        )
+        self.speech_error.emit(
+            "Ses motorunu açamadım senpai. Windows SAPI/espeak-ng kurulumunu ve ses çıkışını kontrol et. 🔊"
+        )
+
+    def _tts_worker(self) -> None:
+        com_initialized = self._com_initialize()
+        try:
+            while not self._tts_stop.is_set():
+                item = self._speech_queue.get()
+                if item is None:
+                    break
+                generation, chunks, on_start, on_end = item
+                try:
+                    with self._speech_lock:
+                        current = (
+                            generation == self._speech_generation and not self._closed
+                        )
+                    if not current:
+                        continue
+                    self.speaking_started.emit()
+                    if on_start:
+                        try:
+                            on_start()
+                        except Exception:
+                            logger.exception("TTS başlangıç callback hatası")
+                    self._speak_chunks(generation, chunks)
+                except Exception as exc:
+                    self.last_speech_error = f"TTS worker hatası: {type(exc).__name__}"
+                    logger.warning("TTS worker hatası: %s", type(exc).__name__)
+                    self.speech_error.emit("Sesli yanıtta sorun yaşadım senpai. 🔊")
+                finally:
+                    if on_end:
+                        try:
+                            on_end()
+                        except Exception:
+                            logger.exception("TTS bitiş callback hatası")
+                    with self._speech_lock:
+                        self._speech_pending = max(0, self._speech_pending - 1)
+                    self.speaking_finished.emit()
+                    self._speech_queue.task_done()
+        finally:
+            self._com_uninitialize(com_initialized)
 
     def stop_speaking(self) -> None:
         with self._speech_lock:
@@ -297,6 +436,7 @@ class NoraVoice(QObject):
     @staticmethod
     def list_output_voices() -> list[dict[str, str]]:
         """Enumerate system voices in a worker, never on the GUI thread."""
+        initialized = NoraVoice._com_initialize()
         try:
             import pyttsx3
 
@@ -311,6 +451,8 @@ class NoraVoice(QObject):
         except Exception as exc:
             logger.warning("Ses listesi alınamadı: %s", type(exc).__name__)
             return []
+        finally:
+            NoraVoice._com_uninitialize(initialized)
 
     # --------------------------------------------------------------------- STT
     def set_stt_backend(self, backend: str) -> None:
