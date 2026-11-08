@@ -39,17 +39,28 @@ jobs:
             libxcb-xinerama0 libxcb-xfixes0 xclip
       - name: Windows setup helper (base only)
         if: runner.os == 'Windows'
-        shell: powershell
-        run: ./tools/setup_windows.ps1 -Feature base
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tools/setup_windows.ps1 -Feature base *> setup.log
+          $code = $LASTEXITCODE
+          Get-Content setup.log -Tail 80
+          if ($code -ne 0) {
+            $tail = (Get-Content setup.log -Tail 25) -join "`n"
+            $tail = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error title=Windows setup log::$tail"
+            exit $code
+          }
       - name: Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
-      - name: Lint and syntax
-        run: |
-          python -m ruff check nora tests tools main.py
-          python -m ruff format --check nora tests tools main.py
-          python -m compileall -q nora tools main.py
+      - name: Ruff lint
+        run: python -m ruff check nora tests tools main.py
+      - name: Ruff format
+        run: python -m ruff format --check nora tests tools main.py
+      - name: Syntax
+        run: python -m compileall -q nora tools main.py
       - name: Headless doctor (no microphone/network)
         shell: bash
         run: |
