@@ -104,6 +104,43 @@ class NoraSettingsDialog(QDialog):
             "Spotify OAuth yerine işletim sistemi medya tuşlarını kullanır; çalan şarkı adı için API gerekmez."
         )
         self._check(form, "audit_log", "Yerel denetim kaydı", prefs)
+        self._check(
+            form, "clipboard_watch", "Pano geçmişini izle (bellek, 30 dk)", prefs
+        )
+        self.fields["clipboard_watch"].setToolTip(
+            "Varsayılan kapalı. Açık onayla yeni kopyalanan metinleri en fazla 20 kayıt/30 dakika bellekte tutar; "
+            "hassas görünenleri atlar, diske yazmaz, buluta göndermez."
+        )
+        self._check(form, "semantic_search", "Yerel embedding araması", prefs)
+        self.fields["semantic_search"].setToolTip(
+            "Açıkken not/hafıza/görev araması indirilmiş yerel embedding modeliyle hibrit çalışır. Model yoksa kelime aramasına döner; buluta geçmez."
+        )
+        self._check(
+            form, "voice_barge_in", "Konuşurken 'Hey Nora' ile sözümü kes", prefs
+        )
+        self.fields["voice_barge_in"].setToolTip(
+            "Varsayılan kapalı. Açıkken Nora konuşurken de yerel bekçi mikrofonu dinler; yalnızca tam 'hey nora' sesi keser. Kulaklık önerilir."
+        )
+        self._combo(
+            form,
+            "chat_backend",
+            "Sohbet motoru",
+            (("groq", "Groq (bulut)"), ("local", "Yerel GGUF")),
+            prefs,
+        )
+        self._line(form, "local_chat_model", "Yerel sohbet modeli (.gguf)", prefs, 120)
+        self._combo(
+            form,
+            "tts_backend",
+            "Konuşma motoru",
+            (("system", "Sistem sesi"), ("piper", "Piper (yerel)")),
+            prefs,
+        )
+        self._line(form, "piper_model", "Piper modeli (.onnx)", prefs, 120)
+        self._line(form, "spotify_client_id", "Spotify Client ID", prefs, 80)
+        self.fields["spotify_client_id"].setToolTip(
+            "Spotify Developer uygulamanın Client ID'si. Gizli client secret istenmez; OAuth PKCE kullanılır. Tokenlar mümkünse sistem kasasında tutulur."
+        )
         self.fields["audit_log"].setToolTip(
             "Son 200 komutu yalnızca cihazında tutar; izin merkezinden görebilir veya temizleyebilirsin."
         )

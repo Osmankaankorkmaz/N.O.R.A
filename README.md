@@ -4,6 +4,16 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 
 > **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
 
+## 1.9.0 · İsteğe bağlı gelişmiş entegrasyonlar
+
+- **Spotify Web API:** OAuth PKCE, sistem anahtar kasasında token, çalan parça/cihazlar ve gerçek çal-duraklat/sonraki/önceki kontrolü. Client secret yok; bağlantı yoksa durum açıkça söylenir.
+- **Yerel anlam araması:** isteğe bağlı fastembed/MiniLM embedding modeli; not/hafıza/görevlerde hibrit arama. Model indirilmezse kelime aramasına döner, buluta geçmez.
+- **Yerel sohbet:** kullanıcı tarafından içe aktarılan GGUF + llama-cpp-python. Yerel mod seçiliyken Groq’a sessiz fallback yok.
+- **Piper TTS:** kullanıcı `.onnx` + `.onnx.json` modelini içe aktarır; kesilebilir yerel ses üretimi. Piper seçiliyken sistem sesine gizlice dönmez.
+- **Sözünü kesme:** varsayılan kapalı; açıkken Nora konuşurken de tam yerel `hey nora` bekçisi dinler ve sesi keser. Kulaklık önerilir.
+- **Pano geçmişi:** varsayılan kapalı, yalnızca bellek, 20 kayıt/30 dakika, hassas görünen metinleri atlama.
+- **Eklentiler:** Python çalıştırmayan, doğrulanmış JSON komut paketleri; içe aktarma/etkinleştirme/çalıştırma onaylı. Örnek: `docs/plugins/study-pack.json`.
+
 ## 1.8.0 · Yerel companion ve güven paketi
 
 - Windows wake-word `MicrophoneStream.read() got an unexpected keyword argument 'exception_on_overflow'` hatası düzeltildi; SpeechRecognition sarmalayıcısı ve PyAudio stilleri uyumlu okunur.
@@ -27,7 +37,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 - **Sürekli konuşma modu:** Nora cevap verdikten sonra tekrar dinler; `dinlemeyi bırak` / `sürekli konuşmayı kapat` ile durur. İki kez sessizlik olursa kendiliğinden bırakır.
 - **Bas-konuş:** Ayarlardan seçilen global kısayola (varsayılan `Ctrl+Alt+Space`) basılı tutunca dinler, bırakınca cevaplar. Global kısayol için `requirements-local.txt` içindeki `keyboard` paketi gerekir; bazı sistemlerde yönetici izni isteyebilir.
 - **Otonomi (varsayılan kapalı):** Kullanıcı açıkça açarsa Nora ara sıra ekranını/kamerasını inceleyebilir veya Spotify/YouTube araması açıp dans edebilir/video izleme pozuna geçebilir. Odak/sessiz modda ve gece sessizliğinde çalışmaz; aralık ayarlanabilir.
-- **Medya:** `müzik aç`, `spotifyda lofi aç`, `video aç` Spotify/YouTube araması açar; Nora dans eder veya mısır alıp izleme pozuna geçer. `duraklat`, `sonraki şarkı`, `önceki şarkı`, `müziği durdur` işletim sistemi medya tuşlarını kullanır; `şu an ne çalıyor` pencere başlığını okumayı dener, kesin şarkı bilgisi için Spotify API/OAuth gerektiğini söyler.
+- **Medya:** `müzik aç`, `spotifyda lofi aç`, `video aç` Spotify/YouTube araması açar; Nora dans eder veya mısır alıp izleme pozuna geçer. Spotify API bağlıysa `duraklat`, `sonraki şarkı`, `önceki şarkı`, `müziği durdur`, `şu an ne çalıyor` gerçek Web API kontrolüdür. API bağlı değilse OS medya tuşları kullanılır; API seçili ama token yoksa Nora bunu açıkça söyler.
 - Havada uzun tutulunca rahatsız olup söylenir; düşüşte hareket çizgileri, yere inince kısa squash/toz animasyonu vardır. Video izleme ve landenme pozlarıPainter ile çizilir.
 - Bot yanıtları merkezi sesli yanıt politikasından geçer; uzun yanıtlar kesilmeden cümlelere bölünür. Sohbet başlığındaki 🔊/🔇 göstergesi, tepsi **Sesli Yanıt Testi** ve “sesli yanıtı aç/kapat”, “ses testi” komutları sessiz kalma nedenini görünür kılar.
 
@@ -40,7 +50,10 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 - Kelime/anagram oyunu ve 1-100 sayı tahmin oyunu; çift tıklayınca oyun açma seçeneği.
 - **Companion:** `modun nasıl`, `kahve ver`, `kurabiye ver`, `ödül ver`, `seni özledim`; bağlılık 0-100 arasında yerelde saklanır.
 - **Brifing:** `günaydın brifingi`, `gün sonu özeti`, `haftalık plan`; isteğe bağlı açılış brifingi.
-- **Yerel arama:** `notlarımda kahve ara`, `hafızamda … ara`, `görevlerimde … ara`, `yerel ara …`; yalnızca açıkça kaydedilmiş Nora verisinde Türkçe normalize + bulanık eşleşme.
+- **Yerel arama:** `notlarımda kahve ara`, `hafızamda … ara`, `görevlerimde … ara`, `yerel ara …`; Türkçe normalize + bulanık eşleşme. `anlamsal ara …` veya ayar açıkken indirilmiş yerel embedding modeliyle hibrit arama; model yoksa yerel kelime araması.
+- **Pano geçmişi:** `pano geçmişini aç/kapat`, `panoyu geçmişe ekle`, `pano geçmişi`, `pano 1 kopyala`, `pano geçmişi temizle`. İzleme varsayılan kapalı; kayıtlar diske yazılmaz.
+- **Eklentiler:** `eklentiler`, `eklenti <id> aç/kapat`, `eklenti <id> <komut> çalıştır`; JSON komut paketleri yerleşik komutları gölgeleyemez ve Python/shell çalıştıramaz.
+- **Sözünü kesme:** `sus` / `sözünü kes` anında TTS’i durdurur. `sözümü kesmeyi aç` ile konuşma sırasında tam `hey nora` da sesi keser; bu özellik mikrofonu konuşma boyunca açık tutar.
 - **İzin/veri:** `izinleri göster`, `son işlemleri göster`, `denetim kaydını temizle`, `verilerimi dışa aktar`.
 - Yerel **OCR** ile ekrandaki yazıları okuma; isterseniz okunan metni Groq’a ayrıca onayla analiz ettirme.
 - Pano metnini özetleme/çevirme/düzenleme/biçimlendirme; pano geçmişi tutulmaz, gönderim onay ister.
@@ -91,9 +104,31 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 | `sayı oyunu başlat` / `sayı tahminim 42` / `sayı oyununu bitir` | 1-100 tahmin oyunu |
 | `izinleri göster` / `son işlemleri göster` / `verilerimi dışa aktar` | İzin merkezi, denetim kaydı, JSON export |
 | `son komutları rutin kaydet: sabah` | Son güvenli komutları rutinleştirme |
+| `spotify bağlan` / `spotify durumu` / `spotify cihazları` | OAuth PKCE bağlantısı ve cihaz listesi |
+| `spotify bağlantısını kes` | Yerel token kaydını temizleme |
+| `anlamsal arama modelini indir` / `yerel ai durumu` | Yerel embedding modeli ve durum |
+| `yerel sohbet modu` / `bulut sohbet modu` | GGUF / Groq sohbet seçimi |
+| `piper ses modu` / `sistem ses modu` | Piper / sistem TTS seçimi |
+| `sus` / `sözünü kes` | Konuşmayı anında durdur |
+| `sözümü kesmeyi aç/kapat` | Konuşurken tam `hey nora` ile kesme |
+| `pano geçmişini aç` / `pano geçmişi` / `pano 1 kopyala` | Onaylı, bellek-içi pano geçmişi |
+| `eklentiler` / `eklenti study-pack aç` | JSON eklenti yönetimi |
 | `ekranımı izle` / `kamera incelemesini aç` / `otomatik medyayı aç` | Açıkça opt-in otonomi |
 
 Serbest sohbet ve daha esnek ifadeler için Groq gerekir. Hareket komutları deterministik olduğundan internet kesilse de çalışır. Bilgisayarı kapatma, kod çalıştırma ve etkin pencereye yazma gibi işlemler yine ayrıca onay ister; “ne dersem yapsın” güvenlik onaylarını kaldırmaz.
+
+### Gelişmiş isteğe bağlı paketler
+
+Spotify token kasası temel paketteki `keyring` ile çalışır. Embedding/GGUF/Piper için:
+
+```bash
+python -m pip install -r requirements-ai.txt
+```
+
+- `llama-cpp-python` bazı sistemlerde C++ derleme araçları isteyebilir; hazır wheel yoksa kurulum belgesi gerekir.
+- Embedding modeli yaklaşık 220 MB olabilir; Nora açılışta indirmez. **Özellikler → Embedding modelini indir** açık onay ister.
+- GGUF ve Piper modelleri otomatik indirilmez. **GGUF sohbet modeli içe aktar** / **Piper modeli içe aktar** ile dosyaları seçersin; Piper için `.onnx.json` yanında olmalıdır.
+- Spotify için kendi Developer uygulamanın Client ID’sini gir; redirect URI olarak `http://127.0.0.1:8765/callback` ekle. Gizli client secret istenmez. PKCE ve loopback kuralları: [1](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow) · [2](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri).
 
 ## Kurulum
 
@@ -158,7 +193,8 @@ Kalıcı veriler varsayılan olarak:
 
 `NORA_DATA_DIR` veya `python main.py --data-dir D:\NoraVeri` ile değiştirilebilir. Yerel modeller bu klasörün `models/` altındadır.
 
-**Saklananlar:** ayarlar, açıkça kaydedilen kişisel bilgiler, notlar, görevler, hatırlatıcılar, rutinler, içe aktarılan takvim etkinlikleri, companion bağlılık/ruh hali ve isteğe bağlı son 200 komutluk denetim kaydı. **Saklanmayanlar:** ham sohbet geçmişi, mikrofon sesi, pano geçmişi. Sohbet bağlamı oturumda son 30 mesajdır; “Sohbet Geçmişini Sıfırla” kişisel hafızayı silmez. Kişisel hafıza ayrı bir onaylı menüyle silinebilir.
+**Saklananlar:** ayarlar, açıkça kaydedilen kişisel bilgiler, notlar, görevler, hatırlatıcılar, rutinler, içe aktarılan takvim etkinlikleri, companion bağlılık/ruh hali, etkin eklenti kimlikleri ve isteğe bağlı son 200 komutluk denetim kaydı. Denetim kaydı komut metinlerini/pano içerğini değil eylem türünü yazar. Spotify tokenları mümkünse sistem anahtar kasasında tutulur; JSON state’e yazılmaz. **Saklanmayanlar:** ham sohbet geçmişi, mikrofon sesi, kalıcı pano geçmişi. Pano geçmişi açıkça açılırsa yalnızca bellekte 30 dakika tutulur.
+ Sohbet bağlamı oturumda son 30 mesajdır; “Sohbet Geçmişini Sıfırla” kişisel hafızayı silmez. Kişisel hafıza ayrı bir onaylı menüyle silinebilir.
 
 ## Gizlilik ve güvenlik sınırları
 
@@ -202,6 +238,14 @@ python main.py --data-dir ./veri    # taşınabilir veri klasörü
 python main.py --version
 ```
 
+## Gelişmiş özellik sorun giderme
+
+- **Spotify:** `spotify bağlan` tarayıcıda izin ister. 8765 portu meşgulse başka uygulamayı kapat veya redirect ayarını kontrol et. 403 Premium/izin kısıtı, 404 aktif cihaz yok demektir; Nora sessizce başka hesaba/servise geçmez.
+- **Piper:** `.onnx` ve `.onnx.json` birlikte olmalı. Piper seçiliyken model/ses cihazı hatası varsa sistem sesine gizlice dönmez; hatayı gösterir.
+- **Yerel sohbet:** GGUF dosyası ve `llama-cpp-python` gerekir. Yerel modda model yoksa Groq’a geçilmez. RAM ve dosya boyutunu kontrol et.
+- **Sözünü kesme:** hoparlör sesi mikrofona kaçarsa yanlış tetiklenebilir; kulaklık önerilir. Yalnızca tam `hey nora` kabul edilir, çıplak `Nora` kabul edilmez. Sistem TTS motorunun kesme desteği platforma göre değişebilir; bas-konuş ve `sus` her zaman alternatifdir.
+- **Pano geçmişi:** parola/anahtar/kart/OTP gibi görünen metinler atlanır. Bu sezgisel bir filtredir; çok hassas ortamlarda izlemeyi kapalı tut.
+
 ## Ses tanıma sorun giderme
 
 - `Yerel wake word döngüsü hatası: TypeError` görürsen güncel sürümde PortAudio’dan gelen `bytearray/memoryview` verisi PocketSphinx için `bytes`’a çevrilir ve hata ayrıntısı loglanır. Yine olursa PyAudio/mikrofon cihazını kontrol et; 🎤 düğmesi çalışmaya devam eder.
@@ -244,6 +288,12 @@ nora/
   nora_calendar.py        # .ics okuma, etkinlik ve boş zaman listeleme
   nora_desktop.py         # Windows pencere düzeni kaydetme/geri yükleme
   nora_local_ai.py        # isteğe bağlı Whisper ve RapidOCR
+  nora_embeddings.py      # isteğe bağlı yerel çok dilli embedding
+  nora_local_llm.py       # kullanıcı GGUF modeliyle yerel sohbet
+  nora_piper.py           # kesilebilir yerel Piper TTS
+  nora_spotify.py         # OAuth PKCE + Spotify Web API
+  nora_clipboard.py       # onaylı, bellek-içi pano geçmişi
+  nora_plugins.py         # güvenli JSON komut paketi eklentileri
   nora_settings_dialog.py # ayar paneli
   nora_proactive.py       # düşük frekanslı proaktif konuşma
   nora_ui.py              # sohbet/tray/worker entegrasyonu
@@ -255,6 +305,8 @@ tests/
 requirements.txt
 requirements-local.txt
 requirements-dev.txt
+requirements-ai.txt
+docs/plugins/
 .env.example
 ```
 
@@ -268,4 +320,4 @@ python -m compileall -q nora main.py tests
 ruff check nora tests tools main.py
 ```
 
-Bu sürümde **260 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export ve sayı oyunu kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Bu sürümde **284 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export, sayı oyunu, Spotify PKCE/state/token kasası, yerel embedding/GGUF/Piper, pano geçmişi sınırları, JSON eklenti güvenliği ve sözünü kesme kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

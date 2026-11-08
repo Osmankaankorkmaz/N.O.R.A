@@ -290,6 +290,16 @@ def _appearance(low: str) -> DirectCommand | None:
         "medya tuşlarını kapat": ("media_keys", False),
         "denetim kaydını aç": ("audit_log", True),
         "denetim kaydını kapat": ("audit_log", False),
+        "pano geçmişini aç": ("clipboard_watch", True),
+        "pano geçmişini kapat": ("clipboard_watch", False),
+        "anlamsal aramayı aç": ("semantic_search", True),
+        "anlamsal aramayı kapat": ("semantic_search", False),
+        "yerel sohbet modu": ("chat_backend", "local"),
+        "bulut sohbet modu": ("chat_backend", "groq"),
+        "piper ses modu": ("tts_backend", "piper"),
+        "sistem ses modu": ("tts_backend", "system"),
+        "sözümü kesmeyi aç": ("voice_barge_in", True),
+        "sözümü kesmeyi kapat": ("voice_barge_in", False),
     }
     if low in settings:
         key, value = settings[low]
@@ -531,6 +541,49 @@ def parse_direct_command(
     match = re.fullmatch(r"([\w-]+)\s*(?:numaralı\s*)?notu sil", low)
     if match:
         return _cmd("note", action="delete", id=match.group(1))
+    if low in {"sus", "sözünü kes", "sesini kes", "konuşmayı durdur"}:
+        return _cmd("speech_stop")
+    if low in {"pano geçmişi", "pano geçmişini göster"}:
+        return _cmd("clipboard_history", action="list")
+    if low in {"panoyu geçmişe ekle", "panoyu geçmişe kaydet"}:
+        return _cmd("clipboard_history", action="capture")
+    if low in {"pano geçmişini temizle", "pano geçmişini sil"}:
+        return _cmd("clipboard_history", action="clear")
+    match = re.fullmatch(
+        r"pano(?: geçmiş(?:i|inden|indeki)?)?\s+(\w+)\s+(kopyala|göster|sil)", low
+    )
+    if match:
+        action = {"kopyala": "copy", "göster": "get", "sil": "delete"}[match.group(2)]
+        return _cmd("clipboard_history", action=action, id=match.group(1))
+    if low in {"eklentiler", "eklenti listesi"}:
+        return _cmd("plugin", action="list")
+    match = re.fullmatch(
+        r"eklenti\s+([a-z0-9-]+)\s+(aç|etkinleştir|kapat|devre dışı bırak|sil)", low
+    )
+    if match:
+        action = {
+            "aç": "enable",
+            "etkinleştir": "enable",
+            "kapat": "disable",
+            "devre dışı bırak": "disable",
+            "sil": "delete",
+        }[match.group(2)]
+        return _cmd("plugin", action=action, id=match.group(1))
+    match = re.fullmatch(r"eklenti\s+([a-z0-9-]+)\s+(.+?)\s+çalıştır", low)
+    if match:
+        return _cmd("plugin", action="run", id=match.group(1), name=match.group(2))
+    if low in {"spotify bağlan", "spotify bağlantısı kur"}:
+        return _cmd("spotify", action="connect")
+    if low in {"spotify bağlantısını kes", "spotify çıkış"}:
+        return _cmd("spotify", action="disconnect")
+    if low in {"spotify durumu", "spotify bağlı mı"}:
+        return _cmd("spotify", action="status")
+    if low in {"spotify cihazları", "spotify cihazlarını göster"}:
+        return _cmd("spotify", action="devices")
+    if low in {"yerel ai durumu", "yerel modeller", "yerel model durumu"}:
+        return _cmd("local_ai", action="status")
+    if low in {"anlamsal arama modelini indir", "embedding modelini indir"}:
+        return _cmd("local_ai", action="download_embeddings")
     if low in {"günaydın brifingi", "sabah brifingi", "brifing", "bugün planım ne"}:
         return _cmd("briefing", action="morning")
     if low in {"gün sonu özeti", "bugün ne yaptım", "günlük özet"}:
@@ -570,7 +623,12 @@ def parse_direct_command(
     ):
         match = re.fullmatch(pattern, low)
         if match:
-            return _cmd("local_search", query=match.group(1)[:200], scope=scope)
+            return _cmd(
+                "local_search",
+                query=match.group(1)[:200],
+                scope=scope,
+                semantic=scope == "all" and pattern.startswith(r"anlamsal"),
+            )
     if low in {"spotify duraklat", "müziği duraklat", "duraklat", "çal/duraklat"}:
         return _cmd("media_control", action="play_pause")
     if low in {"sonraki şarkı", "sonraki parça", "şarkıyı değiştir"}:

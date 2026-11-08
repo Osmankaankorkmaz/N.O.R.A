@@ -595,3 +595,116 @@ def test_companion_reactions_can_be_disabled(qapp):
     assert app.store.companion_state["affection"] == before
     app.shutdown()
     qapp.processEvents()
+
+
+def test_clipboard_and_plugin_commands_are_explicit_and_audited_without_payload(
+    qapp, monkeypatch, tmp_path
+):
+    import json
+
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    monkeypatch.setattr(app.clipboard_history, "_reader", lambda: "gizli olmayan pano")
+    app._execute_command({"command": "clipboard_history", "action": "capture"})
+    assert app.clipboard_history.entries[0]["text"] == "gizli olmayan pano"
+    app._execute_command({"command": "clipboard_history", "action": "list"})
+    source = tmp_path / "plugin.json"
+    source.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "id": "test-pack",
+                "name": "Test",
+                "version": "1.0.0",
+                "description": "",
+                "commands": [
+                    {
+                        "name": "otur",
+                        "phrase": "özel otur zamanı",
+                        "reply": "Oldu.",
+                        "steps": [{"command": "pet_action", "action": "sit"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    app.plugins.install(source)
+    app.store.set_plugin_enabled("test-pack", True)
+    confirmations = []
+    monkeypatch.setattr(
+        app, "_confirm", lambda title, text: confirmations.append(title) or True
+    )
+    app._send_message("özel otur zamanı")
+    assert confirmations == ["Eklenti komutunu çalıştır"]
+    assert not any(
+        "gizli olmayan pano" in item["detail"] for item in app.store.audit_log
+    )
+    app._execute_command({"command": "note", "action": "add", "text": "çok gizli not"})
+    assert not any("çok gizli not" in item["detail"] for item in app.store.audit_log)
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_sensitive_settings_cancel_only_that_toggle_and_audit_redacts_steps(
+    qapp, monkeypatch
+):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    monkeypatch.setattr(app, "_confirm", lambda title, text: False)
+    app._apply_settings(
+        {"clipboard_watch": True, "voice_barge_in": True, "address": "Kaan"}
+    )
+    assert app.store.preference("address") == "Kaan"
+    assert not app.store.preference("clipboard_watch")
+    assert not app.store.preference("voice_barge_in")
+    detail = app._audit_detail(
+        {
+            "command": "routine",
+            "action": "add",
+            "name": "x",
+            "steps": [{"command": "note", "action": "add", "text": "gizli"}],
+        }
+    )
+    assert "gizli" not in detail and "gizlendi" in detail
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_semantic_search_missing_model_falls_back_locally_with_notice(
+    qapp, monkeypatch
+):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    app.store.add_note("kahve çekirdeği")
+    app._execute_command(
+        {"command": "local_search", "query": "kahve", "scope": "all", "semantic": True}
+    )
+    assert process_until(qapp, lambda: not app._busy)
+    assert any(
+        "Kelime araması sonucu" in row.findChild(QLabel).text()
+        for row in app._message_rows
+        if row.findChild(QLabel)
+    )
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_media_control_without_spotify_uses_os_keys_and_with_unconnected_api_is_explicit(
+    qapp, monkeypatch
+):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    monkeypatch.setattr(app.tools, "media_control", lambda action: "OS tuşu tamam")
+    assert app._media_control_result("next") == "OS tuşu tamam"
+    app.spotify.configure("a" * 32)
+    result = app._media_control_result("next")
+    assert "bağlı değil" in result and "OS tuşu tamam" in result
+    app.shutdown()
+    qapp.processEvents()

@@ -87,6 +87,11 @@ KOMUTLAR (JSON alan adlarını aynen kullan):
 {"command":"permissions","action":"list"}  // audit/clear_audit
 {"command":"export_data"}
 {"command":"number_game","action":"start"}  // guess requires guess:1-100
+{"command":"clipboard_history","action":"list"}  // capture/get/copy/delete/clear; copy/delete need id
+{"command":"plugin","action":"list"}  // enable/disable/delete need id; run needs id+name
+{"command":"spotify","action":"status"}  // connect/disconnect/devices
+{"command":"local_ai","action":"status"}  // download_embeddings requires explicit user consent
+{"command":"speech_stop"}
 {"command":"clipboard_help","action":"translate","target_language":"İngilizce"}
 {"command":"screen_text","prompt":"Ekrandaki hatayı açıkla"}
 {"command":"find_files","query":"rapor","directory":"downloads","extension":"pdf"}
@@ -339,6 +344,7 @@ def normalize_command(command: Any) -> dict[str, Any]:
         "speech_test",
         "stt_test",
         "export_data",
+        "speech_stop",
     }:
         pass
     elif name in {"screenshot", "camera"}:
@@ -551,6 +557,37 @@ def normalize_command(command: Any) -> dict[str, Any]:
         out["action"] = action
         if action == "answer":
             out["answer"] = _text(command, "answer", 40)
+    elif name == "clipboard_history":
+        action = command.get("action", "list")
+        if action not in {"list", "capture", "get", "copy", "delete", "clear"}:
+            raise CommandError("Pano geçmişi işlemi geçersiz.")
+        out["action"] = action
+        if action in {"get", "copy", "delete"}:
+            out["id"] = _text(command, "id", 40)
+    elif name == "plugin":
+        action = command.get("action", "list")
+        if action not in {"list", "enable", "disable", "run", "delete"}:
+            raise CommandError("Eklenti işlemi geçersiz.")
+        out["action"] = action
+        if action != "list":
+            plugin_id = _text(command, "id", 40)
+            if not re.fullmatch(r"[a-z][a-z0-9-]{1,39}", plugin_id):
+                raise CommandError("Eklenti kimliği geçersiz.")
+            out["id"] = plugin_id
+        if action == "run":
+            out["name"] = _text(command, "name", 60)
+    elif name == "spotify":
+        action = command.get("action", "status")
+        if action not in {"connect", "disconnect", "status", "devices"}:
+            raise CommandError(
+                "Spotify işlemi connect/disconnect/status/devices olmalı."
+            )
+        out["action"] = action
+    elif name == "local_ai":
+        action = command.get("action", "status")
+        if action not in {"status", "download_embeddings"}:
+            raise CommandError("Yerel AI işlemi status/download_embeddings olmalı.")
+        out["action"] = action
     elif name == "briefing":
         action = command.get("action", "morning")
         if action not in {"morning", "summary", "weekly"}:
@@ -575,6 +612,10 @@ def normalize_command(command: Any) -> dict[str, Any]:
         out["limit"] = (
             int(_number(command, "limit", 1, 20)) if "limit" in command else 8
         )
+        semantic = command.get("semantic", False)
+        if not isinstance(semantic, bool):
+            raise CommandError("semantic açık/kapalı olmalı.")
+        out["semantic"] = semantic
     elif name == "media_control":
         action = command.get("action", "play_pause")
         if action not in {"play_pause", "next", "previous", "stop", "now_playing"}:
@@ -644,6 +685,14 @@ SETTINGS_KEYS = {
     "briefing_on_startup",
     "media_keys",
     "audit_log",
+    "clipboard_watch",
+    "semantic_search",
+    "chat_backend",
+    "local_chat_model",
+    "tts_backend",
+    "piper_model",
+    "voice_barge_in",
+    "spotify_client_id",
     "tts",
     "proactive",
     "quiet_hours",
@@ -701,6 +750,7 @@ SAFE_ROUTINE_COMMANDS = {
     "settings",
     "stt_backend",
     "media",
+    "media_control",
 }
 
 

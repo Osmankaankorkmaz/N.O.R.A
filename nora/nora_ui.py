@@ -35,12 +35,15 @@ from .nora_activities import ModeManager, NumberGame, ReminderScheduler, WordGam
 from .nora_briefing import daily_summary, morning_briefing, weekly_plan
 from .nora_brain import ChatReply, NoraBrain
 from .nora_calendar import format_events, format_free_slots, read_ics
+from .nora_clipboard import ClipboardHistory
 from .nora_commands import normalize_text, parse_direct_command, parse_direct_sequence
 from .nora_companion import mood_summary, reaction_details
 from .nora_desktop import DesktopLayouts
 from .nora_files import NoraFiles
 from .nora_hotkeys import DEFAULT_PTT_KEY, PushToTalkHotkey
-from .nora_local_ai import LocalOCR, LocalSpeech
+from .nora_embeddings import LocalEmbeddings
+from .nora_local_ai import LocalModelMissing, LocalOCR, LocalSpeech
+from .nora_local_llm import LocalChatModel
 from .nora_local_search import format_results, search_store
 from .nora_personality import (
     EMOTIONS,
@@ -50,9 +53,12 @@ from .nora_personality import (
     startup_greeting,
 )
 from .nora_pet import NoraPet
+from .nora_plugins import PluginRegistry
 from .nora_pixel_art import PixelCharacter
+from .nora_piper import PiperSpeech
 from .nora_proactive import ProactiveEngine
 from .nora_settings_dialog import NoraSettingsDialog
+from .nora_spotify import SpotifyClient
 from .nora_store import NoraStore, default_data_dir, now_local, parse_datetime
 from .nora_tools import NoraTools
 from .nora_voice import NoraVoice
@@ -233,6 +239,16 @@ class NoraApp(QWidget):
             else default_data_dir()
         )
         self.store = NoraStore(self.data_dir / "state.json")
+        self.clipboard_history = ClipboardHistory(parent=self)
+        self.plugins = PluginRegistry(self.data_dir / "plugins", self.store)
+        self.spotify = SpotifyClient(
+            self.store.preference("spotify_client_id")
+            or os.getenv("SPOTIFY_CLIENT_ID", "")
+        )
+        self._clipboard_prune_timer = QTimer(self)
+        self._clipboard_prune_timer.setInterval(10_000)
+        self._clipboard_prune_timer.timeout.connect(self.clipboard_history.prune)
+        self._clipboard_prune_timer.start()
         self.files = NoraFiles()
         self.desktop_layouts = DesktopLayouts()
         self.local_speech = LocalSpeech(
@@ -240,6 +256,11 @@ class NoraApp(QWidget):
             model_name=self.store.preference("whisper_model"),
             device=self.store.preference("whisper_device"),
         )
+        self.embeddings = LocalEmbeddings(self.data_dir / "models" / "embeddings")
+        self.local_chat = LocalChatModel(self.data_dir / "models" / "chat")
+        self.local_chat.configure(self.store.preference("local_chat_model"))
+        self.piper = PiperSpeech(self.data_dir / "models" / "piper")
+        self.piper.configure(self.store.preference("piper_model"))
         self.ocr = LocalOCR()
         self.reminders = ReminderScheduler(self.store, parent=self)
         self.modes = ModeManager(self.store)
@@ -263,7 +284,9 @@ class NoraApp(QWidget):
             else env_bool("NORA_PROACTIVE", self.store.preference("proactive"))
         )
         self.brain = NoraBrain(
-            offline=self.options.offline or env_bool("NORA_OFFLINE", False)
+            offline=self.options.offline or env_bool("NORA_OFFLINE", False),
+            local_chat=self.local_chat,
+            chat_backend=self.store.preference("chat_backend"),
         )
         self.tools = NoraTools(
             allow_code=self.options.allow_code, store=self.store, parent=self
@@ -272,6 +295,9 @@ class NoraApp(QWidget):
             tts_enabled=tts,
             stt_backend=self.store.preference("stt_backend"),
             local_speech=self.local_speech,
+            local_tts=self.piper,
+            tts_backend=self.store.preference("tts_backend"),
+            barge_in=self.store.preference("voice_barge_in"),
             speech_rate=self.store.preference("speech_rate"),
             speech_volume=self.store.preference("speech_volume"),
             voice_id=self.store.preference("voice_id"),
@@ -296,6 +322,8 @@ class NoraApp(QWidget):
         if proactive_enabled:
             self.proactive.start()
         self._sync_voice_modes()
+        if self.store.preference("clipboard_watch"):
+            self.clipboard_history.start()
         self._update_mic_indicator()
         self._update_tts_indicator()
         try:
@@ -621,6 +649,74 @@ class NoraApp(QWidget):
                 ),
             ),
             ("📦 Veriyi dışa aktar", self._export_data),
+            (
+                "📋 Pano geçmişi",
+                lambda: self._execute_command(
+                    {"command": "clipboard_history", "action": "list"}
+                ),
+            ),
+            (
+                "📋 Panoyu geçmişe ekle",
+                lambda: self._execute_command(
+                    {"command": "clipboard_history", "action": "capture"}
+                ),
+            ),
+            (
+                "🧩 Eklentiler",
+                lambda: self._execute_command({"command": "plugin", "action": "list"}),
+            ),
+            ("🧩 JSON eklenti içe aktar", self._import_plugin),
+            (
+                "🎧 Spotify bağlan",
+                lambda: self._execute_command(
+                    {"command": "spotify", "action": "connect"}
+                ),
+            ),
+            (
+                "🎧 Spotify durumu",
+                lambda: self._execute_command(
+                    {"command": "spotify", "action": "status"}
+                ),
+            ),
+            (
+                "🎧 Spotify cihazları",
+                lambda: self._execute_command(
+                    {"command": "spotify", "action": "devices"}
+                ),
+            ),
+            (
+                "🎧 Spotify bağlantısını kes",
+                lambda: self._execute_command(
+                    {"command": "spotify", "action": "disconnect"}
+                ),
+            ),
+            (
+                "🔎 Embedding modelini indir",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "download_embeddings"}
+                ),
+            ),
+            (
+                "🧠 Yerel AI durumu",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "status"}
+                ),
+            ),
+            ("🧠 GGUF sohbet modeli içe aktar", self._import_local_chat_model),
+            ("🔊 Piper modeli içe aktar", self._import_piper_model),
+            (
+                "🔎 Embedding modelini indir",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "download_embeddings"}
+                ),
+            ),
+            (
+                "🧠 Yerel AI durumu",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "status"}
+                ),
+            ),
+            ("🧠 GGUF sohbet modeli içe aktar", self._import_local_chat_model),
         ):
             features.addAction(label, slot)
         clipboard = features.addMenu("📋 Pano yardımı (onaylı)")
@@ -1203,7 +1299,12 @@ class NoraApp(QWidget):
         )
         self.mic_indicator.setToolTip(
             (
-                "Yerel 'Hey Nora' bekçisi AÇIK · şu an komut dinlemiyor. "
+                (
+                    "Yerel 'Hey Nora' bekçisi AÇIK · konuşurken sözünü kesmeyi dinliyor. "
+                    if self.store.preference("voice_barge_in")
+                    and self.voice.is_speaking
+                    else "Yerel 'Hey Nora' bekçisi AÇIK · şu an komut dinlemiyor. "
+                )
                 if active
                 else "Hey Nora bekçisi kapalı · yalnızca 🎤 ile dinlenir. "
             )
@@ -1314,6 +1415,9 @@ class NoraApp(QWidget):
                 "local_search",
                 "media_control",
                 "number_game",
+                "speech_stop",
+                "clipboard_history",
+                "plugin",
             }
             for item in requested
         )
@@ -1331,6 +1435,10 @@ class NoraApp(QWidget):
             return
         if command is not None:
             self._execute_command(command)
+            return
+        plugin_match = self.plugins.match(text)
+        if plugin_match is not None:
+            self._run_plugin_command(*plugin_match)
             return
         self.pet.set_emotion("thinking")
         self._set_busy(True, "Düşünüyorum…")
@@ -1386,7 +1494,7 @@ class NoraApp(QWidget):
             return
         name = cmd["command"]
         self._remember_command(cmd)
-        self.store.add_audit("command", json.dumps(cmd, ensure_ascii=False)[:240])
+        self.store.add_audit("command", self._audit_detail(cmd))
         if name in {"pet_action", "move_monitor"}:
             self._last_repeatable = dict(cmd)
             if name == "pet_action":
@@ -1408,6 +1516,18 @@ class NoraApp(QWidget):
             self._test_speech()
         elif name == "stt_test":
             self._start_listening(recognition_test=True)
+        elif name == "speech_stop":
+            self._wake_followup = False
+            self.voice.stop_speaking()
+            self._report("Sustum senpai. Sözün varsa dinliyorum. 🤫", speak=False)
+        elif name == "clipboard_history":
+            self._clipboard_history_command(cmd)
+        elif name == "plugin":
+            self._plugin_command(cmd)
+        elif name == "spotify":
+            self._spotify_command(cmd)
+        elif name == "local_ai":
+            self._local_ai_command(cmd)
         elif name == "media":
             self._media_command(cmd)
         elif name == "briefing":
@@ -1422,7 +1542,7 @@ class NoraApp(QWidget):
             self._local_search_command(cmd)
         elif name == "media_control":
             self._run_tool(
-                lambda: self.tools.media_control(cmd["action"]),
+                lambda: self._media_control_result(cmd["action"]),
                 "Medya kontrol ediliyor…",
             )
         elif name == "number_game":
@@ -1593,6 +1713,189 @@ class NoraApp(QWidget):
             self.add_message(self.tools.lock_screen(), "bot")
 
     # ------------------------------------------------------- personal features
+    @staticmethod
+    def _audit_detail(cmd: dict[str, Any]) -> str:
+        private_keys = {
+            "text",
+            "value",
+            "code",
+            "query",
+            "url",
+            "prompt",
+            "answer",
+            "steps",
+        }
+        safe = {key: value for key, value in cmd.items() if key not in private_keys}
+        if any(key in cmd for key in private_keys):
+            safe["payload"] = "[yerel metin gizlendi]"
+        return json.dumps(safe, ensure_ascii=False)[:240]
+
+    def _media_control_result(self, action: str) -> str:
+        if not self.spotify.configured:
+            return self.tools.media_control(action)
+        if not self.spotify.connected():
+            return (
+                "Spotify API bağlı değil; 'spotify bağlan' de. İşletim sistemi medya tuşu deneniyor: "
+                + self.tools.media_control(action)
+            )
+        return self.spotify.control(action)
+
+    def _spotify_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd["action"]
+        if action == "status":
+            self._report(self.spotify.status(), speak=False)
+            return
+        if action == "disconnect":
+            if self._confirm(
+                "Spotify bağlantısını kes",
+                "Yerel Spotify token kaydını silmemi onaylıyor musun?",
+            ):
+                self._report(self.spotify.disconnect())
+            return
+        if action == "devices":
+            self._run_tool(
+                self.spotify.devices, "Spotify cihazları okunuyor…", speak=False
+            )
+            return
+        client_id = self.spotify.client_id
+        if not client_id:
+            client_id, ok = QInputDialog.getText(
+                self.chat_window,
+                "Spotify Client ID",
+                "Spotify Developer uygulamanın Client ID'si:",
+            )
+            if not ok or not client_id.strip():
+                return
+            client_id = client_id.strip()
+        if not self._confirm(
+            "Spotify bağlantısı",
+            "Tarayıcıda Spotify izni istenecek: çalan parçayı okuma, oynatma durumu ve oynatmayı kontrol etme. Gizli client secret istenmez; token mümkünse sistem kasasında tutulur. Redirect URI: http://127.0.0.1:8765/callback. Bağlantıyı başlatayım mı?",
+        ):
+            return
+        try:
+            self.store.set_preference("spotify_client_id", client_id)
+            self.spotify.configure(client_id)
+        except ValueError as exc:
+            self._report(str(exc), speak=False)
+            return
+        self._run_tool(
+            lambda: self.spotify.connect(client_id),
+            "Spotify bağlantısı bekleniyor…",
+            speak=False,
+        )
+
+    def _clipboard_history_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd["action"]
+        try:
+            if action == "list":
+                result = self.clipboard_history.listing()
+            elif action == "capture":
+                ok = self.clipboard_history.capture_current()
+                result = (
+                    "Panoyu geçmişe ekledim. 📋"
+                    if ok
+                    else (
+                        self.clipboard_history.last_skip_reason
+                        or "Pano kaydı eklenmedi."
+                    )
+                )
+            elif action == "clear":
+                if not self._confirm(
+                    "Pano geçmişini temizle",
+                    "Bellekteki pano geçmişini silmemi onaylıyor musun?",
+                ):
+                    return
+                self.clipboard_history.clear()
+                result = "Pano geçmişini temizledim. 📋"
+            elif action == "delete":
+                result = (
+                    "Pano kaydını sildim."
+                    if self.clipboard_history.delete(cmd["id"])
+                    else "Pano kaydı bulunamadı."
+                )
+            elif action == "copy":
+                result = self.clipboard_history.copy(cmd["id"])
+            else:
+                result = self.clipboard_history.get(cmd["id"])
+            self._report(result, speak=False)
+        except ValueError as exc:
+            self._report(str(exc), speak=False)
+
+    def _plugin_command(self, cmd: dict[str, Any]) -> None:
+        action = cmd["action"]
+        try:
+            if action == "list":
+                self._report(self.plugins.listing(), speak=False)
+            elif action == "enable":
+                manifest = self.plugins.get(cmd["id"])
+                if self._confirm(
+                    "Eklentiyi etkinleştir",
+                    f"{manifest.name} v{manifest.version}\n{manifest.description}\n\nBu JSON komut paketi Python çalıştırmaz. Komutları yine onaylı rutin olarak çalışır. Etkinleştireyim mi?",
+                ):
+                    self.store.set_plugin_enabled(cmd["id"], True)
+                    self._report(f"'{manifest.name}' eklentisini etkinleştirdim. 🧩")
+            elif action == "disable":
+                self.store.set_plugin_enabled(cmd["id"], False)
+                self._report("Eklentiyi devre dışı bıraktım. 🧩")
+            elif action == "delete":
+                if self._confirm(
+                    "Eklentiyi sil",
+                    f"'{cmd['id']}' eklenti dosyasını silmemi onaylıyor musun?",
+                ):
+                    self.plugins.delete(cmd["id"])
+                    self._report("Eklentiyi sildim. 🧩")
+            else:
+                self._run_plugin_command(
+                    *self.plugins.command_steps(cmd["id"], cmd["name"])
+                )
+        except (ValueError, CommandError, OSError) as exc:
+            self._report(str(exc), speak=False)
+
+    def _run_plugin_command(self, manifest: Any, command: Any) -> None:
+        steps = [dict(step) for step in command.steps]
+        summary = json.dumps(steps, ensure_ascii=False, indent=2)[:2500]
+        if not self._confirm(
+            "Eklenti komutunu çalıştır",
+            f"{manifest.name} · {command.name}\n\n{summary}\n\nBu adımları onaylıyor musun?",
+        ):
+            return
+        self._queue_commands(steps)
+        self._report(
+            command.reply or f"'{command.name}' eklenti komutunu başlattım. 🧩"
+        )
+
+    def _import_plugin(self) -> None:
+        self.show_chat()
+        path, _ = QFileDialog.getOpenFileName(
+            self.chat_window, "JSON eklenti içe aktar", "", "JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            from .nora_plugins import validate_manifest
+
+            manifest = validate_manifest(
+                json.loads(Path(path).read_text(encoding="utf-8"))
+            )
+            if not self._confirm(
+                "Eklenti içe aktar",
+                f"{manifest.name} v{manifest.version} · {len(manifest.commands)} komut\n\nYalnızca doğrulanmış JSON komut paketi kurulur; Python/shell kodu çalıştırılmaz. Kurulumdan sonra ayrıca etkinleştirmen gerekir. İçe aktarayım mı?",
+            ):
+                return
+            target = self.plugins.directory / f"{manifest.id}.json"
+            overwrite = target.exists()
+            if overwrite and not self._confirm(
+                "Eklentiyi güncelle",
+                "Aynı kimlikli eklenti zaten var. Üzerine yazılsın mı?",
+            ):
+                return
+            self.plugins.install(Path(path), overwrite=overwrite)
+            self._report(
+                f"'{manifest.name}' eklentisini kurdum. Etkinleştirmek için 'eklenti {manifest.id} aç' de. 🧩"
+            )
+        except (ValueError, CommandError, OSError) as exc:
+            self._report(f"Eklenti içe aktarılamadı: {exc}", speak=False)
+
     def _remember_command(self, cmd: dict[str, Any]) -> None:
         if cmd["command"] in SAFE_ROUTINE_COMMANDS and cmd["command"] != "routine":
             self._recent_commands.append(dict(cmd))
@@ -1667,6 +1970,9 @@ class NoraApp(QWidget):
                 "companion_reactions",
                 "briefing_on_startup",
                 "audit_log",
+                "clipboard_watch",
+                "semantic_search",
+                "voice_barge_in",
             )
             result = "İzin merkezi 🔐\n" + "\n".join(
                 f"• {key}: {'açık' if prefs.get(key) else 'kapalı'}" for key in keys
@@ -1694,13 +2000,90 @@ class NoraApp(QWidget):
             self._report(f"Dışa aktaramadım senpai: {exc}")
 
     def _local_search_command(self, cmd: dict[str, Any]) -> None:
-        results = search_store(
-            self.store,
-            cmd["query"],
-            scope=cmd.get("scope", "all"),
-            limit=cmd.get("limit", 8),
+        query = cmd["query"]
+        scope = cmd.get("scope", "all")
+        limit = cmd.get("limit", 8)
+        semantic = bool(cmd.get("semantic") or self.store.preference("semantic_search"))
+        if not semantic:
+            results = search_store(self.store, query, scope=scope, limit=limit)
+            self._report(format_results(query, results), speak=False)
+            return
+
+        def run() -> str:
+            try:
+                results = search_store(
+                    self.store,
+                    query,
+                    scope=scope,
+                    limit=limit,
+                    embedder=self.embeddings,
+                )
+                return format_results(query, results)
+            except (LocalModelMissing, ValueError) as exc:
+                results = search_store(self.store, query, scope=scope, limit=limit)
+                return (
+                    str(exc)
+                    + "\nKelime araması sonucu:\n"
+                    + format_results(query, results)
+                )
+
+        self._run_tool(run, "Yerel anlam araması yapılıyor…", speak=False)
+
+    def _local_ai_command(self, cmd: dict[str, Any]) -> None:
+        if cmd["action"] == "status":
+            self._report(
+                self.embeddings.status() + "\n" + self.local_chat.status(), speak=False
+            )
+            return
+        if self._confirm(
+            "Embedding modelini indir",
+            "Çok dilli MiniLM embedding modeli Hugging Face'ten indirilecek (yaklaşık 220 MB). Not/hafıza/görev araması cihazında çalışır; metinlerin buluta gönderilmez. İndireyim mi?",
+        ):
+            self._run_tool(
+                lambda: self.embeddings.ensure_model(download=True),
+                "Embedding modeli indiriliyor…",
+                speak=False,
+            )
+
+    def _import_piper_model(self) -> None:
+        self.show_chat()
+        path, _ = QFileDialog.getOpenFileName(
+            self.chat_window, "Piper .onnx modeli içe aktar", "", "Piper (*.onnx)"
         )
-        self._report(format_results(cmd["query"], results), speak=False)
+        if not path:
+            return
+        if not self._confirm(
+            "Piper modelini içe aktar",
+            "Seçilen .onnx ve yanındaki .onnx.json Nora veri klasörüne kopyalanacak. İndirme/buluta yükleme yapılmaz. Piper seçiliyse sistem sesine gizlice dönülmez. İçe aktarayım mı?",
+        ):
+            return
+
+        def run() -> str:
+            message = self.piper.import_model(Path(path))
+            self.store.set_preference("piper_model", self.piper.model_name)
+            return message
+
+        self._run_tool(run, "Piper modeli kopyalanıyor…", speak=False)
+
+    def _import_local_chat_model(self) -> None:
+        self.show_chat()
+        path, _ = QFileDialog.getOpenFileName(
+            self.chat_window, "GGUF sohbet modeli içe aktar", "", "GGUF (*.gguf)"
+        )
+        if not path:
+            return
+        if not self._confirm(
+            "GGUF modelini içe aktar",
+            "Seçilen model Nora veri klasörüne kopyalanacak. İndirme veya buluta yükleme yapılmaz; model yalnızca sen seçince yüklenir. İçe aktarayım mı?",
+        ):
+            return
+
+        def run() -> str:
+            message = self.local_chat.import_model(Path(path))
+            self.store.set_preference("local_chat_model", self.local_chat.model_name)
+            return message
+
+        self._run_tool(run, "GGUF modeli kopyalanıyor…", speak=False)
 
     def _local_search_dialog(self) -> None:
         self.show_chat()
@@ -1760,12 +2143,37 @@ class NoraApp(QWidget):
 
     def _apply_settings(self, values: dict[str, Any]) -> None:
         try:
+            values = dict(values)
+            if values.get("clipboard_watch") is True and not self.store.preference(
+                "clipboard_watch"
+            ):
+                if not self._confirm(
+                    "Pano geçmişini aç",
+                    "Yeni kopyalanan metinler 30 dakika boyunca yalnızca bellekte tutulacak (en fazla 20 kayıt). Parola/anahtar gibi hassas görünenler atlanır; diske yazılmaz ve buluta gönderilmez. Açayım mı?",
+                ):
+                    values["clipboard_watch"] = False
+            if values.get("voice_barge_in") is True and not self.store.preference(
+                "voice_barge_in"
+            ):
+                if not self._confirm(
+                    "Sözümü kesmeyi aç",
+                    "Nora konuşurken yerel 'Hey Nora' bekçisi mikrofonu açık tutacak. Yalnızca tam 'hey nora' ifadesi sesi keser; komut daha sonra ayrıca dinlenir. Kulaklık önerilir. Açayım mı?",
+                ):
+                    values["voice_barge_in"] = False
             self.store.update_preferences(values)
             prefs = self.store.preferences
             self.voice.configure_speech(
                 prefs["speech_rate"], prefs["speech_volume"], prefs["voice_id"]
             )
             self.local_speech.configure(prefs["whisper_model"], prefs["whisper_device"])
+            self.local_chat.configure(prefs["local_chat_model"])
+            self.piper.configure(prefs["piper_model"])
+            self.voice.set_tts_backend(prefs["tts_backend"])
+            self.voice.configure_barge_in(prefs["voice_barge_in"])
+            self.brain.set_chat_backend(prefs["chat_backend"])
+            self.spotify.configure(
+                prefs["spotify_client_id"] or os.getenv("SPOTIFY_CLIENT_ID", "")
+            )
             self.pet.set_appearance(prefs)
             self.tray.setIcon(self._tray_icon())
             for action, key in (
@@ -1779,6 +2187,16 @@ class NoraApp(QWidget):
             self._update_mic_indicator()
             self._update_tts_indicator()
             self._sync_voice_modes()
+            if prefs["voice_barge_in"] and not prefs["wake_word"]:
+                self._report(
+                    "Sözümü kesme için yerel 'Hey Nora' bekçisini de açman gerekiyor senpai. 🎙️",
+                    speak=False,
+                )
+            if prefs["clipboard_watch"]:
+                self.clipboard_history.start()
+            else:
+                self.clipboard_history.stop()
+                self.clipboard_history.clear()
         except (ValueError, CommandError) as exc:
             self._report(f"Ayar uygulanamadı senpai: {exc}")
 
@@ -2626,6 +3044,9 @@ class NoraApp(QWidget):
         )
 
     def _on_wake_word(self, remainder: str = "") -> None:
+        if self.voice.is_speaking and self.store.preference("voice_barge_in"):
+            self._wake_followup = False
+            self.voice.stop_speaking()
         if self._closing or self._busy or self._listening or self.voice.is_speaking:
             return
         self.proactive.user_interacted()
@@ -2709,11 +3130,13 @@ class NoraApp(QWidget):
         text = startup_greeting()
         self.pet.show_speech(text, 6500)
         self.add_message(text, "bot")
-        if not self.brain.available:
-            self.add_message(
-                "Heh, şu an çevrimdışı temel komut modundayım. Serbest sohbet için GROQ_API_KEY ayarla senpai. 🐾",
-                "bot",
+        if not self.brain.chat_available:
+            message = (
+                "Yerel sohbet seçili ama GGUF modeli hazır değil. Menüden model içe aktar senpai; buluta geçmiyorum. 🧠"
+                if self.brain.chat_backend == "local"
+                else "Heh, şu an çevrimdışı temel komut modundayım. Serbest sohbet için GROQ_API_KEY ayarla veya yerel GGUF modeli seç senpai. 🐾"
             )
+            self.add_message(message, "bot")
         if self.store.preference("briefing_on_startup"):
             QTimer.singleShot(
                 1800, lambda: self._briefing_command({"action": "morning"})
@@ -2794,10 +3217,17 @@ class NoraApp(QWidget):
         if self.settings_dialog is not None:
             self.settings_dialog.close()
         self.proactive.stop()
+        self.clipboard_history.stop()
+        self.clipboard_history.clear()
+        self._clipboard_prune_timer.stop()
         self.ptt_hotkey.stop()
         self.reminders.stop()
         self.local_speech.close()
+        self.embeddings.close()
+        self.local_chat.close()
+        self.piper.close()
         self.ocr.close()
+        self.spotify.close()
         self.voice.close()
         self.tools.close()
         self.brain.close()

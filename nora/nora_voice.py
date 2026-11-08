@@ -97,6 +97,9 @@ class NoraVoice(QObject):
         tts_enabled: bool = True,
         stt_backend: str = "google",
         local_speech: Any = None,
+        local_tts: Any = None,
+        tts_backend: str = "system",
+        barge_in: bool = False,
         speech_rate: int = 180,
         speech_volume: float = 0.9,
         voice_id: str = "",
@@ -108,6 +111,11 @@ class NoraVoice(QObject):
             stt_backend if stt_backend in {"google", "local"} else "google"
         )
         self.local_speech = local_speech
+        self.local_tts = local_tts
+        self.tts_backend = (
+            tts_backend if tts_backend in {"system", "piper"} else "system"
+        )
+        self.barge_in_enabled = bool(barge_in)
         self._tts_settings = {
             "rate": int(speech_rate),
             "volume": float(speech_volume),
@@ -227,6 +235,16 @@ class NoraVoice(QObject):
         except Exception:
             logger.debug("COM kapatılamadı", exc_info=True)
 
+    def set_tts_backend(self, backend: str) -> None:
+        if backend not in {"system", "piper"}:
+            raise ValueError("Konuşma motoru system/piper olmalı.")
+        if backend != self.tts_backend:
+            self.stop_speaking()
+        self.tts_backend = backend
+
+    def configure_barge_in(self, enabled: bool) -> None:
+        self.barge_in_enabled = bool(enabled)
+
     def diagnose_speech(self) -> str:
         with self._speech_lock:
             settings = dict(self._tts_settings)
@@ -235,7 +253,7 @@ class NoraVoice(QObject):
         if settings["volume"] <= 0:
             state += " ama ses düzeyi 0"
         return (
-            f"Sesli yanıt {state} · hız {settings['rate']} · düzey {settings['volume']:.2f} · "
+            f"Sesli yanıt {state} · motor {self.tts_backend} · hız {settings['rate']} · düzey {settings['volume']:.2f} · "
             f"kuyruk {pending} · motor {'hazır' if self._engine is not None else 'henüz başlatılmadı'}. "
             + (
                 f"Son hata: {self.last_speech_error}"
@@ -324,6 +342,9 @@ class NoraVoice(QObject):
             logger.debug("Ses seçimi uygulanamadı", exc_info=True)
 
     def _speak_chunks(self, generation: int, chunks: list[str]) -> None:
+        if self.tts_backend == "piper":
+            self._speak_piper(generation, chunks)
+            return
         last_error: Exception | None = None
         for attempt in range(2):
             try:
@@ -357,6 +378,41 @@ class NoraVoice(QObject):
         self.speech_error.emit(
             "Ses motorunu açamadım senpai. Windows SAPI/espeak-ng kurulumunu ve ses çıkışını kontrol et. 🔊"
         )
+
+    def _speak_piper(self, generation: int, chunks: list[str]) -> None:
+        if self.local_tts is None:
+            self.last_speech_error = "Piper yapılandırılmadı."
+            self.speech_error.emit(
+                "Piper seçili ama yerel ses motoru yok senpai. Menüden Piper modeli içe aktar. Sistem sesine gizlice geçmedim. 🔊"
+            )
+            return
+        with self._speech_lock:
+            settings = dict(self._tts_settings)
+        try:
+            for chunk in chunks:
+                with self._speech_lock:
+                    if self._closed or generation != self._speech_generation:
+                        return
+                completed = self.local_tts.speak(
+                    chunk,
+                    volume=settings["volume"],
+                    rate=settings["rate"],
+                    should_stop=lambda: (
+                        self._closed or generation != self._speech_generation
+                    ),
+                )
+                if not completed:
+                    return
+            self.last_speech_error = ""
+        except Exception as exc:
+            self.last_speech_error = f"Piper hatası: {type(exc).__name__}"
+            logger.warning("Piper hatası: %s", type(exc).__name__, exc_info=True)
+            detail = (
+                str(exc)
+                if isinstance(exc, ValueError)
+                else "Piper ses motoru çalıştırılamadı."
+            )
+            self.speech_error.emit(detail + " Sistem sesine gizlice geçmedim. 🔊")
 
     def _tts_worker(self) -> None:
         com_initialized = self._com_initialize()
@@ -407,6 +463,11 @@ class NoraVoice(QObject):
                 self._speech_queue.task_done()
             except queue.Empty:
                 break
+        if self.local_tts is not None:
+            try:
+                self.local_tts.stop()
+            except Exception:
+                logger.debug("Piper durdurulamadı", exc_info=True)
         engine = self._engine
         if engine is not None:
             try:
@@ -943,7 +1004,11 @@ class NoraVoice(QObject):
             silent_chunks = 0
             try:
                 while not self._wake_stop.is_set():
-                    if self._closed or self.is_speaking or self._listening:
+                    if (
+                        self._closed
+                        or (self.is_speaking and not self.barge_in_enabled)
+                        or self._listening
+                    ):
                         return False
                     raw = self._read_mic_chunk(stream, chunk)
                     if not raw:
@@ -973,16 +1038,26 @@ class NoraVoice(QObject):
 
     def _wake_loop(self) -> None:
         while not self._wake_stop.wait(0.05):
-            if self._closed or self.is_speaking or self._listening:
+            if (
+                self._closed
+                or (self.is_speaking and not self.barge_in_enabled)
+                or self._listening
+            ):
                 self._wake_stop.wait(0.2)
                 continue
             if not self._mic_lock.acquire(timeout=0.2):
                 continue
             try:
-                if self._closed or self.is_speaking or self._listening:
+                if (
+                    self._closed
+                    or (self.is_speaking and not self.barge_in_enabled)
+                    or self._listening
+                ):
                     continue
                 detected = self._local_wake_session()
                 if detected and not self._closed:
+                    if self.is_speaking and self.barge_in_enabled:
+                        self.stop_speaking()
                     # Local spotting only activates the assistant; the command
                     # itself is captured afterwards by explicit cloud STT.
                     self.wake_word_detected.emit("")

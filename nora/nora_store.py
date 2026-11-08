@@ -1,6 +1,7 @@
 """Explicit, local-only preferences, memories, notes and scheduled activities.
 
-No conversation transcript, microphone audio or clipboard history is saved.
+No conversation transcript or microphone audio is saved. Optional clipboard
+history is session-only and lives outside this store.
 Writes are atomic and protected by a lock. Pass ``path=None`` for an isolated,
 in-memory store (used by tests and library callers).
 """
@@ -43,6 +44,14 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "briefing_on_startup": False,
     "media_keys": True,
     "audit_log": True,
+    "clipboard_watch": False,
+    "semantic_search": False,
+    "chat_backend": "groq",
+    "local_chat_model": "",
+    "tts_backend": "system",
+    "piper_model": "",
+    "voice_barge_in": False,
+    "spotify_client_id": "",
     "tts": True,
     "proactive": True,
     "quiet_hours": True,
@@ -135,6 +144,7 @@ class NoraStore:
                 "layouts",
                 "companion",
                 "audit",
+                "enabled_plugins",
             ):
                 is_dict = key in {"preferences", "memories", "companion"}
                 value = raw.get(key, {} if is_dict else [])
@@ -207,11 +217,25 @@ class NoraStore:
                 "accessory": _ACCESSORIES,
                 "double_click_action": {"chat", "game", "pet"},
                 "mode": _MODES,
+                "chat_backend": {"groq", "local"},
+                "tts_backend": {"system", "piper"},
             }
             if key in choices and value not in choices[key]:
                 raise ValueError("Bu seçenek desteklenmiyor.")
             if key == "hair_color" and not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
                 raise ValueError("Renk #RRGGBB biçiminde olmalı.")
+            if key in {"local_chat_model", "piper_model"} and value:
+                suffix = ".gguf" if key == "local_chat_model" else ".onnx"
+                if not re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}" + re.escape(suffix), value
+                ):
+                    raise ValueError("Model adı güvenli bir dosya adı olmalı.")
+            if (
+                key == "spotify_client_id"
+                and value
+                and not re.fullmatch(r"[A-Za-z0-9]{16,80}", value)
+            ):
+                raise ValueError("Spotify Client ID harf/rakam içermeli.")
 
     def set_preference(self, key: str, value: Any) -> None:
         with self._lock:
@@ -634,6 +658,31 @@ class NoraStore:
         """Explicit user-requested local export; no microphone/audio is included."""
         with self._lock:
             return copy.deepcopy(self._data)
+
+    @property
+    def enabled_plugins(self) -> list[str]:
+        with self._lock:
+            return [
+                str(item)
+                for item in self._data.get("enabled_plugins", [])
+                if isinstance(item, str)
+            ]
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> None:
+        if not re.fullmatch(r"[a-z][a-z0-9-]{1,39}", str(plugin_id)):
+            raise ValueError("Geçersiz eklenti kimliği.")
+        with self._lock:
+            items = [
+                item
+                for item in self._data.get("enabled_plugins", [])
+                if isinstance(item, str)
+            ]
+            if enabled and plugin_id not in items:
+                items.append(plugin_id)
+            elif not enabled and plugin_id in items:
+                items.remove(plugin_id)
+            self._data["enabled_plugins"] = items
+            self._save()
 
     @property
     def mode_snapshot(self) -> dict[str, bool]:
