@@ -99,6 +99,7 @@ class SpotifyClient:
         self._open_browser = open_browser or webbrowser.open
         self.timeout = max(5.0, min(float(timeout), 300.0))
         self._tokens: dict[str, Any] | None = None
+        self._revoked = False
         self._lock = threading.RLock()
         self._cancel = threading.Event()
         self.storage_notice = ""
@@ -132,6 +133,8 @@ class SpotifyClient:
 
     def _load_tokens(self) -> dict[str, Any] | None:
         with self._lock:
+            if self._revoked:
+                return None
             if self._tokens is not None:
                 return dict(self._tokens)
         keyring = self._keyring_module()
@@ -172,6 +175,7 @@ class SpotifyClient:
         }
         with self._lock:
             self._tokens = data
+            self._revoked = False
         keyring = self._keyring_module()
         if keyring is None:
             self.storage_notice = (
@@ -287,7 +291,26 @@ class SpotifyClient:
             server.server_close()
 
     def disconnect(self) -> str:
-        self._clear_tokens()
+        self.cancel()
+        with self._lock:
+            self._tokens = None
+            self._revoked = True
+        keyring = self._keyring_module()
+        if keyring is None:
+            return "Spotify oturum tokenını bellekten temizledim; sistem kasası kullanılmıyordu. 🎧"
+        try:
+            keyring.delete_password(KEYRING_SERVICE, self._username())
+            if keyring.get_password(KEYRING_SERVICE, self._username()):
+                raise RuntimeError("token remains")
+        except Exception:
+            self.storage_notice = (
+                "Oturum kapandı ama sistem kasasındaki token silinemedi."
+            )
+            return (
+                "Spotify oturumunu kapattım; sistem anahtar kasasındaki token silinemedi. "
+                "Windows Kimlik Bilgileri Yöneticisi / sistem anahtarlığından Nora.Spotify kaydını elle kaldırabilirsin. 🎧"
+            )
+        self.storage_notice = "Yerel Spotify token kaydı silindi."
         return "Spotify bağlantısını ve yerel token kaydını temizledim. 🎧"
 
     def connected(self) -> bool:

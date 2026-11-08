@@ -1,4 +1,5 @@
 import math
+import struct
 
 import pytest
 
@@ -104,7 +105,7 @@ def test_local_chat_import_and_no_cloud_fallback(tmp_path):
             }
 
     source = tmp_path / "model.gguf"
-    source.write_bytes(b"GGUF-fake")
+    source.write_bytes(struct.pack("<4sIQQ", b"GGUF", 3, 0, 0))
     chat = LocalChatModel(tmp_path / "models", model_factory=FakeLlama)
     chat.import_model(source)
     assert chat.cached()

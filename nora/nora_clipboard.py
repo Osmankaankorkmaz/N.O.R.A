@@ -67,6 +67,11 @@ class ClipboardHistory(QObject):
         """Observe future changes only; do not silently ingest the current clipboard."""
         if self._connected:
             return True
+        if self._reader is not None:
+            # Injected readers are used by tests/headless adapters; manual
+            # capture_current() remains the explicit ingestion boundary.
+            self._connected = True
+            return True
         try:
             clipboard = QApplication.clipboard()
             if clipboard is None:

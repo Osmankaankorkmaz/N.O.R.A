@@ -45,7 +45,7 @@ class LocalEmbeddings:
                         from fastembed import TextEmbedding
                     except ImportError as exc:
                         raise ValueError(
-                            "Yerel anlam araması için fastembed kurulu olmalı. requirements-ai.txt dosyasını kur senpai. 🔎"
+                            "Yerel anlam araması için fastembed kurulu olmalı. requirements-embeddings.txt dosyasını kur senpai. 🔎"
                         ) from exc
                     factory = TextEmbedding
                 try:

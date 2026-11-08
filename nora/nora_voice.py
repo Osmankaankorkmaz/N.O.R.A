@@ -126,6 +126,11 @@ class NoraVoice(QObject):
         self._speech_lock = threading.RLock()
         self._speech_pending = 0
         self._speech_generation = 0
+        self._active_speech: int | None = None
+        # is_speaking becomes false on cancellation, but microphone capture must
+        # wait until the backend has actually returned from runAndWait/write.
+        self._playback_idle = threading.Event()
+        self._playback_idle.set()
         self._tts_stop = threading.Event()
         self._tts_thread: threading.Thread | None = None
         self._engine: Any = None
@@ -163,6 +168,14 @@ class NoraVoice(QObject):
     def is_speaking(self) -> bool:
         with self._speech_lock:
             return self._speech_pending > 0
+
+    @property
+    def playback_active(self) -> bool:
+        return not self._playback_idle.is_set()
+
+    def wait_for_playback_stop(self, timeout: float = 2.0) -> bool:
+        """Wait outside UI locks; never open a microphone over dying audio."""
+        return self._playback_idle.wait(max(0.0, min(float(timeout), 5.0)))
 
     @property
     def is_listening(self) -> bool:
@@ -355,13 +368,21 @@ class NoraVoice(QObject):
                 self._apply_engine_settings(self._engine, settings)
                 for chunk in chunks:
                     with self._speech_lock:
-                        if self._closed or generation != self._speech_generation:
+                        if (
+                            self._closed
+                            or not self.tts_enabled
+                            or generation != self._speech_generation
+                        ):
                             return
                     self._engine.say(chunk)
                     self._engine.runAndWait()
+                    if generation != self._speech_generation or not self.tts_enabled:
+                        return
                 self.last_speech_error = ""
                 return
             except Exception as exc:
+                if generation != self._speech_generation or not self.tts_enabled:
+                    return
                 last_error = exc
                 logger.warning(
                     "Ses motoru hatası (deneme %s): %s", attempt + 1, type(exc).__name__
@@ -405,6 +426,8 @@ class NoraVoice(QObject):
                     return
             self.last_speech_error = ""
         except Exception as exc:
+            if generation != self._speech_generation or not self.tts_enabled:
+                return
             self.last_speech_error = f"Piper hatası: {type(exc).__name__}"
             logger.warning("Piper hatası: %s", type(exc).__name__, exc_info=True)
             detail = (
@@ -425,10 +448,14 @@ class NoraVoice(QObject):
                 try:
                     with self._speech_lock:
                         current = (
-                            generation == self._speech_generation and not self._closed
+                            generation == self._speech_generation
+                            and not self._closed
+                            and self.tts_enabled
                         )
-                    if not current:
-                        continue
+                        if not current:
+                            continue
+                        self._active_speech = generation
+                        self._playback_idle.clear()
                     self.speaking_started.emit()
                     if on_start:
                         try:
@@ -447,8 +474,16 @@ class NoraVoice(QObject):
                         except Exception:
                             logger.exception("TTS bitiş callback hatası")
                     with self._speech_lock:
-                        self._speech_pending = max(0, self._speech_pending - 1)
-                    self.speaking_finished.emit()
+                        # Cancellation owns the pending counter. A late worker
+                        # must not decrement a NEW reply's count when it returns.
+                        current = generation == self._speech_generation
+                        if self._active_speech == generation:
+                            self._active_speech = None
+                            self._playback_idle.set()
+                        if current:
+                            self._speech_pending = max(0, self._speech_pending - 1)
+                    if current:
+                        self.speaking_finished.emit()
                     self._speech_queue.task_done()
         finally:
             self._com_uninitialize(com_initialized)
@@ -457,10 +492,16 @@ class NoraVoice(QObject):
         with self._speech_lock:
             self._speech_generation += 1
             self._speech_pending = 0
+            # Keep _active_speech until its worker acknowledges the stop.
         while True:
             try:
-                self._speech_queue.get_nowait()
+                item = self._speech_queue.get_nowait()
                 self._speech_queue.task_done()
+                if callable(item[3]):
+                    try:
+                        item[3]()
+                    except Exception:
+                        logger.exception("İptal edilen TTS bitiş işlevi hatası")
             except queue.Empty:
                 break
         if self.local_tts is not None:

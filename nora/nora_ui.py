@@ -217,6 +217,7 @@ class NoraApp(QWidget):
         self._busy = False
         self._listening = False
         self._wake_followup = False
+        self._wake_capture_deadline = 0.0
         self._resume_wake_after_audio = False
         self._stt_test_request = 0
         self._conversation_active = False
@@ -863,6 +864,9 @@ class NoraApp(QWidget):
         self.pet.position_changed.connect(self._on_pet_moved)
         self.voice.speaking_started.connect(self._on_speaking_started)
         self.voice.speaking_finished.connect(self._on_speaking_finished)
+        self.voice.speaking_started.connect(
+            lambda: setattr(self, "_wake_capture_deadline", 0.0)
+        )
         self.voice.speech_error.connect(self._on_voice_error)
         self.voice.voice_error.connect(self._on_voice_error)
         self.voice.listening_started.connect(self._on_listening_started)
@@ -1715,19 +1719,13 @@ class NoraApp(QWidget):
     # ------------------------------------------------------- personal features
     @staticmethod
     def _audit_detail(cmd: dict[str, Any]) -> str:
-        private_keys = {
-            "text",
-            "value",
-            "code",
-            "query",
-            "url",
-            "prompt",
-            "answer",
-            "steps",
+        # Allow metadata only. Future fields must not accidentally persist
+        # plugin names, clipboard IDs, note text or dictated payloads.
+        safe = {
+            key: cmd[key]
+            for key in ("command", "action", "backend", "mode")
+            if key in cmd and isinstance(cmd[key], str)
         }
-        safe = {key: value for key, value in cmd.items() if key not in private_keys}
-        if any(key in cmd for key in private_keys):
-            safe["payload"] = "[yerel metin gizlendi]"
         return json.dumps(safe, ensure_ascii=False)[:240]
 
     def _media_control_result(self, action: str) -> str:
@@ -2193,7 +2191,12 @@ class NoraApp(QWidget):
                     speak=False,
                 )
             if prefs["clipboard_watch"]:
-                self.clipboard_history.start()
+                if not self.clipboard_history.start():
+                    self.store.set_preference("clipboard_watch", False)
+                    self._report(
+                        "Pano izleyicisi başlatılamadı; ayarı kapattım. Pano içeriği tutulmuyor. 📋",
+                        speak=False,
+                    )
             else:
                 self.clipboard_history.stop()
                 self.clipboard_history.clear()
@@ -3044,9 +3047,31 @@ class NoraApp(QWidget):
         )
 
     def _on_wake_word(self, remainder: str = "") -> None:
-        if self.voice.is_speaking and self.store.preference("voice_barge_in"):
+        import time
+
+        interrupted = self.voice.playback_active and self.voice.barge_in_enabled
+        if self.voice.is_speaking:
+            if not interrupted:
+                return
             self._wake_followup = False
             self.voice.stop_speaking()
+        if interrupted or self.voice.playback_active:
+            if self._closing or self._busy or self._listening:
+                return
+            if not self._wake_capture_deadline:
+                self._wake_capture_deadline = time.monotonic() + 3.0
+                self.pet.show_speech("Ses kesiliyor… sonra dinliyorum 🎙️", 2000)
+            if self.voice.playback_active:
+                if time.monotonic() >= self._wake_capture_deadline:
+                    self._wake_capture_deadline = 0.0
+                    self._report(
+                        "Ses motoru kesilmeyi bitirmedi; mikrofonu sesin üzerine açmadım. 🔇 düğmesine basıp tekrar deneyebilirsin.",
+                        speak=False,
+                    )
+                else:
+                    QTimer.singleShot(50, lambda: self._on_wake_word(remainder))
+                return
+            self._wake_capture_deadline = 0.0
         if self._closing or self._busy or self._listening or self.voice.is_speaking:
             return
         self.proactive.user_interacted()
@@ -3079,6 +3104,7 @@ class NoraApp(QWidget):
         if (
             self._wake_followup
             and not self.voice.is_speaking
+            and not self.voice.playback_active
             and not self._busy
             and not self._listening
         ):

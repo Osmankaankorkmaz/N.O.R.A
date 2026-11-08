@@ -55,11 +55,21 @@ class Audio:
         return stream
 
 
+def valid_piper_config():
+    return {
+        "num_symbols": 256,
+        "num_speakers": 1,
+        "audio": {"sample_rate": 22050},
+        "espeak": {"voice": "tr"},
+        "phoneme_id_map": {"a": [1]},
+    }
+
+
 def import_fake_model(tmp_path):
     source = tmp_path / "voice.onnx"
     source.write_bytes(b"onnx")
     Path(str(source) + ".json").write_text(
-        json.dumps({"language": "tr"}), encoding="utf-8"
+        json.dumps(valid_piper_config()), encoding="utf-8"
     )
     return source
 
@@ -71,10 +81,13 @@ def test_piper_import_requires_config_and_plays_locally(tmp_path):
         tmp_path / "models",
         voice_loader=lambda *a, **k: FakeVoice(),
         audio_backend=Audio(),
+        config_factory=lambda **kw: kw,
     )
     with pytest.raises(ValueError):
         piper.import_model(source)
-    Path(str(source) + ".json").write_text("{}", encoding="utf-8")
+    Path(str(source) + ".json").write_text(
+        json.dumps(valid_piper_config()), encoding="utf-8"
+    )
     piper.import_model(source)
     assert piper.cached()
     assert piper.speak("Merhaba", volume=0.8, rate=180)
@@ -87,6 +100,7 @@ def test_piper_stop_aborts_playback_and_missing_model_is_explicit(tmp_path):
         tmp_path / "models",
         voice_loader=lambda *a, **k: FakeVoice(),
         audio_backend=audio,
+        config_factory=lambda **kw: kw,
     )
     with pytest.raises(LocalModelMissing):
         piper.speak("Merhaba")

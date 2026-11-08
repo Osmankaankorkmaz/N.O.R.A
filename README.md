@@ -4,6 +4,16 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 
 > **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
 
+## 1.9.1 · Kurulum ve kararlılık
+
+- **Windows kurulum yardımcısı:** `tools/setup_windows.ps1` temel/local/embeddings/chat/piper/all seçenekleriyle sanal ortam kurar; yönetici izni, kalıcı execution-policy değişikliği veya otomatik model indirmesi yapmaz.
+- **Başsız teşhis:** `python main.py --doctor [--check piper] [--json]` paket/model dosyası/veri klasörünü kontrol eder; PyQt, mikrofon, hoparlör, ağ veya Spotify kasası açmaz. Eksik zorunlu bileşenlerde çıkış kodu 1’dir.
+- **Ayrı özellik paketleri:** Bir C++ derleme hatası tüm yerel özellikleri engellemesin diye `requirements-embeddings.txt`, `requirements-chat.txt`, `requirements-piper.txt` eklendi.
+- **Ses kesme yarışı düzeltildi:** İptal edilen eski TTS işçisi yeni yanıtın kuyruğunu bozmaz; mikrofon, ses motoru gerçekten durmadan açılmaz. Kesme zaman aşımı görünürdür.
+- **Model içe aktarma:** GGUF başlığı ve Piper JSON alanları doğrulanır; kopyalar geçici alanda hazırlanır, başarısız çok dosyalı değişimde önceki dosyalar geri yüklenir. Yerel sohbet üretimi sırasında kapatma arayüzü kilitlemez.
+- **Dürüst durumlar:** Pano izleyicisi başlamazsa ayar geri kapatılır; Spotify oturumu kapatılır; token kasadan silinemediyse bu açıkça söylenir. Denetim kaydı yalnızca izinli eylem meta verisini yazar.
+- Windows/Linux Python 3.11 CI iş akışı eklendi; gerçek cihaz/model/hesap testlerinin yerini tutmaz.
+
 ## 1.9.0 · İsteğe bağlı gelişmiş entegrasyonlar
 
 - **Spotify Web API:** OAuth PKCE, sistem anahtar kasasında token, çalan parça/cihazlar ve gerçek çal-duraklat/sonraki/önceki kontrolü. Client secret yok; bağlantı yoksa durum açıkça söylenir.
@@ -119,10 +129,20 @@ Serbest sohbet ve daha esnek ifadeler için Groq gerekir. Hareket komutları det
 
 ### Gelişmiş isteğe bağlı paketler
 
-Spotify token kasası temel paketteki `keyring` ile çalışır. Embedding/GGUF/Piper için:
+Spotify token kasası temel paketteki `keyring` ile çalışır. Diğer özellikleri ayrı kurabilirsin:
+
+| Özellik | Dosya | İçerik |
+|---|---|---|
+| Yerel ses/OCR/takvim/kısayol | `requirements-local.txt` | Whisper, RapidOCR, icalendar, keyboard |
+| Anlam araması | `requirements-embeddings.txt` | fastembed |
+| Yerel sohbet | `requirements-chat.txt` | llama-cpp-python |
+| Piper TTS | `requirements-piper.txt` | piper-tts, sounddevice |
+| Tümü | `requirements-ai.txt` | Yukarıdakilerin tümü |
 
 ```bash
-python -m pip install -r requirements-ai.txt
+# Yalnızca ihtiyacın olanı kur; hepsini kurmak zorunda değilsin.
+python -m pip install -r requirements-piper.txt
+python main.py --doctor --check piper
 ```
 
 - `llama-cpp-python` bazı sistemlerde C++ derleme araçları isteyebilir; hazır wheel yoksa kurulum belgesi gerekir.
@@ -136,16 +156,23 @@ Temel paket için Python **3.10+**. Yerel ses/OCR/takvim eklentileri için `requ
 
 ### Windows
 
+Önerilen yardımcı (Python 3.10–3.12; yönetici gerekmez):
+
+```powershell
+# Temel kurulum. Özellik için: -Feature local / embeddings / chat / piper / all
+powershell -ExecutionPolicy Bypass -File .\tools\setup_windows.ps1 -Feature base
+.venv\Scripts\python.exe main.py --doctor
+$env:GROQ_API_KEY = "gsk_..."
+.venv\Scripts\python.exe main.py
+```
+
+`Bypass` yalnızca bu PowerShell süreci içindir; sistem politikasını kalıcı değiştirmez. Elle kurulum:
+
 ```powershell
 py -3 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-# Tüm yerel özellikler (Whisper, OCR, .ics):
-python -m pip install -r requirements-local.txt
-
-$env:GROQ_API_KEY = "gsk_..."
-python main.py
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe main.py --doctor
 ```
 
 Yerel ses modelleri başlangıçta indirilmez. Kurulumdan sonra Nora sağ tık/tray → **Özellikler → Yerel ses modelini indir** adımını açıkça onaylayın; ardından **Ayarlar → Komut ses tanıma → Whisper** seçin. Model yoksa Nora sesinizi Google’a göndermez.
@@ -235,6 +262,9 @@ python main.py --no-tts             # sesli yanıt kapalı
 python main.py --no-proactive       # kendiliğinden konuşma kapalı
 python main.py --offline            # Groq kapalı; yerel komutlar çalışır
 python main.py --data-dir ./veri    # taşınabilir veri klasörü
+python main.py --doctor             # GUI/mikrofon/ağ açmadan kurulum teşhisi
+python main.py --doctor --check piper --check chat  # özellik paket/model dosyaları
+python main.py --doctor --json      # makinece okunabilir rapor
 python main.py --version
 ```
 
@@ -294,11 +324,14 @@ nora/
   nora_spotify.py         # OAuth PKCE + Spotify Web API
   nora_clipboard.py       # onaylı, bellek-içi pano geçmişi
   nora_plugins.py         # güvenli JSON komut paketi eklentileri
+  nora_diagnostics.py     # ağ/cihaz açmayan kurulum teşhisi
+  nora_model_files.py     # model başlık doğrulama ve geçici kopyalı içe aktarma
   nora_settings_dialog.py # ayar paneli
   nora_proactive.py       # düşük frekanslı proaktif konuşma
   nora_ui.py              # sohbet/tray/worker entegrasyonu
 tools/
   export_character.py     # QPainter çiziminden PNG/GIF galerisi üretir
+  setup_windows.ps1       # ayrı özellikli Windows sanal ortam kurulumu
 docs/
   character/              # tüm poz, duygu, aksesuar, kıyafet ve animasyon çıktıları
 tests/
@@ -306,6 +339,10 @@ requirements.txt
 requirements-local.txt
 requirements-dev.txt
 requirements-ai.txt
+requirements-embeddings.txt
+requirements-chat.txt
+requirements-piper.txt
+.github/workflows/tests.yml
 docs/plugins/
 .env.example
 ```
@@ -320,4 +357,4 @@ python -m compileall -q nora main.py tests
 ruff check nora tests tools main.py
 ```
 
-Bu sürümde **284 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export, sayı oyunu, Spotify PKCE/state/token kasası, yerel embedding/GGUF/Piper, pano geçmişi sınırları, JSON eklenti güvenliği ve sözünü kesme kontrol edilmiştir. Fiziksel Windows mikrofonu, gerçek Groq anahtarı ve indirilmiş Whisper modeli bu ortamda canlı doğrulanamamıştır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Yerel tam ortamda **302 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export, sayı oyunu, Spotify PKCE/state/token kasası, yerel embedding/GGUF/Piper, pano geçmişi sınırları, JSON eklenti güvenliği ve sözünü kesme kontrol edilmiştir. Yeni kapsam: başsız teşhisin sır/cihaz/ağ açmaması, iptal edilen TTS işçisinin yeni kuyruğu bozmaması, gerçek ses bitmeden mikrofon açılmaması, model başlık/geri yükleme doğrulaması, üretim sırasında bloklamayan kapatma ve dürüst pano/Spotify hata durumları. Fiziksel Windows mikrofonu, gerçek Groq anahtarı, indirilmiş Whisper/GGUF/Piper/embedding modelleri ve Spotify hesabı bu ortamda canlı doğrulanamamıştır. Windows/Linux CI iş akışı eklendi; uzak çalışma sonucu ayrı doğrulanır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

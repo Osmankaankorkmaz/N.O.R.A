@@ -1,0 +1,66 @@
+name: Nora tests
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python 3.11 · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      NORA_OFFLINE: "1"
+      NORA_WAKE_WORD: "0"
+      NORA_TTS: "0"
+      NORA_PROACTIVE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: "requirements*.txt"
+      - name: Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev espeak-ng xvfb libgl1 libegl1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xfixes0 xclip
+      - name: Windows setup helper (base only)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./tools/setup_windows.ps1 -Feature base
+      - name: Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Lint and syntax
+        run: |
+          python -m ruff check nora tests tools main.py
+          python -m ruff format --check nora tests tools main.py
+          python -m compileall -q nora tools main.py
+      - name: Headless doctor (no microphone/network)
+        shell: bash
+        run: |
+          python main.py --doctor --data-dir "$RUNNER_TEMP/nora-doctor" --check piper > doctor.txt || status=$?
+          cat doctor.txt
+          # Optional Piper is not installed in this base-only CI job.
+          test "${status:-0}" -eq 1
+          grep -q 'piper paketleri' doctor.txt
+      - name: Tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest -q
+      - name: Tests (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest -q

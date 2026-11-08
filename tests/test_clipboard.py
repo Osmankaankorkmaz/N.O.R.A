@@ -46,3 +46,15 @@ def test_manual_capture_uses_reader_without_watcher(qapp):
     history.clear()
     assert history.entries == []
     history.stop()
+
+
+def test_injected_reader_start_does_not_require_qt_clipboard(qapp):
+    from nora.nora_clipboard import ClipboardHistory
+
+    history = ClipboardHistory(reader=lambda: "yerel metin")
+    assert history.start()
+    assert history.active
+    assert history.capture_current()
+    assert history.entries[0]["text"] == "yerel metin"
+    history.stop()
+    history.clear()

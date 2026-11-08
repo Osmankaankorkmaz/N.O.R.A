@@ -6,7 +6,6 @@ stop_speaking/barge-in can abort promptly instead of waiting for a long reply.
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import threading
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .nora_local_ai import LocalModelMissing
+from .nora_model_files import staged_import, validate_piper_config
 
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.onnx")
 MAX_MODEL_BYTES = 500 * 1024 * 1024
@@ -26,14 +26,17 @@ class PiperSpeech:
         *,
         voice_loader: Any = None,
         audio_backend: Any = None,
+        config_factory: Any = None,
     ) -> None:
         self.model_dir = Path(model_dir)
         self.model_name = ""
         self._voice_loader = voice_loader
         self._audio = audio_backend
+        self._config_factory = config_factory
         self._voice: Any = None
         self._stream: Any = None
         self._lock = threading.RLock()
+        self._stream_lock = threading.RLock()
         self._stop = threading.Event()
 
     def configure(self, model_name: str) -> None:
@@ -78,7 +81,7 @@ class PiperSpeech:
         size = source.stat().st_size + config.stat().st_size
         if not 0 < size <= MAX_MODEL_BYTES:
             raise ValueError("Piper modeli 500 MB altında olmalı.")
-        json.loads(config.read_text(encoding="utf-8"))
+        validate_piper_config(config)
         name = re.sub(r"[^A-Za-z0-9_.-]", "_", source.name)
         if not _NAME_RE.fullmatch(name):
             raise ValueError("Piper model dosya adı geçersiz.")
@@ -92,8 +95,12 @@ class PiperSpeech:
         free = shutil.disk_usage(self.model_dir).free
         if free < size + 32 * 1024 * 1024:
             raise ValueError("Piper modeli için yeterli boş disk alanı yok.")
-        shutil.copy2(source, target)
-        shutil.copy2(config, target_config)
+        with staged_import(
+            self.model_dir,
+            {name: source, target_config.name: config},
+            overwrite=overwrite,
+        ) as stage:
+            validate_piper_config(stage / target_config.name)
         self.configure(name)
         return (
             f"Piper modeli içe aktarıldı: {name}. 'piper ses modu' ile seçebilirsin. 🔊"
@@ -114,7 +121,7 @@ class PiperSpeech:
                         from piper import PiperVoice
                     except ImportError as exc:
                         raise ValueError(
-                            "Piper için piper-tts kurulu olmalı. requirements-ai.txt dosyasını kur senpai. 🔊"
+                            "Piper için piper-tts kurulu olmalı. requirements-piper.txt dosyasını kur senpai. 🔊"
                         ) from exc
                     loader = PiperVoice.load
                 try:
@@ -140,7 +147,7 @@ class PiperSpeech:
             return sd
         except ImportError as exc:
             raise ValueError(
-                "Piper ses çıkışı için sounddevice kurulu olmalı. requirements-ai.txt dosyasını kur senpai. 🔊"
+                "Piper ses çıkışı için sounddevice kurulu olmalı. requirements-piper.txt dosyasını kur senpai. 🔊"
             ) from exc
 
     def speak(
@@ -156,12 +163,20 @@ class PiperSpeech:
         stopped = should_stop or (lambda: False)
         try:
             import numpy as np
-            from piper import SynthesisConfig
         except ImportError as exc:
             raise ValueError(
-                "Piper/numpy kurulumu eksik. requirements-ai.txt dosyasını kur senpai. 🔊"
+                "Piper/numpy kurulumu eksik. requirements-piper.txt dosyasını kur senpai. 🔊"
             ) from exc
-        config = SynthesisConfig(
+        config_factory = self._config_factory
+        if config_factory is None:
+            try:
+                from piper import SynthesisConfig
+            except ImportError as exc:
+                raise ValueError(
+                    "Piper kurulumu eksik. requirements-piper.txt dosyasını kur senpai. 🔊"
+                ) from exc
+            config_factory = SynthesisConfig
+        config = config_factory(
             volume=max(0.0, min(float(volume), 1.0)),
             length_scale=max(0.6, min(180.0 / max(rate, 1), 1.8)),
         )
@@ -177,7 +192,7 @@ class PiperSpeech:
                     continue
                 channels = max(1, int(chunk.sample_channels))
                 samples = np.frombuffer(pcm, dtype="<i2").reshape(-1, channels)
-                with self._lock:
+                with self._stream_lock:
                     self._stream = audio.OutputStream(
                         samplerate=int(chunk.sample_rate),
                         channels=channels,
@@ -197,7 +212,7 @@ class PiperSpeech:
                         stream.close()
                     except Exception:
                         pass
-                    with self._lock:
+                    with self._stream_lock:
                         self._stream = None
             return not (self._stop.is_set() or stopped())
         except Exception as exc:
@@ -209,7 +224,8 @@ class PiperSpeech:
 
     def stop(self) -> None:
         self._stop.set()
-        with self._lock:
+        # Do not wait for a model load/synthesis lock while aborting audio.
+        with self._stream_lock:
             stream = self._stream
         if stream is not None:
             try:

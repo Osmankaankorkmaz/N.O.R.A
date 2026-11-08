@@ -61,6 +61,12 @@ class LocalSpeech:
         return snapshots.is_dir() and any(snapshots.glob("*/model.bin"))
 
     def ensure_model(self, *, download: bool = False) -> str:
+        # The explicit download gate comes before optional imports: a missing
+        # model is actionable even on a base-only installation.
+        if not download and not self.cached():
+            raise LocalModelMissing(
+                "Yerel ses modeli henüz indirilmedi. Menüden 'Yerel ses modelini indir'i seç. Sesini buluta göndermedim. 🎤"
+            )
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:

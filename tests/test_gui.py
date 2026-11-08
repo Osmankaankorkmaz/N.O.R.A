@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -670,7 +671,10 @@ def test_sensitive_settings_cancel_only_that_toggle_and_audit_redacts_steps(
             "steps": [{"command": "note", "action": "add", "text": "gizli"}],
         }
     )
-    assert "gizli" not in detail and "gizlendi" in detail
+    assert json.loads(detail) == {"command": "routine", "action": "add"}
+    assert app._audit_detail({"command": "note", "future_field": "gizli"}) == (
+        '{"command": "note"}'
+    )
     app.shutdown()
     qapp.processEvents()
 
@@ -706,5 +710,60 @@ def test_media_control_without_spotify_uses_os_keys_and_with_unconnected_api_is_
     app.spotify.configure("a" * 32)
     result = app._media_control_result("next")
     assert "bağlı değil" in result and "OS tuşu tamam" in result
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_barge_in_waits_for_real_playback_stop_before_listening(qapp, monkeypatch):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    app.voice.barge_in_enabled = True
+    app.voice._playback_idle.clear()
+    with app.voice._speech_lock:
+        app.voice._speech_pending = 1
+    captured = []
+    monkeypatch.setattr(app, "_start_listening", lambda **kw: captured.append(kw))
+    app._on_wake_word()
+    qapp.processEvents()
+    assert not app.voice.is_speaking
+    assert app.voice.playback_active
+    assert not captured
+    app.voice._playback_idle.set()
+    assert process_until(qapp, lambda: bool(captured))
+    assert len(captured) == 1
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_barge_in_timeout_does_not_open_microphone(qapp, monkeypatch):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    app.voice.barge_in_enabled = True
+    app.voice._playback_idle.clear()
+    captured, errors = [], []
+    monkeypatch.setattr(app, "_start_listening", lambda **kw: captured.append(kw))
+    monkeypatch.setattr(app, "_report", lambda text, **kw: errors.append(text))
+    app._wake_capture_deadline = 0.01
+    app._on_wake_word()
+    assert errors and "mikrofonu" in errors[0]
+    assert not captured
+    app.voice._playback_idle.set()
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_clipboard_start_failure_reverts_preference(qapp, monkeypatch):
+    app = NoraApp(
+        NoraOptions(wake_word=False, tts=False, proactive=False, offline=True)
+    )
+    monkeypatch.setattr(app, "_confirm", lambda title, text: True)
+    monkeypatch.setattr(app.clipboard_history, "start", lambda: False)
+    reports = []
+    monkeypatch.setattr(app, "_report", lambda text, **kw: reports.append(text))
+    app._apply_settings({"clipboard_watch": True})
+    assert not app.store.preference("clipboard_watch")
+    assert reports and "başlatılamadı" in reports[0]
     app.shutdown()
     qapp.processEvents()

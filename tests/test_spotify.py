@@ -170,3 +170,20 @@ def test_spotify_control_and_errors_are_explicit():
     with pytest.raises(SpotifyError, match="reddetti"):
         client.control("next")
     client.close()
+
+
+def test_disconnect_reports_keyring_delete_failure_honestly():
+    class BrokenKeyring(FakeKeyring):
+        def delete_password(self, service, username):
+            raise RuntimeError("locked")
+
+    keyring = BrokenKeyring()
+    client = SpotifyClient("a" * 32, session=Session(), keyring_module=keyring)
+    client._tokens = {"access_token": "secret", "client_id": client.client_id}
+    message = client.disconnect()
+    assert "silinemedi" in message
+    assert not client.connected()
+    assert client._tokens is None
+    client._save_tokens({"access_token": "new-after-explicit-reconnect"})
+    assert client.connected()
+    client.close()

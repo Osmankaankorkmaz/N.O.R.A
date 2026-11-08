@@ -7,11 +7,7 @@ import logging
 import os
 import signal
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import QApplication
-
 from . import __version__
-from .nora_ui import NoraApp, NoraOptions
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,7 +29,39 @@ def main(argv: list[str] | None = None) -> int:
         help="Kalıcı ayar/not/model klasörü (varsayılan: kullanıcı veri dizini)",
     )
     parser.add_argument("--version", action="version", version=f"Nora {__version__}")
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="GUI/mikrofon/ağ açmadan kurulum teşhisi; zorunlu eksiklerde çıkış kodu 1",
+    )
+    parser.add_argument(
+        "--check",
+        action="append",
+        choices=("local", "embeddings", "chat", "piper"),
+        default=[],
+        help="--doctor ile bir özelliğin paket/model dosyalarını da denetle (tekrarlanabilir)",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="--doctor raporunu JSON yazdır"
+    )
     args = parser.parse_args(argv)
+    if args.check and not args.doctor:
+        parser.error("--check yalnızca --doctor ile kullanılır")
+    if args.json and not args.doctor:
+        parser.error("--json yalnızca --doctor ile kullanılır")
+    if args.doctor:
+        # Keep headless diagnostics usable even when PyQt/PortAudio is broken.
+        from .nora_diagnostics import format_report, run_diagnostics
+
+        checks = run_diagnostics(args.data_dir, args.check)
+        print(format_report(checks, as_json=args.json))
+        return 1 if any(check.status == "fail" for check in checks) else 0
+
+    from PyQt5.QtCore import Qt, QTimer
+    from PyQt5.QtWidgets import QApplication
+
+    from .nora_ui import NoraApp, NoraOptions
+
     log_level = getattr(
         logging, os.getenv("NORA_LOG_LEVEL", "INFO").upper(), logging.INFO
     )

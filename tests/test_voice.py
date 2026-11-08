@@ -593,3 +593,57 @@ def test_wake_session_works_with_size_only_microphone_stream(qapp, monkeypatch):
     monkeypatch.setattr(voice, "_make_wake_decoder", lambda: Decoder())
     assert voice._local_wake_session() is False
     voice.close()
+
+
+def test_cancelled_worker_does_not_clear_new_speech_or_restart_after_cancel(
+    qapp, monkeypatch
+):
+    voice = NoraVoice(tts_enabled=True)
+    entered, release = threading.Event(), threading.Event()
+
+    class BlockingEngine(_FakeTTSEngine):
+        def runAndWait(self):
+            self.runs += 1
+            entered.set()
+            assert release.wait(3)
+
+    engine = BlockingEngine()
+    monkeypatch.setattr(voice, "_make_engine", lambda: engine)
+    assert voice.speak("Eski yanıt")
+    assert entered.wait(2)
+    voice.stop_speaking()
+    assert not voice.is_speaking
+    assert voice.playback_active
+    assert not voice.wait_for_playback_stop(0.01)
+    assert voice.speak("Yeni yanıt. İkinci cümle.")
+    assert voice.is_speaking
+    release.set()
+    assert _wait_voice(qapp, voice, lambda: not voice.is_speaking)
+    assert not voice.playback_active
+    # The old worker must not consume the new reply's pending count. It also
+    # must not continue with the old reply's second chunk after cancellation.
+    assert engine.runs >= 2
+    assert voice._speech_pending == 0
+    assert voice._speech_queue.unfinished_tasks == 0
+    voice.close()
+
+
+def test_disabling_tts_stops_remaining_chunks(qapp, monkeypatch):
+    voice = NoraVoice(tts_enabled=True)
+    entered, release = threading.Event(), threading.Event()
+
+    class BlockingEngine(_FakeTTSEngine):
+        def runAndWait(self):
+            self.runs += 1
+            entered.set()
+            assert release.wait(3)
+
+    engine = BlockingEngine()
+    monkeypatch.setattr(voice, "_make_engine", lambda: engine)
+    assert voice.speak("Birinci uzun cümle burada. " * 30)
+    assert entered.wait(2)
+    voice.set_tts_enabled(False)
+    release.set()
+    assert _wait_voice(qapp, voice, lambda: not voice.playback_active)
+    assert engine.runs == 1
+    voice.close()
