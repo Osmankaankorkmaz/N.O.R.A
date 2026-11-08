@@ -64,15 +64,4 @@ jobs:
         run: xvfb-run -a python -m pytest -q
       - name: Tests (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:PYTHONIOENCODING = "utf-8"
-          python -m pytest -q --junitxml=pytest.xml *> pytest.log
-          $code = $LASTEXITCODE
-          Get-Content pytest.log -Tail 100
-          if ($code -ne 0) {
-            $tail = (Get-Content pytest.log -Tail 80) -join "`n"
-            $tail = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-            Write-Host "::error title=Windows pytest log::$tail"
-            exit $code
-          }
+        run: python -m pytest -q

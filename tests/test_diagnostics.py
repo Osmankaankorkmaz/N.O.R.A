@@ -91,6 +91,7 @@ raise SystemExit(result)
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=20,
     )
     assert result.returncode in {0, 1}, result.stderr
