@@ -105,6 +105,8 @@ def test_setup_script_uses_modular_requirements_and_no_model_download():
     assert "Invoke-Expression" not in script
     assert "Set-ExecutionPolicy" not in script
     assert "--doctor" in script
+    assert "py -3.11" in script
+    assert script.index("Get-Command python") < script.index("Get-Command py")
     for feature in ("embeddings", "chat", "piper"):
         requirements = (root / f"requirements-{feature}.txt").read_text(
             encoding="utf-8"

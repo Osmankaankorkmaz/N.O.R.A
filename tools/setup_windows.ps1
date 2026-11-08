@@ -13,14 +13,21 @@ Push-Location $Root
 try {
     if (-not (Test-Path -LiteralPath $VenvPython)) {
         Write-Host "Python 3.10-3.12 sanal ortami olusturuluyor..."
-        if (Get-Command py -ErrorAction SilentlyContinue) {
-            & py -3 -m venv .venv
+        # Prefer a supported python on PATH (including CI/setup-python). The
+        # py launcher's default may be a newer unsupported Python, so ask 3.11.
+        $UsePathPython = $false
+        if (Get-Command python -ErrorAction SilentlyContinue) {
+            & python -c "import sys; raise SystemExit(0 if (3, 10) <= sys.version_info[:2] <= (3, 12) else 1)"
+            $UsePathPython = ($LASTEXITCODE -eq 0)
         }
-        elseif (Get-Command python -ErrorAction SilentlyContinue) {
+        if ($UsePathPython) {
             & python -m venv .venv
         }
+        elseif (Get-Command py -ErrorAction SilentlyContinue) {
+            & py -3.11 -m venv .venv
+        }
         else {
-            throw "Python bulunamadi. python.org'dan Python 3.11 kurup tekrar deneyin."
+            throw "Python 3.10-3.12 bulunamadi. python.org'dan Python 3.11 kurup tekrar deneyin."
         }
         if ($LASTEXITCODE -ne 0) { throw "Sanal ortam olusturulamadi." }
     }
