@@ -39,18 +39,8 @@ jobs:
             libxcb-xinerama0 libxcb-xfixes0 xclip
       - name: Windows setup helper (base only)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Continue"
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tools/setup_windows.ps1 -Feature base *> setup.log
-          $code = $LASTEXITCODE
-          Get-Content setup.log -Tail 80
-          if ($code -ne 0) {
-            $tail = (Get-Content setup.log -Tail 25) -join "`n"
-            $tail = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-            Write-Host "::error title=Windows setup log::$tail"
-            exit $code
-          }
+        shell: powershell
+        run: ./tools/setup_windows.ps1 -Feature base
       - name: Python dependencies
         run: |
           python -m pip install --upgrade pip
@@ -58,16 +48,7 @@ jobs:
       - name: Ruff lint
         run: python -m ruff check nora tests tools main.py
       - name: Ruff format
-        shell: bash
-        run: |
-          if ! python -m ruff format --check nora tests tools main.py > format.log 2>&1; then
-            cat format.log
-            python -m ruff format --diff nora tests tools main.py > format-diff.log 2>&1 || true
-            tail -n 40 format-diff.log
-            msg=$(tail -n 20 format-diff.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
-            echo "::error title=Ruff format diff::$msg"
-            exit 1
-          fi
+        run: python -m ruff format --check nora tests tools main.py
       - name: Syntax
         run: python -m compileall -q nora tools main.py
       - name: Headless doctor (no microphone/network)
@@ -83,4 +64,15 @@ jobs:
         run: xvfb-run -a python -m pytest -q
       - name: Tests (Windows)
         if: runner.os == 'Windows'
-        run: python -m pytest -q
+        shell: pwsh
+        run: |
+          $env:PYTHONIOENCODING = "utf-8"
+          python -m pytest -q --junitxml=pytest.xml *> pytest.log
+          $code = $LASTEXITCODE
+          Get-Content pytest.log -Tail 100
+          if ($code -ne 0) {
+            $tail = (Get-Content pytest.log -Tail 80) -join "`n"
+            $tail = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error title=Windows pytest log::$tail"
+            exit $code
+          }
