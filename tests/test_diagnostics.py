@@ -84,6 +84,7 @@ raise SystemExit(result)
     env = dict(os.environ)
     env.pop("GROQ_API_KEY", None)
     env["NORA_DATA_DIR"] = str(tmp_path)
+    env["PYTHONIOENCODING"] = "cp1252"
     result = subprocess.run(
         [sys.executable, "-c", code, str(tmp_path)],
         cwd=Path(__file__).resolve().parents[1],
@@ -96,6 +97,7 @@ raise SystemExit(result)
     report = json.loads(result.stdout)
     assert isinstance(report, list)
     assert any(item["name"] == "Temel paketler" for item in report)
+    assert any("ö" in item["name"] or "ü" in item["name"] for item in report)
     assert not list(tmp_path.iterdir())
 
 
@@ -106,7 +108,9 @@ def test_setup_script_uses_modular_requirements_and_no_model_download():
     assert "Set-ExecutionPolicy" not in script
     assert "--doctor" in script
     assert "py -3.11" in script
-    assert script.index("Get-Command python") < script.index("Get-Command py -ErrorAction")
+    assert script.index("Get-Command python") < script.index(
+        "Get-Command py -ErrorAction"
+    )
     for feature in ("embeddings", "chat", "piper"):
         requirements = (root / f"requirements-{feature}.txt").read_text(
             encoding="utf-8"

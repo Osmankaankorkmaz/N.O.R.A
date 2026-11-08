@@ -58,7 +58,16 @@ jobs:
       - name: Ruff lint
         run: python -m ruff check nora tests tools main.py
       - name: Ruff format
-        run: python -m ruff format --check nora tests tools main.py
+        shell: bash
+        run: |
+          if ! python -m ruff format --check nora tests tools main.py > format.log 2>&1; then
+            cat format.log
+            python -m ruff format --diff nora tests tools main.py > format-diff.log 2>&1 || true
+            tail -n 40 format-diff.log
+            msg=$(tail -n 20 format-diff.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Ruff format diff::$msg"
+            exit 1
+          fi
       - name: Syntax
         run: python -m compileall -q nora tools main.py
       - name: Headless doctor (no microphone/network)

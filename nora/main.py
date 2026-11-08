@@ -54,6 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         from .nora_diagnostics import format_report, run_diagnostics
 
         checks = run_diagnostics(args.data_dir, args.check)
+        # Windows redirected stdout may default to cp1252 and cannot encode
+        # Turkish text. The doctor report is explicitly UTF-8.
+        import sys
+
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         print(format_report(checks, as_json=args.json))
         return 1 if any(check.status == "fail" for check in checks) else 0
 
