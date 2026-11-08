@@ -89,3 +89,44 @@ def test_shipped_example_plugin_is_valid():
 
     data = json.loads(Path("docs/plugins/study-pack.json").read_text(encoding="utf-8"))
     assert validate_manifest(data).id == "study-pack"
+
+
+def test_plugin_phrase_conflicts_are_rejected_on_install_and_match(tmp_path):
+    store = NoraStore(tmp_path / "state.json")
+    registry = PluginRegistry(tmp_path / "plugins", store)
+    first = tmp_path / "first.json"
+    first.write_text(json.dumps(manifest("study")), encoding="utf-8")
+    registry.install(first)
+    second = tmp_path / "second.json"
+    second.write_text(json.dumps(manifest("other")), encoding="utf-8")
+    with pytest.raises(CommandError, match="çakışıyor"):
+        registry.install(second)
+    # Simulate a manually placed conflicting pack: it must never silently run.
+    registry.directory.mkdir(exist_ok=True)
+    (registry.directory / "other.json").write_text(
+        json.dumps(manifest("other")), encoding="utf-8"
+    )
+    store.set_plugin_enabled("study", True)
+    store.set_plugin_enabled("other", True)
+    with pytest.raises(CommandError, match="çakış"):
+        registry.match("stüdyo zamanı")
+    with pytest.raises(CommandError, match="çakış"):
+        registry.command_steps("study", "başla")
+    assert "Çakışan ifadeler" in registry.listing()
+
+
+def test_plugin_filename_mismatch_and_limit_are_safe(tmp_path):
+    store = NoraStore(tmp_path / "state.json")
+    registry = PluginRegistry(tmp_path / "plugins", store)
+    registry.directory.mkdir()
+    (registry.directory / "wrong.json").write_text(
+        json.dumps(manifest("study")), encoding="utf-8"
+    )
+    manifests, errors = registry.load_all()
+    assert manifests == [] and any("dosya adıyla" in error for error in errors)
+    for i in range(21):
+        (registry.directory / f"p{i}.json").write_text(
+            json.dumps(manifest(f"p{i}")), encoding="utf-8"
+        )
+    manifests, errors = registry.load_all()
+    assert manifests == [] and any("sınırı" in error for error in errors)

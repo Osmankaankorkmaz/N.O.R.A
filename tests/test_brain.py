@@ -219,3 +219,17 @@ def test_diagnose_connection_lists_model_availability():
     text = brain.diagnose_connection()
     assert "✓ listede" in text
     assert DEFAULT_CHAT_MODEL in text
+
+
+def test_cloud_response_after_cancel_is_not_used_or_stored():
+    client = FakeClient()
+    brain = NoraBrain(client=client)
+    stopped = []
+
+    def stop():
+        return bool(stopped)
+
+    client.chat.completions.before_return = lambda: stopped.append(True)
+    reply = brain.chat("gizli kalsın", should_stop=stop)
+    assert reply.error and "iptal" in reply.text
+    assert len(brain.history) == 1

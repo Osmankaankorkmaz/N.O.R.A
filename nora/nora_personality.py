@@ -90,7 +90,7 @@ KOMUTLAR (JSON alan adlarını aynen kullan):
 {"command":"clipboard_history","action":"list"}  // capture/get/copy/delete/clear; copy/delete need id
 {"command":"plugin","action":"list"}  // enable/disable/delete need id; run needs id+name
 {"command":"spotify","action":"status"}  // connect/disconnect/devices
-{"command":"local_ai","action":"status"}  // download_embeddings requires explicit user consent
+{"command":"local_ai","action":"status"}  // models/info/verify/select; download_embeddings requires explicit user consent
 {"command":"speech_stop"}
 {"command":"clipboard_help","action":"translate","target_language":"İngilizce"}
 {"command":"screen_text","prompt":"Ekrandaki hatayı açıkla"}
@@ -585,9 +585,29 @@ def normalize_command(command: Any) -> dict[str, Any]:
         out["action"] = action
     elif name == "local_ai":
         action = command.get("action", "status")
-        if action not in {"status", "download_embeddings"}:
-            raise CommandError("Yerel AI işlemi status/download_embeddings olmalı.")
+        if action not in {
+            "status",
+            "models",
+            "download_embeddings",
+            "info",
+            "verify",
+            "select",
+        }:
+            raise CommandError("Yerel AI işlemi geçersiz.")
         out["action"] = action
+        if action in {"info", "verify", "select"}:
+            backend = command.get("backend", "chat")
+            if backend not in {"chat", "piper"}:
+                raise CommandError("Model türü chat/piper olmalı.")
+            out["backend"] = backend
+            if action != "select" or "name" in command:
+                model_name = _text(command, "name", 128)
+                suffix = ".gguf" if backend == "chat" else ".onnx"
+                if not re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}" + re.escape(suffix), model_name
+                ):
+                    raise CommandError("Model adı güvenli bir dosya adı olmalı.")
+                out["name"] = model_name
     elif name == "briefing":
         action = command.get("action", "morning")
         if action not in {"morning", "summary", "weekly"}:
@@ -689,6 +709,8 @@ SETTINGS_KEYS = {
     "semantic_search",
     "chat_backend",
     "local_chat_model",
+    "local_context_tokens",
+    "local_max_tokens",
     "tts_backend",
     "piper_model",
     "voice_barge_in",

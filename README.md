@@ -4,6 +4,15 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 
 > **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
 
+## 1.10.0 · Yerel model yönetimi ve iptal
+
+- **İptal edilebilir yerel üretim:** GGUF yanıtları token akışıyla üretilir; sohbet/metin işlerinde ⏹ düğmesi güvenli noktada durdurur. İptal edilen yerel yanıt buluta gönderilmez, sohbet geçmişine yazılmaz. Bulut isteği ağda sürebilir ama iptal sonrası yanıtı kullanılmaz.
+- **Model kataloğu:** GGUF/Piper içe aktarmaları `<model>.nora.json` yan dosyasında SHA-256, boyut, kaynak dosya/URL ve isteğe bağlı lisans notu tutar. `yerel modeller`, `gguf model bilgi/seç/doğrula`, `piper model bilgi/seç/doğrula` ve Özellikler menüsünden liste/seçim/doğrulama/not/silme yapılabilir. SHA-256 değişmemiş dosyayı gösterir; güvenlik/lisans kanıtı değildir.
+- **Bağlam ve yanıt limiti:** Ayarlarda yerel bağlam 1024–8192, yanıt 128–2048 token; yanıt bağlamdan en az 128 token küçük olmalıdır. Eski geçmiş mesajları bütçeye göre kırpılır, en yeni kullanıcı mesajı korunur.
+- **Güvenli içe aktarma/silme:** Kopyalama parça parça ve iptal edilebilir; yan dosya geçici alanda üretilip birlikte yerleştirilir. Üzerine yazma açık onay ister, başarısız değişimde önceki dosyalar korunur. Silme seçili modeli kaldırır ve geri alınamaz uyarısı gösterir.
+- **Eklenti çakışma sınırı:** Aynı ifade başka pakette varsa kurulum reddedilir; elle yerleştirilmiş çakışmalarda ilk eşleşme sessizce çalışmaz, hata gösterilir. Dosya adı/kimlik eşleşmesi ve 20 paket sınırı doğrulanır.
+- **Teşhis düzeltmesi:** `--doctor` GGUF/Piper/embedding dosyalarını gerçek `models/chat`, `models/piper`, `models/embeddings` alt klasörlerinde arar ve bütünlük kaydı durumunu raporlar.
+
 ## 1.9.1 · Kurulum ve kararlılık
 
 - **Windows kurulum yardımcısı:** `tools/setup_windows.ps1` temel/local/embeddings/chat/piper/all seçenekleriyle sanal ortam kurar; yönetici izni, kalıcı execution-policy değişikliği veya otomatik model indirmesi yapmaz.
@@ -62,7 +71,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 - **Brifing:** `günaydın brifingi`, `gün sonu özeti`, `haftalık plan`; isteğe bağlı açılış brifingi.
 - **Yerel arama:** `notlarımda kahve ara`, `hafızamda … ara`, `görevlerimde … ara`, `yerel ara …`; Türkçe normalize + bulanık eşleşme. `anlamsal ara …` veya ayar açıkken indirilmiş yerel embedding modeliyle hibrit arama; model yoksa yerel kelime araması.
 - **Pano geçmişi:** `pano geçmişini aç/kapat`, `panoyu geçmişe ekle`, `pano geçmişi`, `pano 1 kopyala`, `pano geçmişi temizle`. İzleme varsayılan kapalı; kayıtlar diske yazılmaz.
-- **Eklentiler:** `eklentiler`, `eklenti <id> aç/kapat`, `eklenti <id> <komut> çalıştır`; JSON komut paketleri yerleşik komutları gölgeleyemez ve Python/shell çalıştıramaz.
+- **Eklentiler:** `eklentiler`, `eklenti <id> aç/kapat`, `eklenti <id> <komut> çalıştır`; JSON komut paketleri yerleşik komutları gölgeleyemez, başka paketlerle aynı ifadeyi paylaşamaz ve Python/shell çalıştıramaz.
 - **Sözünü kesme:** `sus` / `sözünü kes` anında TTS’i durdurur. `sözümü kesmeyi aç` ile konuşma sırasında tam `hey nora` da sesi keser; bu özellik mikrofonu konuşma boyunca açık tutar.
 - **İzin/veri:** `izinleri göster`, `son işlemleri göster`, `denetim kaydını temizle`, `verilerimi dışa aktar`.
 - Yerel **OCR** ile ekrandaki yazıları okuma; isterseniz okunan metni Groq’a ayrıca onayla analiz ettirme.
@@ -117,6 +126,9 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 | `spotify bağlan` / `spotify durumu` / `spotify cihazları` | OAuth PKCE bağlantısı ve cihaz listesi |
 | `spotify bağlantısını kes` | Yerel token kaydını temizleme |
 | `anlamsal arama modelini indir` / `yerel ai durumu` | Yerel embedding modeli ve durum |
+| `yerel modeller` / `model listesi` | GGUF + Piper model kataloğu |
+| `gguf model seç` / `piper model seç v.onnx` | Yerel model seçimi |
+| `gguf model bilgi a.gguf` / `piper model doğrula v.onnx` | Model meta verisi / SHA-256 doğrulaması |
 | `yerel sohbet modu` / `bulut sohbet modu` | GGUF / Groq sohbet seçimi |
 | `piper ses modu` / `sistem ses modu` | Piper / sistem TTS seçimi |
 | `sus` / `sözünü kes` | Konuşmayı anında durdur |
@@ -147,7 +159,7 @@ python main.py --doctor --check piper
 
 - `llama-cpp-python` bazı sistemlerde C++ derleme araçları isteyebilir; hazır wheel yoksa kurulum belgesi gerekir.
 - Embedding modeli yaklaşık 220 MB olabilir; Nora açılışta indirmez. **Özellikler → Embedding modelini indir** açık onay ister.
-- GGUF ve Piper modelleri otomatik indirilmez. **GGUF sohbet modeli içe aktar** / **Piper modeli içe aktar** ile dosyaları seçersin; Piper için `.onnx.json` yanında olmalıdır.
+- GGUF ve Piper modelleri otomatik indirilmez. **GGUF sohbet modeli içe aktar** / **Piper modeli içe aktar** ile dosyaları seçersin; Piper için `.onnx.json` yanında olmalıdır. İçe aktarma SHA-256 yan dosyası oluşturur; **Model bütünlüğü doğrula** dosyayı değiştirmeden kontrol eder, **Model kaynak/lisans notu** URL/lisans notunu yerelde saklar. SHA-256 modelin güvenli veya lisanslı olduğunu kanıtlamaz; model kartını kendin kontrol etmelisin.
 - Spotify için kendi Developer uygulamanın Client ID’sini gir; redirect URI olarak `http://127.0.0.1:8765/callback` ekle. Gizli client secret istenmez. PKCE ve loopback kuralları: [1](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow) · [2](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri).
 
 ## Kurulum
@@ -220,7 +232,7 @@ Kalıcı veriler varsayılan olarak:
 
 `NORA_DATA_DIR` veya `python main.py --data-dir D:\NoraVeri` ile değiştirilebilir. Yerel modeller bu klasörün `models/` altındadır.
 
-**Saklananlar:** ayarlar, açıkça kaydedilen kişisel bilgiler, notlar, görevler, hatırlatıcılar, rutinler, içe aktarılan takvim etkinlikleri, companion bağlılık/ruh hali, etkin eklenti kimlikleri ve isteğe bağlı son 200 komutluk denetim kaydı. Denetim kaydı komut metinlerini/pano içerğini değil eylem türünü yazar. Spotify tokenları mümkünse sistem anahtar kasasında tutulur; JSON state’e yazılmaz. **Saklanmayanlar:** ham sohbet geçmişi, mikrofon sesi, kalıcı pano geçmişi. Pano geçmişi açıkça açılırsa yalnızca bellekte 30 dakika tutulur.
+**Saklananlar:** ayarlar, açıkça kaydedilen kişisel bilgiler, notlar, görevler, hatırlatıcılar, rutinler, içe aktarılan takvim etkinlikleri, companion bağlılık/ruh hali, etkin eklenti kimlikleri, içe aktarılan GGUF/Piper modellerinin SHA-256/kaynak/lisans yan dosyaları ve isteğe bağlı son 200 komutluk denetim kaydı. Denetim kaydı komut metinlerini/pano içerğini değil eylem türünü yazar. Spotify tokenları mümkünse sistem anahtar kasasında tutulur; JSON state’e yazılmaz. **Saklanmayanlar:** ham sohbet geçmişi, mikrofon sesi, kalıcı pano geçmişi. Pano geçmişi açıkça açılırsa yalnızca bellekte 30 dakika tutulur.
  Sohbet bağlamı oturumda son 30 mesajdır; “Sohbet Geçmişini Sıfırla” kişisel hafızayı silmez. Kişisel hafıza ayrı bir onaylı menüyle silinebilir.
 
 ## Gizlilik ve güvenlik sınırları
@@ -272,7 +284,8 @@ python main.py --version
 
 - **Spotify:** `spotify bağlan` tarayıcıda izin ister. 8765 portu meşgulse başka uygulamayı kapat veya redirect ayarını kontrol et. 403 Premium/izin kısıtı, 404 aktif cihaz yok demektir; Nora sessizce başka hesaba/servise geçmez.
 - **Piper:** `.onnx` ve `.onnx.json` birlikte olmalı. Piper seçiliyken model/ses cihazı hatası varsa sistem sesine gizlice dönmez; hatayı gösterir.
-- **Yerel sohbet:** GGUF dosyası ve `llama-cpp-python` gerekir. Yerel modda model yoksa Groq’a geçilmez. RAM ve dosya boyutunu kontrol et.
+- **Yerel sohbet:** GGUF dosyası ve `llama-cpp-python` gerekir. Yerel modda model yoksa Groq’a geçilmez. RAM ve dosya boyutunu kontrol et. Uzun üretimde ⏹ ile iptal edebilirsin; iptal tokenlar arasında gerçekleşir, modelin o anki token hesabı bitmeden kesilmeyebilir. Bağlam/yanıt limiti ayarlarını modelin RAM kapasitesine göre seç.
+- **Model bütünlüğü:** `gguf model doğrula a.gguf` / `piper model doğrula v.onnx` içe aktarma kaydındaki SHA-256 ile karşılaştırır. Kayıt yoksa veya dosya değiştiyse modeli kullanmadan önce güvenli kaynaktan yeniden içe aktar. Bu kontrol zararlı model içeriğini veya lisans uygunluğunu denetlemez.
 - **Sözünü kesme:** hoparlör sesi mikrofona kaçarsa yanlış tetiklenebilir; kulaklık önerilir. Yalnızca tam `hey nora` kabul edilir, çıplak `Nora` kabul edilmez. Sistem TTS motorunun kesme desteği platforma göre değişebilir; bas-konuş ve `sus` her zaman alternatifdir.
 - **Pano geçmişi:** parola/anahtar/kart/OTP gibi görünen metinler atlanır. Bu sezgisel bir filtredir; çok hassas ortamlarda izlemeyi kapalı tut.
 
@@ -319,7 +332,8 @@ nora/
   nora_desktop.py         # Windows pencere düzeni kaydetme/geri yükleme
   nora_local_ai.py        # isteğe bağlı Whisper ve RapidOCR
   nora_embeddings.py      # isteğe bağlı yerel çok dilli embedding
-  nora_local_llm.py       # kullanıcı GGUF modeliyle yerel sohbet
+  nora_local_llm.py       # kullanıcı GGUF modeliyle akış/iptal destekli yerel sohbet
+  nora_model_catalog.py   # GGUF/Piper SHA-256, kaynak/lisans yan dosyaları
   nora_piper.py           # kesilebilir yerel Piper TTS
   nora_spotify.py         # OAuth PKCE + Spotify Web API
   nora_clipboard.py       # onaylı, bellek-içi pano geçmişi
@@ -357,4 +371,4 @@ python -m compileall -q nora main.py tests
 ruff check nora tests tools main.py
 ```
 
-Yerel tam ortamda **302 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export, sayı oyunu, Spotify PKCE/state/token kasası, yerel embedding/GGUF/Piper, pano geçmişi sınırları, JSON eklenti güvenliği ve sözünü kesme kontrol edilmiştir. Yeni kapsam: başsız teşhisin sır/cihaz/ağ açmaması, iptal edilen TTS işçisinin yeni kuyruğu bozmaması, gerçek ses bitmeden mikrofon açılmaması, model başlık/geri yükleme doğrulaması, üretim sırasında bloklamayan kapatma ve dürüst pano/Spotify hata durumları. Fiziksel Windows mikrofonu, gerçek Groq anahtarı, indirilmiş Whisper/GGUF/Piper/embedding modelleri ve Spotify hesabı bu ortamda canlı doğrulanamamıştır. Windows/Linux CI iş akışı eklendi; uzak çalışma sonucu ayrı doğrulanır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Yerel tam ortamda **325 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export, sayı oyunu, Spotify PKCE/state/token kasası, yerel embedding/GGUF/Piper, pano geçmişi sınırları, JSON eklenti güvenliği ve sözünü kesme kontrol edilmiştir. Yeni kapsam: GGUF akış/iptal ve bağlam bütçesi, iptalin buluta geçirmemesi/geçmişe yazmaması, model SHA-256 doğrulama/silme/kaynak notu, iptal edilebilir kopyalama ve yan dosya commit'i, token limiti çapraz doğrulaması, Türkçe model komutları, eklenti ifade çakışması/dosya adı sınırı, teşhis alt klasörleri ve GUI iptal düğmesi. Fiziksel Windows mikrofonu, gerçek Groq anahtarı, indirilmiş Whisper/GGUF/Piper/embedding modelleri ve Spotify hesabı bu ortamda canlı doğrulanamamıştır. Windows/Linux CI iş akışı eklendi; uzak çalışma sonucu ayrı doğrulanır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

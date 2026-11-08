@@ -100,9 +100,14 @@ def test_local_chat_shutdown_does_not_block_on_generation(tmp_path):
     chat = LocalChatModel(tmp_path / "models", model_factory=lambda **kw: Model())
     chat.import_model(source)
     result = []
-    worker = threading.Thread(
-        target=lambda: result.append(chat.chat([{"role": "user", "content": "selam"}]))
-    )
+
+    def generate():
+        try:
+            result.append(chat.chat([{"role": "user", "content": "selam"}]))
+        except Exception as exc:
+            result.append(type(exc).__name__)
+
+    worker = threading.Thread(target=generate)
     worker.start()
     assert entered.wait(2)
     started = time.monotonic()
@@ -112,5 +117,19 @@ def test_local_chat_shutdown_does_not_block_on_generation(tmp_path):
     release.set()
     worker.join(3)
     assert not worker.is_alive()
-    assert result == ["Bitti."]
+    assert result == ["LocalChatCancelled"]
     assert closed == [True]
+
+
+def test_generated_sidecar_does_not_silently_overwrite_orphan_record(tmp_path):
+    directory = tmp_path / "models"
+    directory.mkdir()
+    orphan = directory / "a.gguf.nora.json"
+    orphan.write_text("eski kayıt", encoding="utf-8")
+    source = tmp_path / "a.gguf"
+    gguf_file(source)
+    with pytest.raises(ValueError, match="üzerine yazmak"):
+        with staged_import(directory, {"a.gguf": source}) as stage:
+            (stage / "a.gguf.nora.json").write_text("yeni kayıt", encoding="utf-8")
+    assert orphan.read_text(encoding="utf-8") == "eski kayıt"
+    assert not (directory / "a.gguf").exists()

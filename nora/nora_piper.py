@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .nora_local_ai import LocalModelMissing
+from .nora_model_catalog import ModelCatalog, safe_model_name
 from .nora_model_files import staged_import, validate_piper_config
 
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.onnx")
@@ -29,6 +30,7 @@ class PiperSpeech:
         config_factory: Any = None,
     ) -> None:
         self.model_dir = Path(model_dir)
+        self.catalog = ModelCatalog(self.model_dir, "piper")
         self.model_name = ""
         self._voice_loader = voice_loader
         self._audio = audio_backend
@@ -65,7 +67,15 @@ class PiperSpeech:
         except (ValueError, LocalModelMissing):
             return False
 
-    def import_model(self, source: Path, *, overwrite: bool = False) -> str:
+    def import_model(
+        self,
+        source: Path,
+        *,
+        overwrite: bool = False,
+        source_url: str = "",
+        license_note: str = "",
+        should_stop=None,
+    ) -> str:
         source = Path(source)
         config = Path(str(source) + ".json")
         if (
@@ -82,9 +92,7 @@ class PiperSpeech:
         if not 0 < size <= MAX_MODEL_BYTES:
             raise ValueError("Piper modeli 500 MB altında olmalı.")
         validate_piper_config(config)
-        name = re.sub(r"[^A-Za-z0-9_.-]", "_", source.name)
-        if not _NAME_RE.fullmatch(name):
-            raise ValueError("Piper model dosya adı geçersiz.")
+        name = safe_model_name(source.name, ".onnx")
         self.model_dir.mkdir(parents=True, exist_ok=True)
         target = self.model_dir / name
         target_config = Path(str(target) + ".json")
@@ -93,18 +101,30 @@ class PiperSpeech:
                 "Bu Piper modeli zaten var; üzerine yazmak için açık onay gerekir."
             )
         free = shutil.disk_usage(self.model_dir).free
-        if free < size + 32 * 1024 * 1024:
+        reserve = size + 32 * 1024 * 1024
+        if overwrite:
+            reserve += sum(
+                path.stat().st_size for path in (target, target_config) if path.exists()
+            )
+        if free < reserve:
             raise ValueError("Piper modeli için yeterli boş disk alanı yok.")
         with staged_import(
             self.model_dir,
             {name: source, target_config.name: config},
             overwrite=overwrite,
+            should_stop=should_stop,
         ) as stage:
             validate_piper_config(stage / target_config.name)
+            self.catalog.write_staged(
+                stage,
+                name,
+                source_name=source.name,
+                source_url=source_url,
+                license_note=license_note,
+                should_stop=should_stop,
+            )
         self.configure(name)
-        return (
-            f"Piper modeli içe aktarıldı: {name}. 'piper ses modu' ile seçebilirsin. 🔊"
-        )
+        return f"Piper modeli içe aktarıldı: {name}. SHA-256 kaydı oluşturuldu. 'piper ses modu' ile seçebilirsin. 🔊"
 
     def ensure_model(self) -> str:
         path = self._path()

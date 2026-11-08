@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -87,14 +88,21 @@ class ChatWorker(QThread):
     done = pyqtSignal(int, object)
 
     def __init__(
-        self, brain: NoraBrain, message: str, request_id: int, parent=None
+        self,
+        brain: NoraBrain,
+        message: str,
+        request_id: int,
+        parent=None,
+        *,
+        should_stop=None,
     ) -> None:
         super().__init__(parent)
         self.brain, self.message, self.request_id = brain, message, request_id
+        self.should_stop = should_stop
 
     def run(self) -> None:
         try:
-            reply = self.brain.chat(self.message)
+            reply = self.brain.chat(self.message, should_stop=self.should_stop)
         except Exception as exc:
             logger.exception("Sohbet worker hatası: %s", type(exc).__name__)
             reply = ChatReply(
@@ -166,14 +174,19 @@ class TextWorker(QThread):
         language: str,
         request_id: int,
         parent=None,
+        *,
+        should_stop=None,
     ) -> None:
         super().__init__(parent)
         self.brain, self.text, self.action = brain, text, action
         self.language, self.request_id = language, request_id
+        self.should_stop = should_stop
 
     def run(self) -> None:
         try:
-            reply = self.brain.assist_text(self.text, self.action, self.language)
+            reply = self.brain.assist_text(
+                self.text, self.action, self.language, should_stop=self.should_stop
+            )
         except Exception as exc:
             logger.warning("Metin worker hatası: %s", type(exc).__name__)
             reply = ChatReply(
@@ -225,6 +238,8 @@ class NoraApp(QWidget):
         self._ptt_active = False
         self._request_seq = 0
         self._active_request = 0
+        self._request_cancel = threading.Event()
+        self._cancel_supported = False
         self._workers: set[QThread] = set()
         self._message_rows: list[QWidget] = []
         self._chat_user_moved = False
@@ -259,7 +274,11 @@ class NoraApp(QWidget):
         )
         self.embeddings = LocalEmbeddings(self.data_dir / "models" / "embeddings")
         self.local_chat = LocalChatModel(self.data_dir / "models" / "chat")
-        self.local_chat.configure(self.store.preference("local_chat_model"))
+        self.local_chat.configure(
+            self.store.preference("local_chat_model"),
+            context_tokens=self.store.preference("local_context_tokens"),
+            max_tokens=self.store.preference("local_max_tokens"),
+        )
         self.piper = PiperSpeech(self.data_dir / "models" / "piper")
         self.piper.configure(self.store.preference("piper_model"))
         self.ocr = LocalOCR()
@@ -466,6 +485,15 @@ class NoraApp(QWidget):
         self.send_button.setFont(self._emoji_font(11))
         self.send_button.clicked.connect(self._send_from_input)
         input_row.addWidget(self.input, 1)
+        self.cancel_button = QPushButton("⏹")
+        self.cancel_button.setFixedSize(38, 36)
+        self.cancel_button.setToolTip(
+            "İsteği iptal et. Yerel üretim tokenlar arasında durur; bulut isteği ağda sürebilir ama yanıtı kullanılmaz."
+        )
+        self.cancel_button.setFont(self._emoji_font(11))
+        self.cancel_button.clicked.connect(self._cancel_current_request)
+        self.cancel_button.hide()
+        input_row.addWidget(self.cancel_button)
         input_row.addWidget(self.send_button)
         layout.addLayout(input_row)
         quick_row = QHBoxLayout()
@@ -704,6 +732,27 @@ class NoraApp(QWidget):
                 ),
             ),
             ("🧠 GGUF sohbet modeli içe aktar", self._import_local_chat_model),
+            (
+                "🧠 Yerel modelleri listele",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "models"}
+                ),
+            ),
+            (
+                "🧠 GGUF modeli seç",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "select", "backend": "chat"}
+                ),
+            ),
+            (
+                "🔊 Piper modeli seç",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "select", "backend": "piper"}
+                ),
+            ),
+            ("🛡️ Model bütünlüğü doğrula", self._verify_model_dialog),
+            ("📝 Model kaynak/lisans notu", self._annotate_model_dialog),
+            ("🗑️ Yerel model sil", self._delete_model_dialog),
             ("🔊 Piper modeli içe aktar", self._import_piper_model),
             (
                 "🔎 Embedding modelini indir",
@@ -718,6 +767,27 @@ class NoraApp(QWidget):
                 ),
             ),
             ("🧠 GGUF sohbet modeli içe aktar", self._import_local_chat_model),
+            (
+                "🧠 Yerel modelleri listele",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "models"}
+                ),
+            ),
+            (
+                "🧠 GGUF modeli seç",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "select", "backend": "chat"}
+                ),
+            ),
+            (
+                "🔊 Piper modeli seç",
+                lambda: self._execute_command(
+                    {"command": "local_ai", "action": "select", "backend": "piper"}
+                ),
+            ),
+            ("🛡️ Model bütünlüğü doğrula", self._verify_model_dialog),
+            ("📝 Model kaynak/lisans notu", self._annotate_model_dialog),
+            ("🗑️ Yerel model sil", self._delete_model_dialog),
         ):
             features.addAction(label, slot)
         clipboard = features.addMenu("📋 Pano yardımı (onaylı)")
@@ -895,7 +965,17 @@ class NoraApp(QWidget):
     def _next_request(self) -> int:
         self._request_seq += 1
         self._active_request = self._request_seq
+        self._request_cancel = threading.Event()
         return self._request_seq
+
+    def _cancel_current_request(self) -> None:
+        if not self._busy or not self._cancel_supported:
+            return
+        self._request_cancel.set()
+        if self.brain.chat_backend == "local":
+            self.local_chat.cancel()
+        self.cancel_button.setEnabled(False)
+        self.status_label.setText("İptal ediliyor… güvenli noktada duracak")
 
     def _track_worker(self, worker: QThread) -> None:
         self._workers.add(worker)
@@ -1061,9 +1141,15 @@ class NoraApp(QWidget):
                 lambda: self.tools.video_search(query), "Video araması açılıyor…"
             )
 
-    def _set_busy(self, busy: bool, status: str = "") -> None:
+    def _set_busy(
+        self, busy: bool, status: str = "", *, cancellable: bool = False
+    ) -> None:
         self._busy = busy
+        self._cancel_supported = bool(busy and cancellable)
         self.status_label.setText(status)
+        if hasattr(self, "cancel_button"):
+            self.cancel_button.setVisible(bool(busy and cancellable))
+            self.cancel_button.setEnabled(bool(busy and cancellable))
         for button in (
             self.send_button,
             self.screen_button,
@@ -1440,14 +1526,20 @@ class NoraApp(QWidget):
         if command is not None:
             self._execute_command(command)
             return
-        plugin_match = self.plugins.match(text)
+        try:
+            plugin_match = self.plugins.match(text)
+        except CommandError as exc:
+            self._report(str(exc), speak=False)
+            return
         if plugin_match is not None:
             self._run_plugin_command(*plugin_match)
             return
         self.pet.set_emotion("thinking")
-        self._set_busy(True, "Düşünüyorum…")
+        self._set_busy(True, "Düşünüyorum…", cancellable=True)
         request_id = self._next_request()
-        worker = ChatWorker(self.brain, text, request_id)
+        worker = ChatWorker(
+            self.brain, text, request_id, should_stop=self._request_cancel.is_set
+        )
         worker.done.connect(self._on_chat_done)
         self._track_worker(worker)
         worker.start()
@@ -2027,21 +2119,217 @@ class NoraApp(QWidget):
 
         self._run_tool(run, "Yerel anlam araması yapılıyor…", speak=False)
 
+    def _model_catalog(self, backend: str):
+        return self.local_chat.catalog if backend == "chat" else self.piper.catalog
+
     def _local_ai_command(self, cmd: dict[str, Any]) -> None:
-        if cmd["action"] == "status":
+        action = cmd["action"]
+        if action == "status":
             self._report(
-                self.embeddings.status() + "\n" + self.local_chat.status(), speak=False
-            )
-            return
-        if self._confirm(
-            "Embedding modelini indir",
-            "Çok dilli MiniLM embedding modeli Hugging Face'ten indirilecek (yaklaşık 220 MB). Not/hafıza/görev araması cihazında çalışır; metinlerin buluta gönderilmez. İndireyim mi?",
-        ):
-            self._run_tool(
-                lambda: self.embeddings.ensure_model(download=True),
-                "Embedding modeli indiriliyor…",
+                self.embeddings.status()
+                + "\n"
+                + self.local_chat.status()
+                + "\n"
+                + self.piper.status(),
                 speak=False,
             )
+            return
+        if action == "models":
+            prefs = self.store.preferences
+            self._report(
+                self.local_chat.catalog.listing(prefs["local_chat_model"])
+                + "\n\n"
+                + self.piper.catalog.listing(prefs["piper_model"]),
+                speak=False,
+            )
+            return
+        if action == "download_embeddings":
+            if self._confirm(
+                "Embedding modelini indir",
+                "Çok dilli MiniLM embedding modeli Hugging Face'ten indirilecek (yaklaşık 220 MB). Not/hafıza/görev araması cihazında çalışır; metinlerin buluta gönderilmez. İndireyim mi?",
+            ):
+                self._run_tool(
+                    lambda: self.embeddings.ensure_model(download=True),
+                    "Embedding modeli indiriliyor…",
+                    speak=False,
+                )
+            return
+        backend = cmd.get("backend", "chat")
+        catalog = self._model_catalog(backend)
+        if action == "select":
+            self._select_local_model(backend, cmd.get("name"))
+        elif action == "info":
+            try:
+                self._report(catalog.describe(cmd["name"]), speak=False)
+            except ValueError as exc:
+                self._report(str(exc), speak=False)
+        elif action == "verify":
+            name = cmd["name"]
+            self._run_tool(
+                lambda: catalog.verify(name),
+                "Model SHA-256 doğrulaması yapılıyor…",
+                speak=False,
+            )
+
+    def _choose_model_name(self, backend: str, title: str) -> str | None:
+        catalog = self._model_catalog(backend)
+        names = catalog.names()
+        if not names:
+            self._report(
+                "Önce bu türde bir model içe aktar senpai. GGUF/Piper dosyaları otomatik indirilmez.",
+                speak=False,
+            )
+            return None
+        selected = self.store.preference(
+            "local_chat_model" if backend == "chat" else "piper_model"
+        )
+        current = names.index(selected) if selected in names else 0
+        choice, ok = QInputDialog.getItem(
+            self.chat_window, title, "Model dosyası:", names, current, False
+        )
+        return choice if ok else None
+
+    def _select_local_model(self, backend: str, name: str | None = None) -> None:
+        if self._closing or self._busy:
+            return
+        if name:
+            catalog = self._model_catalog(backend)
+            try:
+                catalog.info(name)
+            except ValueError as exc:
+                self._report(str(exc), speak=False)
+                return
+            choice = name
+        else:
+            choice = self._choose_model_name(backend, "Yerel model seç")
+        if choice is None:
+            return
+        try:
+            if backend == "chat":
+                self.local_chat.configure(
+                    choice,
+                    context_tokens=self.store.preference("local_context_tokens"),
+                    max_tokens=self.store.preference("local_max_tokens"),
+                )
+                self.store.set_preference("local_chat_model", choice)
+            else:
+                self.piper.configure(choice)
+                self.store.set_preference("piper_model", choice)
+            self._report(
+                f"Model seçildi: {choice}. Otomatik indirilmedi/yüklenmedi. 🧠",
+                speak=False,
+            )
+        except ValueError as exc:
+            self._report(str(exc), speak=False)
+
+    def _verify_model_dialog(self) -> None:
+        if self._closing or self._busy:
+            return
+        kind, ok = QInputDialog.getItem(
+            self.chat_window,
+            "Model bütünlüğü",
+            "Model türü:",
+            ["GGUF sohbet", "Piper ses"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        backend = "chat" if kind == "GGUF sohbet" else "piper"
+        name = self._choose_model_name(backend, "Bütünlüğü doğrulanacak model")
+        if name is not None:
+            self._execute_command(
+                {
+                    "command": "local_ai",
+                    "action": "verify",
+                    "backend": backend,
+                    "name": name,
+                }
+            )
+
+    def _delete_model_dialog(self) -> None:
+        if self._closing or self._busy:
+            return
+        kind, ok = QInputDialog.getItem(
+            self.chat_window,
+            "Model sil",
+            "Model türü:",
+            ["GGUF sohbet", "Piper ses"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        backend = "chat" if kind == "GGUF sohbet" else "piper"
+        name = self._choose_model_name(backend, "Silinecek model")
+        if name is None:
+            return
+        if not self._confirm(
+            "Model dosyasını sil",
+            f"{name} ve yerel bütünlük kaydı silinecek. Bu işlem geri alınamaz. Seçili modelse seçim kaldırılacak. Silinsin mi?",
+        ):
+            return
+        try:
+            if backend == "chat" and self.store.preference("local_chat_model") == name:
+                self.local_chat.configure(
+                    "",
+                    context_tokens=self.store.preference("local_context_tokens"),
+                    max_tokens=self.store.preference("local_max_tokens"),
+                )
+                self.store.set_preference("local_chat_model", "")
+            if backend == "piper" and self.store.preference("piper_model") == name:
+                self.piper.configure("")
+                self.store.set_preference("piper_model", "")
+            self._model_catalog(backend).delete(name)
+            self._report(
+                f"Model dosyasını ve yerel kaydını sildim: {name}. 🗑️", speak=False
+            )
+        except (ValueError, OSError) as exc:
+            self._report(f"Model silinemedi: {exc}", speak=False)
+
+    def _annotate_model_dialog(self) -> None:
+        if self._closing or self._busy:
+            return
+        kind, ok = QInputDialog.getItem(
+            self.chat_window,
+            "Model kaynak/lisans notu",
+            "Model türü:",
+            ["GGUF sohbet", "Piper ses"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        backend = "chat" if kind == "GGUF sohbet" else "piper"
+        name = self._choose_model_name(backend, "Not eklenecek model")
+        if name is None:
+            return
+        catalog = self._model_catalog(backend)
+        try:
+            info = catalog.info(name)
+            url, ok = QInputDialog.getText(
+                self.chat_window,
+                "Kaynak URL",
+                "Modelin indirildiği sayfa (isteğe bağlı):",
+                text=info.source_url,
+            )
+            if not ok:
+                return
+            note, ok = QInputDialog.getText(
+                self.chat_window,
+                "Lisans notu",
+                "Model kartındaki lisans/kullanım notu (isteğe bağlı):",
+                text=info.license_note,
+            )
+            if not ok:
+                return
+            catalog.annotate(name, source_url=url.strip(), license_note=note.strip())
+            self._report(
+                "Kaynak/lisans notu yerelde kaydedildi; model dosyası değişmedi. ",
+                speak=False,
+            )
+        except ValueError as exc:
+            self._report(str(exc), speak=False)
 
     def _import_piper_model(self) -> None:
         self.show_chat()
@@ -2050,14 +2338,22 @@ class NoraApp(QWidget):
         )
         if not path:
             return
+        overwrite = False
+        if self.piper.catalog.exists_for_source(Path(path).name):
+            overwrite = self._confirm(
+                "Piper modelinin üzerine yaz",
+                "Aynı adlı Piper modeli zaten var. Üzerine yazılsın mı? Önceki dosyalar kopya başarısız olursa korunur.",
+            )
+            if not overwrite:
+                return
         if not self._confirm(
             "Piper modelini içe aktar",
-            "Seçilen .onnx ve yanındaki .onnx.json Nora veri klasörüne kopyalanacak. İndirme/buluta yükleme yapılmaz. Piper seçiliyse sistem sesine gizlice dönülmez. İçe aktarayım mı?",
+            "Seçilen .onnx ve yanındaki .onnx.json Nora veri klasörüne kopyalanacak; SHA-256 kaydı oluşturulacak. İndirme/buluta yükleme yapılmaz. Piper seçiliyse sistem sesine gizlice dönülmez. İçe aktarayım mı?",
         ):
             return
 
         def run() -> str:
-            message = self.piper.import_model(Path(path))
+            message = self.piper.import_model(Path(path), overwrite=overwrite)
             self.store.set_preference("piper_model", self.piper.model_name)
             return message
 
@@ -2070,14 +2366,22 @@ class NoraApp(QWidget):
         )
         if not path:
             return
+        overwrite = False
+        if self.local_chat.catalog.exists_for_source(Path(path).name):
+            overwrite = self._confirm(
+                "GGUF modelinin üzerine yaz",
+                "Aynı adlı GGUF modeli zaten var. Üzerine yazılsın mı? Önceki dosya kopya başarısız olursa korunur.",
+            )
+            if not overwrite:
+                return
         if not self._confirm(
             "GGUF modelini içe aktar",
-            "Seçilen model Nora veri klasörüne kopyalanacak. İndirme veya buluta yükleme yapılmaz; model yalnızca sen seçince yüklenir. İçe aktarayım mı?",
+            "Seçilen model Nora veri klasörüne kopyalanacak; SHA-256 kaydı oluşturulacak. İndirme veya buluta yükleme yapılmaz; model yalnızca sen seçince yüklenir. İçe aktarayım mı?",
         ):
             return
 
         def run() -> str:
-            message = self.local_chat.import_model(Path(path))
+            message = self.local_chat.import_model(Path(path), overwrite=overwrite)
             self.store.set_preference("local_chat_model", self.local_chat.model_name)
             return message
 
@@ -2164,7 +2468,11 @@ class NoraApp(QWidget):
                 prefs["speech_rate"], prefs["speech_volume"], prefs["voice_id"]
             )
             self.local_speech.configure(prefs["whisper_model"], prefs["whisper_device"])
-            self.local_chat.configure(prefs["local_chat_model"])
+            self.local_chat.configure(
+                prefs["local_chat_model"],
+                context_tokens=prefs["local_context_tokens"],
+                max_tokens=prefs["local_max_tokens"],
+            )
             self.piper.configure(prefs["piper_model"])
             self.voice.set_tts_backend(prefs["tts_backend"])
             self.voice.configure_barge_in(prefs["voice_barge_in"])
@@ -2465,9 +2773,16 @@ class NoraApp(QWidget):
     def _run_text_assist(self, text: str, action: str, context: str) -> None:
         if self._closing or self._busy:
             return
-        self._set_busy(True, "Metni işliyorum…")
+        self._set_busy(True, "Metni işliyorum…", cancellable=True)
         request_id = self._next_request()
-        worker = TextWorker(self.brain, text, action, context, request_id)
+        worker = TextWorker(
+            self.brain,
+            text,
+            action,
+            context,
+            request_id,
+            should_stop=self._request_cancel.is_set,
+        )
         worker.done.connect(self._on_image_done)
         self._track_worker(worker)
         worker.start()

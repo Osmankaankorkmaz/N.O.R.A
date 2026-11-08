@@ -84,3 +84,21 @@ def test_atomic_file_is_valid_json(tmp_path):
     store.add_note("test")
     assert json.loads(path.read_text(encoding="utf-8"))["version"] == 1
     assert not list(tmp_path.glob(".nora-*.tmp"))
+
+
+def test_local_token_limits_are_bounded_and_cross_validated(tmp_path):
+    store = NoraStore(tmp_path / "state.json")
+    assert store.preference("local_context_tokens") == 4096
+    assert store.preference("local_max_tokens") == 600
+    store.update_preferences({"local_context_tokens": 2048, "local_max_tokens": 512})
+    assert store.preference("local_context_tokens") == 2048
+    with pytest.raises(ValueError):
+        store.set_preference("local_context_tokens", 512)
+    with pytest.raises(ValueError):
+        store.set_preference("local_max_tokens", 4096)
+    with pytest.raises(ValueError, match="128 token"):
+        store.update_preferences(
+            {"local_context_tokens": 1024, "local_max_tokens": 1024}
+        )
+    assert store.preference("local_context_tokens") == 2048
+    assert store.preference("local_max_tokens") == 512

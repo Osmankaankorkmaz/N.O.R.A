@@ -131,3 +131,116 @@ def test_local_chat_rejects_unsafe_filename_and_unsupported_extension(tmp_path):
     with pytest.raises(ValueError):
         chat.import_model(source)
     chat.close()
+
+
+def test_local_chat_streams_and_cancels_between_tokens(tmp_path):
+    from nora.nora_local_llm import LocalChatCancelled
+
+    closed = []
+
+    class Stream:
+        def __init__(self):
+            self.sent = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.sent += 1
+            if self.sent > 3:
+                raise StopIteration
+            return {"choices": [{"delta": {"content": f"parca{self.sent} "}}]}
+
+        def close(self):
+            closed.append(True)
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            pass
+
+        def create_chat_completion(self, **kwargs):
+            assert kwargs["stream"] is True
+            assert kwargs["max_tokens"] == 256
+            return Stream()
+
+    source = tmp_path / "model.gguf"
+    source.write_bytes(struct.pack("<4sIQQ", b"GGUF", 3, 0, 0))
+    chat = LocalChatModel(tmp_path / "models", model_factory=FakeLlama)
+    chat.import_model(source)
+    chat.configure("model.gguf", context_tokens=1024, max_tokens=256)
+    assert chat.chat([{"role": "user", "content": "selam"}]) == "parca1 parca2 parca3"
+    assert closed == [True]
+    calls = []
+
+    def stop_after_first():
+        calls.append(True)
+        return len(calls) > 2
+
+    with pytest.raises(LocalChatCancelled):
+        chat.chat([{"role": "user", "content": "selam"}], should_stop=stop_after_first)
+    assert closed == [True, True]
+    chat.close()
+
+
+def test_local_chat_context_budget_keeps_system_and_latest_user(tmp_path):
+    seen = {}
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            pass
+
+        def create_chat_completion(self, **kwargs):
+            seen.update(kwargs)
+            return {"choices": [{"message": {"content": "tamam"}}]}
+
+    source = tmp_path / "model.gguf"
+    source.write_bytes(struct.pack("<4sIQQ", b"GGUF", 3, 0, 0))
+    chat = LocalChatModel(tmp_path / "models", model_factory=FakeLlama)
+    chat.import_model(source)
+    chat.configure("model.gguf", context_tokens=1024, max_tokens=128)
+    messages = [{"role": "system", "content": "S" * 4000}]
+    messages += [
+        {"role": "user", "content": f"eski {i} " + "x" * 300} for i in range(10)
+    ]
+    messages.append({"role": "user", "content": "en yeni soru"})
+    assert chat.chat(messages) == "tamam"
+    fitted = seen["messages"]
+    assert fitted[0]["role"] == "system" and len(fitted[0]["content"]) < 4000
+    assert fitted[-1]["content"] == "en yeni soru"
+    assert all("eski 0" not in item["content"] for item in fitted)
+    with pytest.raises(ValueError, match="çok uzun"):
+        chat.chat([{"role": "user", "content": "x" * 5000}])
+    chat.close()
+
+
+def test_local_chat_cancel_does_not_fall_back_to_cloud(tmp_path):
+    class Stream:
+        def __iter__(self):
+            yield {"choices": [{"delta": {"content": "ilk"}}]}
+            yield {"choices": [{"delta": {"content": "ikinci"}}]}
+
+        def close(self):
+            pass
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            pass
+
+        def create_chat_completion(self, **kwargs):
+            return Stream()
+
+    source = tmp_path / "model.gguf"
+    source.write_bytes(struct.pack("<4sIQQ", b"GGUF", 3, 0, 0))
+    chat = LocalChatModel(tmp_path / "models", model_factory=FakeLlama)
+    chat.import_model(source)
+    brain = NoraBrain(api_key="", offline=True, local_chat=chat, chat_backend="local")
+    calls = []
+
+    def stop():
+        calls.append(True)
+        return len(calls) > 2
+
+    reply = brain.chat("selam", should_stop=stop)
+    assert reply.error and "Buluta geçmedim" in reply.text
+    assert len(brain.history) == 1
+    chat.close()

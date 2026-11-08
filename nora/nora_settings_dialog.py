@@ -129,6 +129,18 @@ class NoraSettingsDialog(QDialog):
             prefs,
         )
         self._line(form, "local_chat_model", "Yerel sohbet modeli (.gguf)", prefs, 120)
+        self._spin(
+            form, "local_context_tokens", "Yerel bağlam (token)", 1024, 8192, prefs
+        )
+        self._spin(
+            form, "local_max_tokens", "Yerel yanıt limiti (token)", 128, 2048, prefs
+        )
+        self.fields["local_context_tokens"].setToolTip(
+            "GGUF bağlam penceresi. Büyük değer daha fazla RAM ister; 4096 çoğu küçük model için başlangıçtır."
+        )
+        self.fields["local_max_tokens"].setToolTip(
+            "Yerel yanıt token sınırı. Bağlamdan en az 128 token küçük olmalı. İptal düğmesi üretim arasında durur."
+        )
         self._combo(
             form,
             "tts_backend",

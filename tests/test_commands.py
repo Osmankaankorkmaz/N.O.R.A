@@ -242,3 +242,47 @@ def test_v18_direct_phrases():
     assert parse_direct_command("sayı tahminim 999").command["guess"] == 999
     with pytest.raises(CommandError):
         normalize_command({"command": "number_game", "action": "guess", "guess": 101})
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("yerel modeller", {"command": "local_ai", "action": "models"}),
+        ("model listesi", {"command": "local_ai", "action": "models"}),
+        (
+            "gguf model seç",
+            {"command": "local_ai", "action": "select", "backend": "chat"},
+        ),
+        (
+            "piper model seç v.onnx",
+            {
+                "command": "local_ai",
+                "action": "select",
+                "backend": "piper",
+                "name": "v.onnx",
+            },
+        ),
+        (
+            "gguf model doğrula a.gguf",
+            {
+                "command": "local_ai",
+                "action": "verify",
+                "backend": "chat",
+                "name": "a.gguf",
+            },
+        ),
+        (
+            "piper model bilgi v.onnx",
+            {
+                "command": "local_ai",
+                "action": "info",
+                "backend": "piper",
+                "name": "v.onnx",
+            },
+        ),
+    ],
+)
+def test_local_model_grammar(text, expected):
+    direct = parse_direct_command(text)
+    assert direct is not None
+    assert normalize_command(direct.command) == expected

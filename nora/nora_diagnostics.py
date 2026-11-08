@@ -194,7 +194,7 @@ def run_diagnostics(
             )
         )
     if "embeddings" in selected:
-        ready = LocalEmbeddings(models).cached()
+        ready = LocalEmbeddings(models / "embeddings").cached()
         checks.append(
             Check(
                 "Embedding modeli",
@@ -205,37 +205,41 @@ def run_diagnostics(
             )
         )
     if "chat" in selected:
-        chat = LocalChatModel(models)
+        chat = LocalChatModel(models / "chat")
+        detail = "Model seçilmedi/yok; Özellikler menüsünden GGUF içe aktar."
         try:
-            chat.configure(str(prefs.get("local_chat_model", "")))
-            ready = chat.cached()
-        except ValueError:
-            ready = False
-        checks.append(
-            Check(
-                "GGUF modeli",
-                "ok" if ready else "warn",
-                "Seçili dosya var."
-                if ready
-                else "Model seçilmedi/yok; Özellikler menüsünden GGUF içe aktar.",
+            chat.configure(
+                str(prefs.get("local_chat_model", "")),
+                context_tokens=int(prefs.get("local_context_tokens", 4096)),
+                max_tokens=int(prefs.get("local_max_tokens", 600)),
             )
-        )
+            ready = chat.cached()
+            if ready:
+                has_record = chat.catalog.info(chat.model_name).has_record
+                detail = (
+                    "Seçili dosya var; bütünlük kaydı var."
+                    if has_record
+                    else "Seçili dosya var; bütünlük kaydı yok. Güvenli kaynaktan yeniden içe aktarabilirsin."
+                )
+        except (ValueError, TypeError):
+            ready = False
+        checks.append(Check("GGUF modeli", "ok" if ready else "warn", detail))
     if "piper" in selected:
-        piper = PiperSpeech(models)
+        piper = PiperSpeech(models / "piper")
+        detail = "Model seçilmedi/yok; .onnx ve .onnx.json dosyalarını içe aktar."
         try:
             piper.configure(str(prefs.get("piper_model", "")))
             ready = piper.cached()
+            if ready:
+                has_record = piper.catalog.info(piper.model_name).has_record
+                detail = (
+                    "ONNX + JSON dosyaları var; bütünlük kaydı var."
+                    if has_record
+                    else "ONNX + JSON dosyaları var; bütünlük kaydı yok."
+                )
         except ValueError:
             ready = False
-        checks.append(
-            Check(
-                "Piper modeli",
-                "ok" if ready else "warn",
-                "ONNX + JSON dosyaları var."
-                if ready
-                else "Model seçilmedi/yok; .onnx ve .onnx.json dosyalarını içe aktar.",
-            )
-        )
+        checks.append(Check("Piper modeli", "ok" if ready else "warn", detail))
     checks.append(
         Check(
             "Kapsam",

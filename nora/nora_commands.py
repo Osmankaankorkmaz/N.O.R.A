@@ -580,8 +580,23 @@ def parse_direct_command(
         return _cmd("spotify", action="status")
     if low in {"spotify cihazları", "spotify cihazlarını göster"}:
         return _cmd("spotify", action="devices")
-    if low in {"yerel ai durumu", "yerel modeller", "yerel model durumu"}:
+    if low in {"yerel ai durumu", "yerel model durumu"}:
         return _cmd("local_ai", action="status")
+    if low in {"yerel modeller", "model listesi", "kurulu modeller"}:
+        return _cmd("local_ai", action="models")
+    match = re.fullmatch(
+        r"(gguf|piper) model(?:i)?\s+(doğrula|bilgi|seç)\s*([A-Za-z0-9_.-]*)", low
+    )
+    if match:
+        backend = "chat" if match.group(1) == "gguf" else "piper"
+        action = {"doğrula": "verify", "bilgi": "info", "seç": "select"}[match.group(2)]
+        data = {"command": "local_ai", "action": action, "backend": backend}
+        if match.group(3):
+            data["name"] = match.group(3)
+        return DirectCommand(data, "Model işlemini hazırlıyorum.", "thinking")
+    if low in {"gguf model seç", "piper model seç"}:
+        backend = "chat" if low.startswith("gguf") else "piper"
+        return _cmd("local_ai", action="select", backend=backend)
     if low in {"anlamsal arama modelini indir", "embedding modelini indir"}:
         return _cmd("local_ai", action="download_embeddings")
     if low in {"günaydın brifingi", "sabah brifingi", "brifing", "bugün planım ne"}:

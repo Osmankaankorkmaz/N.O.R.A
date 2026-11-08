@@ -156,3 +156,32 @@ def test_emotions_have_metadata():
     }
     for data in EMOTIONS.values():
         assert {"emoji", "color", "energy"} <= data.keys()
+
+
+def test_local_ai_model_commands_validate_backend_and_filename():
+    assert normalize_command(
+        {"command": "local_ai", "action": "verify", "backend": "chat", "name": "a.gguf"}
+    ) == {
+        "command": "local_ai",
+        "action": "verify",
+        "backend": "chat",
+        "name": "a.gguf",
+    }
+    for command in (
+        {
+            "command": "local_ai",
+            "action": "verify",
+            "backend": "cloud",
+            "name": "a.gguf",
+        },
+        {
+            "command": "local_ai",
+            "action": "info",
+            "backend": "chat",
+            "name": "../a.gguf",
+        },
+        {"command": "local_ai", "action": "info", "backend": "piper", "name": "a.gguf"},
+        {"command": "local_ai", "action": "delete"},
+    ):
+        with pytest.raises(CommandError):
+            normalize_command(command)

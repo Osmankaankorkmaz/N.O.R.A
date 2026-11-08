@@ -14,7 +14,9 @@ import struct
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
+
+from .nora_model_catalog import ModelCancelled, check_cancelled
 
 
 def validate_gguf_header(path: Path) -> None:
@@ -65,9 +67,27 @@ def validate_piper_config(path: Path) -> dict:
     return data
 
 
+def _copy_checked(
+    source: Path, target: Path, should_stop: Callable[[], bool] | None
+) -> None:
+    with source.open("rb") as src, target.open("wb") as dst:
+        while True:
+            check_cancelled(should_stop)
+            block = src.read(1024 * 1024)
+            if not block:
+                break
+            dst.write(block)
+    check_cancelled(should_stop)
+    shutil.copystat(source, target)
+
+
 @contextmanager
 def staged_import(
-    directory: Path, sources: dict[str, Path], *, overwrite: bool = False
+    directory: Path,
+    sources: dict[str, Path],
+    *,
+    overwrite: bool = False,
+    should_stop: Callable[[], bool] | None = None,
 ) -> Iterator[Path]:
     """Copy beside the destination, validate in the caller, then replace.
 
@@ -95,27 +115,48 @@ def staged_import(
             source = Path(source)
             if source.is_symlink() or not source.is_file():
                 raise ValueError("Model kaynağı normal bir dosya olmalı.")
-            shutil.copy2(source, stage / name)
+            _copy_checked(source, stage / name, should_stop)
+        check_cancelled(should_stop)
         yield stage
+        check_cancelled(should_stop)
+        # Callers may generate sidecars inside the staging directory. Commit
+        # those too, instead of leaving an import without integrity metadata.
+        for path in stage.iterdir():
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("Geçici model klasöründe beklenmeyen öğe var.")
+            if path.name not in targets:
+                if Path(path.name).name != path.name or path.name in {".", ".."}:
+                    raise ValueError("Model hedef adı güvenli değil.")
+                target = directory / path.name
+                if target.is_symlink():
+                    raise ValueError("Model hedef adı güvenli değil.")
+                if target.exists() and not overwrite:
+                    raise ValueError(
+                        "Bu model zaten var; üzerine yazmak için açık onay gerekir."
+                    )
+                targets[path.name] = target
         backup = root / "previous"
         backup.mkdir()
         existed = set()
         for name, target in targets.items():
             if target.exists():
                 existed.add(name)
-                shutil.copy2(target, backup / name)
+                _copy_checked(target, backup / name, should_stop)
         replaced = set()
         try:
             for name, target in targets.items():
+                check_cancelled(should_stop)
                 os.replace(stage / name, target)
                 replaced.add(name)
-        except OSError as exc:
+        except (OSError, ModelCancelled) as exc:
             for name in reversed(list(replaced)):
                 target = targets[name]
                 if name in existed:
                     os.replace(backup / name, target)
                 else:
                     target.unlink(missing_ok=True)
+            if isinstance(exc, ModelCancelled):
+                raise
             raise ValueError(
                 "Model dosyaları yerleştirilemedi; önceki dosyalar korundu."
             ) from exc

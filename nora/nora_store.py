@@ -48,6 +48,8 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "semantic_search": False,
     "chat_backend": "groq",
     "local_chat_model": "",
+    "local_context_tokens": 4096,
+    "local_max_tokens": 600,
     "tts_backend": "system",
     "piper_model": "",
     "voice_barge_in": False,
@@ -198,6 +200,8 @@ class NoraStore:
                 "hydration_minutes": (0, 240),
                 "break_minutes": (0, 180),
                 "autonomy_minutes": (5, 120),
+                "local_context_tokens": (1024, 8192),
+                "local_max_tokens": (128, 2048),
             }
             low, high = bounds[key]
             if (
@@ -237,9 +241,26 @@ class NoraStore:
             ):
                 raise ValueError("Spotify Client ID harf/rakam içermeli.")
 
+    @staticmethod
+    def _check_local_limits(prefs: dict[str, Any]) -> None:
+        context = prefs.get(
+            "local_context_tokens", DEFAULT_PREFERENCES["local_context_tokens"]
+        )
+        limit = prefs.get("local_max_tokens", DEFAULT_PREFERENCES["local_max_tokens"])
+        if limit >= context - 128:
+            raise ValueError(
+                "Yerel yanıt limiti, bağlamdan en az 128 token küçük olmalı."
+            )
+
     def set_preference(self, key: str, value: Any) -> None:
         with self._lock:
             self.validate_preference(key, value)
+            merged = {
+                **DEFAULT_PREFERENCES,
+                **self._data.get("preferences", {}),
+                key: value,
+            }
+            self._check_local_limits(merged)
             if self.load_warning:
                 raise ValueError(
                     self.load_warning + " Dosyayı düzeltmeden üzerine yazmıyorum."
@@ -253,6 +274,12 @@ class NoraStore:
                 raise ValueError(self.load_warning)
             for key, value in values.items():
                 self.validate_preference(key, value)
+            merged = {
+                **DEFAULT_PREFERENCES,
+                **self._data.get("preferences", {}),
+                **values,
+            }
+            self._check_local_limits(merged)
             self._data.setdefault("preferences", {}).update(values)
             self._save()
 

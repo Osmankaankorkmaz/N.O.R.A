@@ -118,3 +118,31 @@ def test_setup_script_uses_modular_requirements_and_no_model_download():
         )
         assert "-r requirements.txt" in requirements
         assert feature in script
+
+
+def test_doctor_finds_imported_models_in_feature_subdirectories(tmp_path):
+    import struct
+
+    chat_dir = tmp_path / "models" / "chat"
+    chat_dir.mkdir(parents=True)
+    (chat_dir / "a.gguf").write_bytes(struct.pack("<4sIQQ", b"GGUF", 3, 0, 0))
+    piper_dir = tmp_path / "models" / "piper"
+    piper_dir.mkdir(parents=True)
+    (piper_dir / "v.onnx").write_bytes(b"onnx")
+    (piper_dir / "v.onnx.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "state.json").write_text(
+        json.dumps(
+            {
+                "preferences": {
+                    "local_chat_model": "a.gguf",
+                    "piper_model": "v.onnx",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    checks = run_diagnostics(tmp_path, ("chat", "piper"))
+    chat = next(c for c in checks if c.name == "GGUF modeli")
+    piper = next(c for c in checks if c.name == "Piper modeli")
+    assert chat.status == "ok" and "bütünlük kaydı yok" in chat.detail
+    assert piper.status == "ok" and "bütünlük kaydı yok" in piper.detail

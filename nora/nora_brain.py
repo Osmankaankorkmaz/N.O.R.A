@@ -15,10 +15,10 @@ import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from .nora_commands import parse_direct_command
-from .nora_local_llm import strip_reasoning
+from .nora_local_llm import LocalChatCancelled, strip_reasoning
 from .nora_personality import (
     SYSTEM_PROMPT,
     CommandError,
@@ -181,11 +181,15 @@ class NoraBrain:
         with self._lock:
             return [self.history[0], *self.history[1:][-HISTORY_LIMIT:]]
 
-    def chat(self, message: str) -> ChatReply:
+    def chat(
+        self, message: str, *, should_stop: Callable[[], bool] | None = None
+    ) -> ChatReply:
         if not isinstance(message, str) or not message.strip():
             return ChatReply(
                 "Boş mesaj gönderemezsin senpai. Bir şey yaz. 🐾", "smug", error=True
             )
+        if should_stop is not None and should_stop():
+            return ChatReply("İstek iptal edildi senpai. 🐾", "sleepy", error=True)
         message = message.strip()
         if len(message) > 4000:
             return ChatReply(
@@ -208,7 +212,7 @@ class NoraBrain:
             except CommandError as exc:
                 return ChatReply(str(exc), "thinking", error=True)
         if self.chat_backend == "local":
-            return self._local_chat_reply(message)
+            return self._local_chat_reply(message, should_stop=should_stop)
         if not self.available:
             return self._offline_reply(message)
 
@@ -226,6 +230,19 @@ class NoraBrain:
                 top_p=0.9,
                 **self._reasoning_kwargs(self.chat_model),
             )
+            if should_stop is not None and should_stop():
+                with self._lock:
+                    if (
+                        revision == self._revision
+                        and self.history
+                        and self.history[-1].get("content") == message
+                    ):
+                        self.history.pop()
+                return ChatReply(
+                    "İstek iptal edildi; yanıtı kullanmadım senpai. 🐾",
+                    "sleepy",
+                    error=True,
+                )
             raw = response.choices[0].message.content or ""
             text, emotion, command = parse_response(raw)
             if command is not None:
@@ -255,9 +272,17 @@ class NoraBrain:
                     and self.history[-1].get("content") == message
                 ):
                     self.history.pop()
+            if should_stop is not None and should_stop():
+                return ChatReply(
+                    "İstek iptal edildi; yanıtı kullanmadım senpai. 🐾",
+                    "sleepy",
+                    error=True,
+                )
             return self._connection_error(exc, self.chat_model)
 
-    def _local_chat_reply(self, message: str) -> ChatReply:
+    def _local_chat_reply(
+        self, message: str, *, should_stop: Callable[[], bool] | None = None
+    ) -> ChatReply:
         if self.local_chat is None:
             return ChatReply(
                 "Yerel sohbet modeli yapılandırılmadı senpai. Menüden GGUF modeli içe aktar. 🧠",
@@ -270,7 +295,7 @@ class NoraBrain:
             revision = self._revision
             messages = self._messages()
         try:
-            raw = self.local_chat.chat(messages)
+            raw = self.local_chat.chat(messages, should_stop=should_stop)
             text, emotion, command = parse_response(raw)
             if command is not None:
                 try:
@@ -288,6 +313,17 @@ class NoraBrain:
                     self.history.append({"role": "assistant", "content": raw})
                     self.history = [self.history[0], *self.history[1:][-HISTORY_LIMIT:]]
             return ChatReply(text, emotion, command)
+        except LocalChatCancelled:
+            with self._lock:
+                if (
+                    revision == self._revision
+                    and self.history
+                    and self.history[-1].get("content") == message
+                ):
+                    self.history.pop()
+            return ChatReply(
+                "Yerel yanıt iptal edildi. Buluta geçmedim. 🧠", "sleepy", error=True
+            )
         except Exception as exc:
             with self._lock:
                 if (
@@ -296,6 +332,12 @@ class NoraBrain:
                     and self.history[-1].get("content") == message
                 ):
                     self.history.pop()
+            if should_stop is not None and should_stop():
+                return ChatReply(
+                    "Yerel yanıt iptal edildi. Buluta geçmedim. 🧠",
+                    "sleepy",
+                    error=True,
+                )
             detail = (
                 str(exc)
                 if isinstance(exc, ValueError)
@@ -381,9 +423,18 @@ class NoraBrain:
             return self._connection_error(exc, self.vision_model)
 
     def assist_text(
-        self, text: str, action: str, target_language: str = "Türkçe"
+        self,
+        text: str,
+        action: str,
+        target_language: str = "Türkçe",
+        *,
+        should_stop: Callable[[], bool] | None = None,
     ) -> ChatReply:
         """One explicit clipboard/screen request; no history or disk persistence."""
+        if should_stop is not None and should_stop():
+            return ChatReply(
+                "Metin işlemi iptal edildi. Buluta geçmedim. ", "sleepy", error=True
+            )
         if not isinstance(text, str) or not text.strip() or len(text) > 12000:
             return ChatReply(
                 "Analiz edilecek metin 1-12000 karakter olmalı senpai.",
@@ -421,13 +472,26 @@ class NoraBrain:
                             + "\nİşlenecek veri:\n"
                             + text,
                         },
-                    ]
+                    ],
+                    should_stop=should_stop,
                 )
                 result, emotion, _ = parse_response(raw)
                 return ChatReply(
                     result or "Metinde işlenecek içerik bulamadım.", emotion
                 )
+            except LocalChatCancelled:
+                return ChatReply(
+                    "Metin işlemi iptal edildi. Buluta geçmedim. 🧠",
+                    "sleepy",
+                    error=True,
+                )
             except Exception as exc:
+                if should_stop is not None and should_stop():
+                    return ChatReply(
+                        "Metin işlemi iptal edildi. Buluta geçmedim. 🧠",
+                        "sleepy",
+                        error=True,
+                    )
                 detail = (
                     str(exc)
                     if isinstance(exc, ValueError)
@@ -458,6 +522,12 @@ class NoraBrain:
                 max_completion_tokens=1200,
                 **self._reasoning_kwargs(self.chat_model),
             )
+            if should_stop is not None and should_stop():
+                return ChatReply(
+                    "Metin işlemi iptal edildi; yanıtı kullanmadım. 🐾",
+                    "sleepy",
+                    error=True,
+                )
             result, emotion, _ = parse_response(
                 response.choices[0].message.content or ""
             )

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -133,7 +134,13 @@ class PluginRegistry:
         errors: list[str] = []
         if not self.directory.is_dir():
             return manifests, errors
-        paths = sorted(self.directory.glob("*.json"))[:MAX_PLUGINS]
+        paths = sorted(self.directory.glob("*.json"))
+        if len(paths) > MAX_PLUGINS:
+            errors.append(
+                f"Eklenti sınırı {MAX_PLUGINS}; fazla dosyalar güvenlik için yüklenmedi."
+            )
+            return manifests, errors
+        seen_ids = set()
         for path in paths:
             try:
                 if (
@@ -144,9 +151,15 @@ class PluginRegistry:
                     raise CommandError(
                         "Eklenti dosyası güvenli boyutta normal bir JSON dosyası olmalı."
                     )
-                manifests.append(
-                    validate_manifest(json.loads(path.read_text(encoding="utf-8")))
+                manifest = validate_manifest(
+                    json.loads(path.read_text(encoding="utf-8"))
                 )
+                if manifest.id != path.stem:
+                    raise CommandError("Eklenti kimliği dosya adıyla eşleşmeli.")
+                if manifest.id in seen_ids:
+                    raise CommandError("Yinelenen eklenti kimliği.")
+                seen_ids.add(manifest.id)
+                manifests.append(manifest)
             except Exception as exc:
                 errors.append(f"{path.name}: {exc}")
         return manifests, errors
@@ -159,7 +172,10 @@ class PluginRegistry:
         path = self._path(plugin_id)
         if not path.is_file() or path.is_symlink():
             raise CommandError("Eklenti bulunamadı.")
-        return validate_manifest(json.loads(path.read_text(encoding="utf-8")))
+        manifest = validate_manifest(json.loads(path.read_text(encoding="utf-8")))
+        if manifest.id != plugin_id:
+            raise CommandError("Eklenti kimliği dosya adıyla eşleşmeli.")
+        return manifest
 
     def install(self, source: Path, *, overwrite: bool = False) -> PluginManifest:
         source = Path(source)
@@ -179,13 +195,32 @@ class PluginRegistry:
             raise CommandError(
                 "Bu eklenti zaten kurulu; güncellemek için üzerine yazmayı onayla."
             )
-        if not target.exists() and len(self.load_all()[0]) >= MAX_PLUGINS:
+        if (
+            not target.exists()
+            and len(list(self.directory.glob("*.json"))) >= MAX_PLUGINS
+        ):
             raise CommandError(f"Eklenti sınırı {MAX_PLUGINS}.")
-        temporary = target.with_suffix(".json.tmp")
-        temporary.write_text(
-            json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
+        existing, _errors = self.load_all()
+        candidate_phrases = {command.phrase for command in manifest.commands}
+        for other in existing:
+            if other.id == manifest.id:
+                continue
+            overlap = candidate_phrases & {command.phrase for command in other.commands}
+            if overlap:
+                raise CommandError(
+                    f"Eklenti ifadesi başka bir paketle çakışıyor ({other.id}): "
+                    + ", ".join(sorted(overlap)[:3])
+                )
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=".plugin-", suffix=".tmp", dir=self.directory
         )
-        temporary.replace(target)
+        temporary = Path(temporary_name)
+        try:
+            with open(fd, "w", encoding="utf-8") as handle:
+                json.dump(raw, handle, ensure_ascii=False, indent=2)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
         return manifest
 
     def delete(self, plugin_id: str) -> None:
@@ -194,14 +229,32 @@ class PluginRegistry:
             path.unlink()
         self.store.set_plugin_enabled(plugin_id, False)
 
+    def conflicts(self) -> dict[str, tuple[str, ...]]:
+        owners: dict[str, list[str]] = {}
+        for manifest in self.load_all()[0]:
+            for command in manifest.commands:
+                owners.setdefault(command.phrase, []).append(manifest.id)
+        return {
+            phrase: tuple(sorted(ids))
+            for phrase, ids in owners.items()
+            if len(set(ids)) > 1
+        }
+
     def match(self, text: str) -> tuple[PluginManifest, PluginCommand] | None:
         phrase = normalize_text(text)
-        seen = set()
-        for manifest in self.enabled():
+        enabled = self.enabled()
+        conflicts = self.conflicts()
+        if phrase in conflicts and any(
+            command.phrase == phrase
+            for manifest in enabled
+            for command in manifest.commands
+        ):
+            raise CommandError(
+                "Bu ifade birden fazla etkin eklentide çakışıyor; güvenlik için çalıştırmadım: "
+                + ", ".join(conflicts[phrase])
+            )
+        for manifest in enabled:
             for command in manifest.commands:
-                if command.phrase in seen:
-                    continue
-                seen.add(command.phrase)
                 if command.phrase == phrase:
                     return manifest, command
         return None
@@ -212,8 +265,14 @@ class PluginRegistry:
         manifest = self.get(plugin_id)
         if manifest.id not in self.store.enabled_plugins:
             raise CommandError("Bu eklenti kapalı; önce açıkça etkinleştir.")
+        conflicts = self.conflicts()
         for command in manifest.commands:
             if command.name.casefold() == str(name).casefold():
+                if command.phrase in conflicts:
+                    raise CommandError(
+                        "Eklenti ifadesi başka paketlerle çakışıyor: "
+                        + ", ".join(conflicts[command.phrase])
+                    )
                 return manifest, command
         raise CommandError("Eklenti komutu bulunamadı.")
 
@@ -229,6 +288,15 @@ class PluginRegistry:
             state = "açık" if manifest.id in enabled else "kapalı"
             lines.append(
                 f"• {manifest.id} · {manifest.name} v{manifest.version} · {state} · {len(manifest.commands)} komut"
+            )
+        conflicts = self.conflicts()
+        if conflicts:
+            lines.append(
+                "Çakışan ifadeler (çalıştırılmaz):\n"
+                + "\n".join(
+                    f"• {phrase} → {', '.join(ids)}"
+                    for phrase, ids in sorted(conflicts.items())[:5]
+                )
             )
         if errors:
             lines.append("Okunamayan eklentiler:\n" + "\n".join(errors[:5]))

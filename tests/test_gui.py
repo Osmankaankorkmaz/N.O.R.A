@@ -767,3 +767,93 @@ def test_clipboard_start_failure_reverts_preference(qapp, monkeypatch):
     assert reports and "başlatılamadı" in reports[0]
     app.shutdown()
     qapp.processEvents()
+
+
+def test_cancel_button_only_enabled_for_cancellable_requests(qapp, tmp_path):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    app.brain.set_chat_backend("local")
+    app._set_busy(True, "Düşünüyorum…", cancellable=True)
+    app._next_request()
+    assert not app.cancel_button.isHidden() and app.cancel_button.isEnabled()
+    app._cancel_current_request()
+    assert app._request_cancel.is_set()
+    assert not app.cancel_button.isEnabled()
+    app._set_busy(False)
+    assert app.cancel_button.isHidden()
+    app._set_busy(True, "Araç", cancellable=False)
+    assert app.cancel_button.isHidden()
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_model_manager_commands_list_select_info_and_verify(
+    qapp, monkeypatch, tmp_path
+):
+    import struct
+
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    reports = []
+    monkeypatch.setattr(app, "_report", lambda text, **kwargs: reports.append(text))
+    monkeypatch.setattr(
+        app, "_run_tool", lambda function, status, **kwargs: reports.append(function())
+    )
+    source = tmp_path / "kaynak.gguf"
+    source.write_bytes(struct.pack("<4sIQQ", b"GGUF", 3, 0, 0))
+    app.local_chat.import_model(
+        source, source_url="https://example.test", license_note="MIT"
+    )
+    app._local_ai_command({"command": "local_ai", "action": "models"})
+    assert "kaynak.gguf" in reports[-1] and "SHA-256" not in reports[-1]
+    app._local_ai_command(
+        {
+            "command": "local_ai",
+            "action": "select",
+            "backend": "chat",
+            "name": "kaynak.gguf",
+        }
+    )
+    assert app.store.preference("local_chat_model") == "kaynak.gguf"
+    app._local_ai_command(
+        {
+            "command": "local_ai",
+            "action": "info",
+            "backend": "chat",
+            "name": "kaynak.gguf",
+        }
+    )
+    assert "MIT" in reports[-1] and "kanıtlamaz" in reports[-1]
+    app._local_ai_command(
+        {
+            "command": "local_ai",
+            "action": "verify",
+            "backend": "chat",
+            "name": "kaynak.gguf",
+        }
+    )
+    assert "doğrulandı" in reports[-1]
+    app.shutdown()
+    qapp.processEvents()
+
+
+def test_invalid_local_token_pair_is_not_saved(qapp, tmp_path):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    before = app.store.preferences
+    app._apply_settings({"local_context_tokens": 1024, "local_max_tokens": 2048})
+    assert (
+        app.store.preference("local_context_tokens") == before["local_context_tokens"]
+    )
+    assert app.store.preference("local_max_tokens") == before["local_max_tokens"]
+    app.shutdown()
+    qapp.processEvents()
