@@ -455,6 +455,9 @@ def test_deep_link_is_platform_guarded(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "nora.nora_ui.os.startfile", lambda uri: started.append(uri), raising=False
     )
-    assert app._open_spotify_deep_link("back in black") is False
+    # the autouse fixture stubs the public hook; exercise the real guarded code
+    guarded = type(app)._real_open_spotify_deep_link
+    assert guarded(app, "back in black") is False
+    assert guarded(app, "") is False
     assert started == []
     app.shutdown()

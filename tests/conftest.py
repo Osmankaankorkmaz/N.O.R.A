@@ -42,3 +42,25 @@ def _clear_session_groq_key():
     finally:
         nora_secrets._keyring = real_keyring
         nora_secrets._session_key = ""
+
+
+@pytest.fixture(autouse=True)
+def _no_real_spotify_deep_link(monkeypatch):
+    """Never hand a spotify: URI to the real OS while testing.
+
+    Windows/macOS register a ``spotify:`` handler, so an unpatched test would
+    launch (or attempt to launch) the desktop app on a contributor's machine.
+    Tests that assert the deep-link behaviour patch it again themselves.
+    """
+    try:
+        from nora.nora_ui import NoraApp
+    except Exception:
+        yield
+        return
+    original = NoraApp.__dict__.get("_open_spotify_deep_link")
+    if original is not None:
+        NoraApp._real_open_spotify_deep_link = original
+    monkeypatch.setattr(
+        NoraApp, "_open_spotify_deep_link", lambda self, query: False, raising=False
+    )
+    yield
