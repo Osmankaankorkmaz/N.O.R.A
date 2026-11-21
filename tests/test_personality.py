@@ -69,7 +69,8 @@ def test_command_extraction_handles_nested_json_and_brackets():
         "text": "köşeli ] ve {brace} içeren not",
     }
     raw = f"Notu aldım [CMD:{json.dumps(command, ensure_ascii=False)}] [EMO:happy]"
-    text, emotion, parsed = parse_response(raw)
+    text, emotion, parsed, move = parse_response(raw)
+    assert move is None
     assert text == "Notu aldım"
     assert emotion == "happy"
     assert parsed == command
@@ -81,12 +82,12 @@ def test_command_extraction_handles_nested_json_and_brackets():
 
 def test_command_before_or_after_emotion():
     raw = 'Heh [EMO:smug] [CMD:{"command":"system_info"}]'
-    assert parse_response(raw) == ("Heh", "smug", {"command": "system_info"})
+    assert parse_response(raw) == ("Heh", "smug", {"command": "system_info"}, None)
 
 
 def test_malformed_or_non_trailing_command_is_not_executed():
     raw = 'Örnek [CMD:{"command":"shutdown"}] sonra yazı [EMO:happy]'
-    text, emotion, command = parse_response(raw)
+    text, emotion, command, _move = parse_response(raw)
     assert command is None
     assert "[CMD:" in text
     assert emotion == "happy"

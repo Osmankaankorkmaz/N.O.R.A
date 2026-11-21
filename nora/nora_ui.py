@@ -64,7 +64,7 @@ from .nora_personality import (
     normalize_command,
     startup_greeting,
 )
-from .nora_avatar import RealisticCharacter
+from .nora_body import FullBodyCharacter
 from .nora_pet import NoraPet
 from .nora_plugins import PluginRegistry
 from .nora_pixel_art import PixelCharacter
@@ -387,14 +387,22 @@ class NoraApp(QWidget):
         frameless translucent Qt.Tool and closing hides it) but the interior is
         the translucent glass card from :mod:`nora.nora_glass`.
         """
+        # A real application window (taskbar entry, normal title bar and
+        # resizing) instead of a frameless tool pinned next to the pet.  The
+        # user decides whether to keep it open, so it must behave like every
+        # other desktop app.
         self.chat_window = QWidget(None)
         self.chat_window.setWindowFlags(
-            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+            Qt.Window
+            | Qt.CustomizeWindowHint
+            | Qt.WindowTitleHint
+            | Qt.WindowSystemMenuHint
+            | Qt.WindowMinMaxButtonsHint
+            | Qt.WindowCloseButtonHint
         )
         self.chat_window.setAttribute(Qt.WA_TranslucentBackground)
-        self.chat_window.setWindowTitle("Nora · Sohbet")
-        self.chat_window.resize(430, 640)
-        self.chat_window.setMinimumSize(380, 470)
+        self.chat_window.setWindowTitle("Nora")
+        self.chat_window.setMinimumSize(820, 620)
         self.chat_window.setStyleSheet(glass_style())
 
         root = QVBoxLayout(self.chat_window)
@@ -412,16 +420,14 @@ class NoraApp(QWidget):
 
         # ---- header -----------------------------------------------------
         header = QWidget()
-        header.setFixedHeight(40)
-        header.setCursor(Qt.SizeAllCursor)
-        header.installEventFilter(self)
+        header.setFixedHeight(46)
         self.chat_header = header
         header_outer = QHBoxLayout(header)
         header_outer.setContentsMargins(2, 0, 0, 0)
         header_outer.setSpacing(9)
 
         self.chat_avatar = AvatarDot()
-        self.chat_avatar.setFixedSize(28, 28)
+        self.chat_avatar.setFixedSize(38, 38)
         self.chat_avatar.set_appearance(self.store.preferences)
         header_outer.addWidget(self.chat_avatar)
 
@@ -462,7 +468,7 @@ class NoraApp(QWidget):
             button.setToolTip(tip)
             button.setAccessibleName(tip)
             button.setFont(self._emoji_font(10))
-            button.setFixedSize(28, 28)
+            button.setFixedSize(32, 32)
             if slot is not None:
                 button.clicked.connect(slot)
             header_outer.addWidget(button)
@@ -479,6 +485,7 @@ class NoraApp(QWidget):
         # ---- message list ----------------------------------------------
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setMinimumHeight(320)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setStyleSheet("background: transparent;")
@@ -504,12 +511,13 @@ class NoraApp(QWidget):
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Nora'ya bir şey yaz…")
+        self.input.setPlaceholderText("Nora'ya bir şey yaz…  (Enter ile gönder)")
         self.input.setMaxLength(4000)
+        self.input.setMinimumHeight(38)
         self.input.returnPressed.connect(self._send_from_input)
         input_row.addWidget(self.input, 1)
         self.cancel_button = QPushButton("⏹")
-        self.cancel_button.setFixedSize(36, 36)
+        self.cancel_button.setFixedSize(40, 40)
         self.cancel_button.setToolTip(
             "İsteği iptal et. Yerel üretim tokenlar arasında durur; bulut isteği ağda sürebilir ama yanıtı kullanılmaz."
         )
@@ -519,7 +527,7 @@ class NoraApp(QWidget):
         input_row.addWidget(self.cancel_button)
         self.send_button = QPushButton("➤")
         self.send_button.setObjectName("sendButton")
-        self.send_button.setFixedSize(44, 36)
+        self.send_button.setFixedSize(52, 40)
         self.send_button.setToolTip("Gönder (Enter)")
         self.send_button.clicked.connect(self._send_from_input)
         input_row.addWidget(self.send_button)
@@ -574,10 +582,18 @@ class NoraApp(QWidget):
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
-        if getattr(self.pet, "character_style", "realistic") == "pixel":
+        style = getattr(self.pet, "character_style", "body")
+        if style == "pixel":
             PixelCharacter.draw_icon(painter, 64, self.store.preferences)
         else:
-            RealisticCharacter().draw_icon(painter, 64, self.store.preferences)
+            # ``body`` and ``realistic`` share the same art: use the head of
+            # the full-body character for a crisp, consistent tray icon.
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            image = FullBodyCharacter().portrait(
+                64, appearance=self.store.preferences, crop="face"
+            )
+            painter.drawImage(0, 0, image)
         painter.end()
         return QIcon(pixmap)
 
@@ -1418,7 +1434,15 @@ class NoraApp(QWidget):
         self.pet.raise_()
 
     def _position_chat(self) -> None:
+        """Open as a normal app window, centred on the pet's screen.
+
+        The window is user-owned: it is only *placed* once, on first open, and
+        never re-anchored to the character afterwards.  When the user has moved
+        or resized it we leave it exactly where they put it.
+        """
         if not self.chat_window.isVisible() and not self.chat_window.isHidden():
+            return
+        if getattr(self, "_chat_user_moved", False):
             return
         app = QApplication.instance()
         screen = (
@@ -1432,43 +1456,33 @@ class NoraApp(QWidget):
         if screen is None:
             return
         area = screen.availableGeometry()
-        width, height = self.chat_window.width(), self.chat_window.height()
-        right = self.pet.x() + self.pet.width() + 10
-        x = right if right + width <= area.right() + 1 else self.pet.x() - width - 10
-        x = max(area.left(), min(x, area.right() - width + 1))
-        y = self.pet.y() + self.pet.height() - height - 8
-        y = max(area.top(), min(y, area.bottom() - height + 1))
-        self.chat_window.move(x, y)
+        width = max(self.chat_window.minimumWidth(), int(area.width() * 0.66))
+        height = max(self.chat_window.minimumHeight(), int(area.height() * 0.86))
+        width = min(width, area.width() - 40)
+        height = min(height, area.height() - 40)
+        self.chat_window.resize(width, height)
+        self.chat_window.move(
+            area.center().x() - width // 2,
+            area.center().y() - height // 2,
+        )
 
     def _on_pet_moved(self, point: QPoint) -> None:
         if self.chat_window.isVisible() and not self._chat_user_moved:
             self._position_chat()
 
     def eventFilter(self, obj, event) -> bool:
-        header = getattr(self, "chat_header", None)
         window = getattr(self, "chat_window", None)
-        if header is not None and obj is header:
-            if (
-                event.type() == QEvent.MouseButtonPress
-                and event.button() == Qt.LeftButton
-            ):
-                self._chat_drag_offset = event.globalPos() - window.pos()
+        if window is not None and obj is window:
+            if event.type() in (QEvent.Move, QEvent.Resize):
+                # Once the user touches the window it is theirs: remember it so
+                # the next show does not re-centre or re-anchor it.
+                if window.isVisible():
+                    self._chat_user_moved = True
+            if event.type() == QEvent.Close:
+                # Closing hides the panel; Nora keeps living in the tray.
+                event.ignore()
+                window.hide()
                 return True
-            if (
-                event.type() == QEvent.MouseMove
-                and self._chat_drag_offset is not None
-                and event.buttons() & Qt.LeftButton
-            ):
-                window.move(event.globalPos() - self._chat_drag_offset)
-                self._chat_user_moved = True
-                return True
-            if event.type() == QEvent.MouseButtonRelease:
-                self._chat_drag_offset = None
-                return True
-        if window is not None and obj is window and event.type() == QEvent.Close:
-            event.ignore()
-            window.hide()
-            return True
         return super().eventFilter(obj, event)
 
     def _tray_activated(self, reason) -> None:
@@ -1676,12 +1690,31 @@ class NoraApp(QWidget):
         self._track_worker(worker)
         worker.start()
 
+    def _apply_reply_motion(self, reply: ChatReply) -> None:
+        """Let the model's ``[MOVE:...]`` drive the body, honestly.
+
+        The payload was produced by the model a moment ago, so this is the
+        "she decides what to do right now" path: nothing here is a pre-baked
+        animation.  If the tag is missing or invalid the pet falls back to
+        body language that matches the emotion (chosen at random).
+        """
+        if self.pet.character_style != "body":
+            return
+        if not self.pet.perform_move(reply.move, fallback=True):
+            return
+        if reply.move:
+            self.store.add_audit(
+                "move",
+                {"source": "model", "steps": len(reply.move.get("steps") or [1])},
+            )
+
     def _on_chat_done(self, request_id: int, reply: ChatReply) -> None:
         if self._closing or request_id != self._active_request:
             return
         self._set_busy(False)
         self.add_message(reply.text, "bot")
         self.pet.set_emotion(reply.emotion)
+        self._apply_reply_motion(reply)
         if reply.command and not reply.error:
             self._execute_command(reply.command)
         self._sync_pause()
@@ -3353,6 +3386,7 @@ class NoraApp(QWidget):
         self._set_busy(False)
         self.add_message(reply.text, "bot")
         self.pet.set_emotion(reply.emotion)
+        self._apply_reply_motion(reply)
 
     # --------------------------------------------------------------------- voice
     def _start_listening(self, *, recognition_test: bool = False) -> None:

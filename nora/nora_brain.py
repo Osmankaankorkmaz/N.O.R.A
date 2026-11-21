@@ -55,6 +55,10 @@ class ChatReply:
     emotion: str = "happy"
     command: dict[str, Any] | None = None
     error: bool = False
+    #: Raw ``[MOVE:...]`` payload chosen by the model for this answer.  It is
+    #: only a *request*: the UI validates it with
+    #: :func:`nora.nora_motion.normalize_move` before any joint moves.
+    move: dict[str, Any] | None = None
 
 
 def _stored_key() -> str:
@@ -351,7 +355,7 @@ class NoraBrain:
                     error=True,
                 )
             raw = response.choices[0].message.content or ""
-            text, emotion, command = parse_response(raw)
+            text, emotion, command, move = parse_response(raw)
             if command is not None:
                 try:
                     command = normalize_command(command)
@@ -370,7 +374,7 @@ class NoraBrain:
                         {"role": "assistant", "content": strip_reasoning(raw)}
                     )
                     self.history = [self.history[0], *self.history[1:][-HISTORY_LIMIT:]]
-            return ChatReply(text, emotion, command)
+            return ChatReply(text, emotion, command, move=move)
         except Exception as exc:
             with self._lock:
                 if (
@@ -403,7 +407,7 @@ class NoraBrain:
             messages = self._messages()
         try:
             raw = self.local_chat.chat(messages, should_stop=should_stop)
-            text, emotion, command = parse_response(raw)
+            text, emotion, command, move = parse_response(raw)
             if command is not None:
                 try:
                     command = normalize_command(command)
@@ -419,7 +423,7 @@ class NoraBrain:
                 if revision == self._revision and not self._closed:
                     self.history.append({"role": "assistant", "content": raw})
                     self.history = [self.history[0], *self.history[1:][-HISTORY_LIMIT:]]
-            return ChatReply(text, emotion, command)
+            return ChatReply(text, emotion, command, move=move)
         except LocalChatCancelled:
             with self._lock:
                 if (
@@ -522,9 +526,11 @@ class NoraBrain:
                 **self._reasoning_kwargs(self.vision_model),
             )
             raw = response.choices[0].message.content or ""
-            text, emotion, _ = parse_response(raw)
+            text, emotion, _, move = parse_response(raw)
             return ChatReply(
-                text or "Hımm, görüntüde anlatacak bir şey bulamadım.", emotion
+                text or "Hımm, görüntüde anlatacak bir şey bulamadım.",
+                emotion,
+                move=move,
             )
         except Exception as exc:
             return self._connection_error(exc, self.vision_model)
@@ -582,9 +588,11 @@ class NoraBrain:
                     ],
                     should_stop=should_stop,
                 )
-                result, emotion, _ = parse_response(raw)
+                result, emotion, _, move = parse_response(raw)
                 return ChatReply(
-                    result or "Metinde işlenecek içerik bulamadım.", emotion
+                    result or "Metinde işlenecek içerik bulamadım.",
+                    emotion,
+                    move=move,
                 )
             except LocalChatCancelled:
                 return ChatReply(
@@ -635,10 +643,14 @@ class NoraBrain:
                     "sleepy",
                     error=True,
                 )
-            result, emotion, _ = parse_response(
+            result, emotion, _, move = parse_response(
                 response.choices[0].message.content or ""
             )
-            return ChatReply(result or "Metinde işlenecek içerik bulamadım.", emotion)
+            return ChatReply(
+                result or "Metinde işlenecek içerik bulamadım.",
+                emotion,
+                move=move,
+            )
         except Exception as exc:
             return self._connection_error(exc, self.chat_model)
 

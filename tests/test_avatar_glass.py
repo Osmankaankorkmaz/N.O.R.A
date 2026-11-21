@@ -103,27 +103,34 @@ def test_tray_icon_uses_the_realistic_face(qapp):
 
 
 # ---------------------------------------------------------------- style switch
-def test_realistic_is_default_and_pixel_still_available(qapp):
+def test_full_body_is_default_and_other_styles_still_available(qapp):
     pet = NoraPet()
     pet._timer.stop()
-    assert pet.character_style == "realistic"
-    assert (pet.width(), pet.height()) == (260, 360)
+    # default: the small full-body character (arms, legs, feet)
+    assert pet.character_style == "body"
+    assert (pet.width(), pet.height()) == (132, 312)
+    assert not pet.grab().isNull()
+
     pet.set_appearance({"character_style": "pixel"})
     assert pet.character_style == "pixel"
     assert (pet.width(), pet.height()) == (120, 150)
-    assert not pet.grab().isNull()
+
     pet.set_appearance({"character_style": "realistic"})
+    assert pet.character_style == "realistic"
     assert (pet.width(), pet.height()) == (260, 360)
+
+    pet.set_appearance({"character_style": "body"})
+    assert (pet.width(), pet.height()) == (132, 312)
     pet.shutdown()
 
 
 def test_character_style_preference_and_env(monkeypatch):
     assert _character_style({"character_style": "pixel"}) == "pixel"
-    assert _character_style({"character_style": "nonsense"}) == "realistic"
+    assert _character_style({"character_style": "nonsense"}) == "body"
     monkeypatch.setenv("NORA_CHARACTER", "pixel")
     assert _character_style({}) == "pixel"
     monkeypatch.setenv("NORA_CHARACTER", "unknown")
-    assert _character_style({}) == "realistic"
+    assert _character_style({}) == "body"
     assert "8-bit" in _tooltip_for("pixel")
     assert "8-bit" not in _tooltip_for("realistic")
 
@@ -132,7 +139,7 @@ def test_store_validates_and_migrates_appearance(qapp, tmp_path):
     from nora.nora_store import NoraStore
 
     store = NoraStore(tmp_path / "state.json")
-    assert store.preference("character_style") == "realistic"
+    assert store.preference("character_style") == "body"
     assert store.preference("hair_color") == DEFAULT_HAIR
     assert store.preference("appearance_version") == 3
     with pytest.raises(ValueError):

@@ -268,6 +268,12 @@ class FrostedPanel(QWidget):
         painter.drawPath(top)
 
 
+#: Message bubbles stay readable on wide windows without turning into
+#: edge-to-edge text: ~62% of the 760 px panel, capped for very large windows.
+BUBBLE_LABEL_MAX = 560
+BUBBLE_MAX = 592
+
+
 class GlassBubble(QFrame):
     """One chat message in a translucent bubble.
 
@@ -287,19 +293,19 @@ class GlassBubble(QFrame):
         layout.setSpacing(0)
         label = QLabel(str(text))
         label.setWordWrap(True)
-        label.setMaximumWidth(280)
+        label.setMaximumWidth(BUBBLE_LABEL_MAX)
         label.setTextFormat(Qt.PlainText)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         label.setStyleSheet("color: #f6effa; background: transparent; font-size: 13px;")
         label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         layout.addWidget(label)
         self.label = label
-        self.setMaximumWidth(312)
+        self.setMaximumWidth(BUBBLE_MAX)
         # QLabel's wrapped size hint collapses to a narrow column; give the
         # bubble a sensible preferred width derived from the actual text.
         metrics = label.fontMetrics()
         ideal = metrics.boundingRect(str(text)).width() + 30
-        self.setMinimumWidth(max(96, min(280, ideal)))
+        self.setMinimumWidth(max(96, min(BUBBLE_LABEL_MAX, ideal)))
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
         painter = QPainter(self)
@@ -602,12 +608,13 @@ class AvatarDot(QWidget):
 
     def set_appearance(self, appearance: dict | None) -> None:
         try:
-            from .nora_avatar import RealisticCharacter
+            from .nora_body import FullBodyCharacter
 
-            image = RealisticCharacter().portrait(appearance=appearance or {})
-            side = min(image.width(), image.height())
-            crop = image.copy(30, 24, min(200, side - 30), min(200, side - 24))
-            self._pixmap = QPixmap.fromImage(crop)
+            # same renderer as the desktop pet: one character, one art style
+            image = FullBodyCharacter().portrait(
+                128, appearance=appearance or {}, crop="face"
+            )
+            self._pixmap = QPixmap.fromImage(image)
         except Exception:
             self._pixmap = None
         self.update()

@@ -28,6 +28,8 @@ from .nora_avatar import (
     DEFAULT_HAIR,
     RealisticCharacter,
 )
+from .nora_body import FullBodyCharacter
+from .nora_motion import MotionController, fallback_move, normalize_move
 from .nora_pixel_art import DEFAULT_HAIR_COLOR, PixelCharacter
 
 
@@ -61,17 +63,17 @@ def _character_style(settings: Mapping[str, Any] | None = None) -> str:
     )
     for value in candidates:
         text = str(value or "").strip().lower()
-        if text in {"realistic", "pixel"}:
+        if text in {"body", "realistic", "pixel"}:
             return text
-    return "realistic"
+    return "body"
 
 
 def _tooltip_for(style: str) -> str:
     if style == "pixel":
         return "Nora 💕 · 8-bit mod · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
-    return (
-        "Nora 💕 · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı · Çift tık: sohbet"
-    )
+    if style == "realistic":
+        return "Nora 💕 · portre · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
+    return "Nora 💕 · tam vücut · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
 
 
 class SpeechBubble(QWidget):
@@ -139,8 +141,12 @@ class NoraPet(QWidget):
 
     PIXEL_WIDTH = 120
     PIXEL_HEIGHT = 150
-    WIDTH = AVATAR_WIDTH
-    HEIGHT = AVATAR_HEIGHT
+    #: Full-body character (default): small on screen, but with real legs and
+    #: arms that the motion engine can move.
+    BODY_WIDTH = 132
+    BODY_HEIGHT = 312
+    WIDTH = BODY_WIDTH
+    HEIGHT = BODY_HEIGHT
     GRAVITY = 0.4
     WALK_SPEED = 1.2
     FPS_INTERVAL = 33
@@ -180,7 +186,8 @@ class NoraPet(QWidget):
         self._animations = True
         self._affection_frames = 0
         self._appearance = {
-            "outfit": "classic",
+            # the reference art wears a cream turtleneck
+            "outfit": "cream",
             "hair_color": (
                 DEFAULT_HAIR_COLOR if self.character_style == "pixel" else DEFAULT_HAIR
             ),
@@ -189,6 +196,10 @@ class NoraPet(QWidget):
         }
         self._pixel_artist = PixelCharacter()
         self._realistic_artist = RealisticCharacter()
+        self._body_artist = FullBodyCharacter()
+        self._motion = MotionController(self.rng)
+        self._pose_clock = 0.0
+        self._last_pose = None
         self._blink_left = 0
         self._next_blink = self.rng.randint(100, 200)
         self._drag_offset = QPoint()
@@ -343,6 +354,7 @@ class NoraPet(QWidget):
             if self._next_blink <= 0:
                 self._blink_left = 6
                 self._next_blink = self.rng.randint(100, 200)
+        self._tick_body()
         self._floor_y = self._current_floor()
 
         if self.state != PetState.DRAG:
@@ -547,6 +559,7 @@ class NoraPet(QWidget):
             self._pinned_state = PetState.DANCE
             self.emotion = "love"
             self._set_state(PetState.DANCE, 100000)
+            self.perform_move({"gesture": "dance"}, fallback=False)
             return "Dans modu açık! 'Dur' dersen bitiririm. 🎵"
         if action == "watch":
             self._manual = True
@@ -558,6 +571,7 @@ class NoraPet(QWidget):
             if not self._grounded:
                 return "Zaten havadayım senpai! Bir de yere ineyim. 😼"
             self._set_state(PetState.JUMP, 100000)
+            self.perform_move({"gesture": "jump"}, fallback=False)
             return "Hop! Zıpladım senpai~"
         if action == "sit":
             self._manual = True
@@ -582,6 +596,7 @@ class NoraPet(QWidget):
         if action == "wave":
             if not self._manual:
                 self._set_state(PetState.WAVE, 100)
+            self.perform_move({"gesture": "wave"}, fallback=False)
             self.show_speech("Selam senpai~ 👋", 3000)
             return "Selam verdim senpai~"
         return "Bu hareketi bilmiyorum senpai."
@@ -592,7 +607,7 @@ class NoraPet(QWidget):
                 self._appearance[key] = str(settings[key])
         if "character_style" in settings:
             requested = str(settings["character_style"])
-            if requested in {"realistic", "pixel"}:
+            if requested in {"body", "realistic", "pixel"}:
                 self._apply_character_style(requested)
         if "animations" in settings:
             self._animations = bool(settings["animations"])
@@ -757,6 +772,19 @@ class NoraPet(QWidget):
             return
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        if self.character_style == "body":
+            pose = self._last_pose
+            if pose is None:
+                pose = self._motion.tick(0.0)
+                self._last_pose = pose
+            self._body_artist.draw(
+                painter,
+                pose,
+                appearance=self._appearance,
+                target=QRectF(0, 0, self.WIDTH, self.HEIGHT),
+                talking=self._talking,
+            )
+            return
         self._realistic_artist.draw(
             painter,
             state=self.state.name,
@@ -771,16 +799,63 @@ class NoraPet(QWidget):
             animations=self._animations,
         )
 
+    # --------------------------------------------------------------- motion
+    def _tick_body(self) -> None:
+        """Advance the procedural body animation by one frame interval.
+
+        The motion controller is time based, so the animation keeps the same
+        speed whether the pet runs at 30 fps or the window is hidden and comes
+        back later (the delta is clamped to avoid a jump).
+        """
+        if self.character_style != "body":
+            return
+        if not self._animations:
+            return
+        dt = self.FPS_INTERVAL / 1000.0
+        if self._talking and self._motion.sustained != "talk":
+            self._motion.play_name("talk", intensity=0.8)
+        elif self._listening and self._motion.sustained != "listen":
+            self._motion.play_name("listen", intensity=0.8)
+        elif self.state == PetState.IDLE and self._motion.sustained in {
+            "talk",
+            "listen",
+        }:
+            self._motion.stop_sustained()
+        self._last_pose = self._motion.tick(dt)
+
+    def perform_move(self, move: Any, *, fallback: bool = True) -> bool:
+        """Run an AI-chosen move (already parsed JSON) on the body.
+
+        The payload is validated here again, at the trust boundary: a model can
+        only pick a known gesture and a bounded intensity/duration.  When the
+        payload is unusable and ``fallback`` is set, body language matching the
+        current emotion is chosen at random instead — she never freezes.
+        """
+        if self.character_style != "body":
+            return False
+        normalized = normalize_move(move)
+        if normalized is None and fallback:
+            normalized = fallback_move(self.emotion, self.rng)
+        if normalized is None:
+            return False
+        return self._motion.play(normalized)
+
+    def current_pose(self):
+        """Latest pose, for tests and for the chat panel's small avatar."""
+        return self._last_pose
+
     # ------------------------------------------------------------ character
     def _apply_character_style(self, style: str, *, update: bool = True) -> None:
         """Switch renderers and resize the window without teleporting the pet."""
-        style = style if style in {"realistic", "pixel"} else "realistic"
+        style = style if style in {"body", "realistic", "pixel"} else "body"
         self.character_style = style
         old_width, old_height = self.WIDTH, self.HEIGHT
         if style == "pixel":
             self.WIDTH, self.HEIGHT = self.PIXEL_WIDTH, self.PIXEL_HEIGHT
-        else:
+        elif style == "realistic":
             self.WIDTH, self.HEIGHT = AVATAR_WIDTH, AVATAR_HEIGHT
+        else:
+            self.WIDTH, self.HEIGHT = self.BODY_WIDTH, self.BODY_HEIGHT
         if not update:
             self.setToolTip(_tooltip_for(style))
             return
