@@ -1,0 +1,7 @@
+# Tüm isteğe bağlı özellikler. Tek bir derleme hatası diğerlerini engellemesin
+# diye özellikleri ayrı kurmak isteyenler aşağıdaki dosyaları kullanabilir.
+# Hiçbir model dosyası pip ile veya açılışta indirilmez.
+-r requirements-local.txt
+-r requirements-embeddings.txt
+-r requirements-chat.txt
+-r requirements-piper.txt

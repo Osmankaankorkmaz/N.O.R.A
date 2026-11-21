@@ -1,0 +1,4 @@
+# Temel uygulama + kullanıcı tarafından seçilen GGUF sohbet modeli.
+# llama-cpp-python bazı platformlarda C++ derleme araçları gerektirebilir.
+-r requirements.txt
+llama-cpp-python==0.3.36

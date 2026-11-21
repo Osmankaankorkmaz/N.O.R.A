@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "study-pack",
+  "name": "Çalışma Paketi",
+  "version": "1.0.0",
+  "description": "Odak için güvenli örnek JSON komut paketi. Python/shell kodu içermez.",
+  "commands": [
+    {
+      "name": "stüdyo",
+      "phrase": "stüdyo zamanı",
+      "reply": "Stüdyo düzeni hazır senpai. Odaklanalım. 🎯",
+      "steps": [
+        {"command": "pet_action", "action": "sit"},
+        {"command": "mode", "mode": "focus"}
+      ]
+    }
+  ]
+}

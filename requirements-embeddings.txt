@@ -1,0 +1,3 @@
+# Temel uygulama + yerel anlam araması. Model pip ile indirilmez.
+-r requirements.txt
+fastembed==0.9.1

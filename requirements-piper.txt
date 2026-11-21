@@ -1,0 +1,5 @@
+# Temel uygulama + kesilebilir yerel Piper konuşması.
+# .onnx ve .onnx.json model dosyaları kullanıcı tarafından içe aktarılır.
+-r requirements.txt
+piper-tts==1.8.0
+sounddevice==0.5.6

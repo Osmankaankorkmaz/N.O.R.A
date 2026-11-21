@@ -1,0 +1,375 @@
+"""A scrollable, keyboard-accessible settings panel for Nora's local preferences."""
+
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QLineEdit,
+    QMessageBox,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .nora_secrets import groq_key_present, save_groq_key
+from .nora_store import NoraStore
+
+
+class NoraSettingsDialog(QDialog):
+    def __init__(
+        self,
+        store: NoraStore,
+        *,
+        on_apply: Callable[[dict[str, Any]], None] | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.store = store
+        self.on_apply = on_apply
+        self.fields: dict[str, QWidget] = {}
+        self.setWindowTitle("Nora · Ayarlar")
+        self.setMinimumSize(460, 560)
+        self.setStyleSheet(
+            "QDialog { background: #24182f; } QLabel { color: #f7ecff; } QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit { background: #392447; color: white; padding: 5px; border: 1px solid #8655a0; border-radius: 5px; } QCheckBox { color: #f7ecff; } QPushButton { padding: 7px 15px; background: #7c4dff; color: white; border-radius: 6px; }"
+        )
+        root = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        form = QFormLayout(content)
+        form.setContentsMargins(12, 12, 12, 12)
+        form.setSpacing(10)
+        prefs = store.preferences
+        self._combo(
+            form,
+            "tone",
+            "Kişilik",
+            (("tsundere", "Tsundere"), ("sweet", "Tatlı"), ("serious", "Ciddi")),
+            prefs,
+        )
+        self._line(form, "address", "Hitap", prefs, 30)
+        self._combo(
+            form,
+            "character_style",
+            "Karakter stili",
+            (
+                ("realistic", "Gerçekçi VTuber (önerilen)"),
+                ("pixel", "8-bit piksel chibi (eski)"),
+            ),
+            prefs,
+        )
+        self.fields["character_style"].setToolTip(
+            "Gerçekçi stil: yumuşak gölgeli yarım boy portre (260×360). Piksel stil eski 8-bit chibi'yi korur."
+        )
+        self._combo(
+            form,
+            "outfit",
+            "Kıyafet",
+            (
+                ("classic", "Siyah elbise"),
+                ("casual", "Günlük pembe"),
+                ("night", "Gece mavisi"),
+            ),
+            prefs,
+        )
+        self._combo(
+            form,
+            "hair_color",
+            "Saç rengi",
+            (
+                ("#7d5a44", "Kumral (varsayılan)"),
+                ("#5a4132", "Koyu kumral"),
+                ("#a8836a", "Açık kumral"),
+                ("#4a2c32", "Kestane"),
+                ("#202b52", "Gece mavisi"),
+                ("#33204d", "Mor"),
+                ("#f5f3f0", "Beyaz (piksel stil)"),
+            ),
+            prefs,
+        )
+        self.fields["hair_color"].setToolTip(
+            "Gerçekçi stilde kumral tonlar doğal durur; beyaz yalnızca 8-bit stilde önerilir."
+        )
+        self._combo(
+            form,
+            "eye_color",
+            "Göz rengi",
+            (
+                ("yesil", "Yeşilimsi ela (varsayılan)"),
+                ("hazel", "Ela"),
+                ("kahve", "Kahverengi"),
+                ("mavi", "Mavi"),
+                ("gri", "Gri"),
+            ),
+            prefs,
+        )
+        self.fields["eye_color"].setToolTip(
+            "Gerçekçi avatarda iris tonunu belirler; göz bebeği ve ışık yansıması korunur."
+        )
+        self._combo(
+            form,
+            "accessory",
+            "Aksesuar",
+            (
+                ("none", "Yok"),
+                ("headphones", "Kulaklık"),
+                ("glasses", "Gözlük"),
+                ("ribbon", "Kurdele"),
+            ),
+            prefs,
+        )
+        self._check(form, "animations", "Dekoratif animasyonlar", prefs)
+        self._check(form, "autonomous", "Kendiliğinden dolaşabilsin", prefs)
+        self._check(form, "pet_reactions", "Okşama tepkileri", prefs)
+        self._check(form, "companion_reactions", "Duygusal companion tepkileri", prefs)
+        self.fields["companion_reactions"].setToolTip(
+            "Kahve/kurabiye/ödül gibi etkileşimlerde ruh hali ve bağlılık puanı değişir. Tamamen yereldir."
+        )
+        self._check(form, "briefing_on_startup", "Açılışta sabah brifingi", prefs)
+        self._check(form, "media_keys", "Medya tuşlarıyla oynatıcı kontrolü", prefs)
+        self.fields["media_keys"].setToolTip(
+            "Spotify OAuth yerine işletim sistemi medya tuşlarını kullanır; çalan şarkı adı için API gerekmez."
+        )
+        self._check(form, "audit_log", "Yerel denetim kaydı", prefs)
+        self._check(
+            form, "clipboard_watch", "Pano geçmişini izle (bellek, 30 dk)", prefs
+        )
+        self.fields["clipboard_watch"].setToolTip(
+            "Varsayılan kapalı. Açık onayla yeni kopyalanan metinleri en fazla 20 kayıt/30 dakika bellekte tutar; "
+            "hassas görünenleri atlar, diske yazmaz, buluta göndermez."
+        )
+        self._check(form, "semantic_search", "Yerel embedding araması", prefs)
+        self.fields["semantic_search"].setToolTip(
+            "Açıkken not/hafıza/görev araması indirilmiş yerel embedding modeliyle hibrit çalışır. Model yoksa kelime aramasına döner; buluta geçmez."
+        )
+        self._check(
+            form, "voice_barge_in", "Konuşurken 'Hey Nora' ile sözümü kes", prefs
+        )
+        self.fields["voice_barge_in"].setToolTip(
+            "Varsayılan kapalı. Açıkken Nora konuşurken de yerel bekçi mikrofonu dinler; yalnızca tam 'hey nora' sesi keser. Kulaklık önerilir."
+        )
+        self._combo(
+            form,
+            "chat_backend",
+            "Sohbet motoru",
+            (("groq", "Groq (bulut)"), ("local", "Yerel GGUF")),
+            prefs,
+        )
+        self._line(form, "local_chat_model", "Yerel sohbet modeli (.gguf)", prefs, 120)
+        self._spin(
+            form, "local_context_tokens", "Yerel bağlam (token)", 1024, 8192, prefs
+        )
+        self._spin(
+            form, "local_max_tokens", "Yerel yanıt limiti (token)", 128, 2048, prefs
+        )
+        self.fields["local_context_tokens"].setToolTip(
+            "GGUF bağlam penceresi. Büyük değer daha fazla RAM ister; 4096 çoğu küçük model için başlangıçtır."
+        )
+        self.fields["local_max_tokens"].setToolTip(
+            "Yerel yanıt token sınırı. Bağlamdan en az 128 token küçük olmalı. İptal düğmesi üretim arasında durur."
+        )
+        self._combo(
+            form,
+            "tts_backend",
+            "Konuşma motoru",
+            (("system", "Sistem sesi"), ("piper", "Piper (yerel)")),
+            prefs,
+        )
+        self._line(form, "piper_model", "Piper modeli (.onnx)", prefs, 120)
+        self._groq_key(form)
+        self._line(form, "chat_model", "Groq sohbet modeli", prefs, 120)
+        self.fields["chat_model"].setToolTip(
+            "Varsayılan openai/gpt-oss-120b. Emekli model adları otomatik öneriyle bildirilir."
+        )
+        self._line(form, "spotify_client_id", "Spotify Client ID", prefs, 80)
+        self.fields["spotify_client_id"].setToolTip(
+            "Spotify Developer uygulamanın Client ID'si. Gizli client secret istenmez; OAuth PKCE kullanılır. Tokenlar mümkünse sistem kasasında tutulur."
+        )
+        self.fields["audit_log"].setToolTip(
+            "Son 200 komutu yalnızca cihazında tutar; izin merkezinden görebilir veya temizleyebilirsin."
+        )
+        self._combo(
+            form,
+            "double_click_action",
+            "Çift tıklama",
+            (("chat", "Sohbet"), ("game", "Kelime oyunu"), ("pet", "Başını okşa")),
+            prefs,
+        )
+        self._spin(form, "speech_rate", "Konuşma hızı", 100, 260, prefs)
+        volume = QDoubleSpinBox()
+        volume.setRange(0, 1)
+        volume.setSingleStep(0.05)
+        volume.setValue(float(prefs["speech_volume"]))
+        self._add(form, "speech_volume", "Ses düzeyi", volume)
+        self._line(form, "voice_id", "Ses kimliği (boş: otomatik)", prefs, 240)
+        self._check(form, "tts", "Sesli yanıt", prefs)
+        self._check(form, "wake_word", "Yerel Hey Nora bekçisi", prefs)
+        self._check(form, "continuous_conversation", "Sürekli konuşma modu", prefs)
+        self.fields["continuous_conversation"].setToolTip(
+            "Açıkken Nora cevap verdikten sonra tekrar dinler. 'Dinlemeyi bırak' veya "
+            "'sürekli konuşmayı kapat' ile durur. Mikrofon yalnızca dinleme sırasında açıktır."
+        )
+        self._check(form, "push_to_talk", "Bas-konuş tuşu", prefs)
+        self._line(form, "ptt_key", "Bas-konuş kısayolu", prefs, 60)
+        self.fields["push_to_talk"].setToolTip(
+            "Tuşa basılı tutunca dinler, bırakınca cevaplar. Global kısayol için 'keyboard' "
+            "paketi gerekir; bazı sistemlerde yönetici izni isteyebilir."
+        )
+        self._check(form, "proactive", "Proaktif konuşma", prefs)
+        self._check(form, "quiet_hours", "Gece 02:00-06:00 daha sessiz ol", prefs)
+        self._check(
+            form, "auto_screen_watch", "Nora ara sıra ekranımı incelesin", prefs
+        )
+        self._check(
+            form, "auto_camera_watch", "Nora ara sıra kameradan beni incelesin", prefs
+        )
+        self._check(
+            form, "auto_media", "Nora kendi kendine müzik/video açabilsin", prefs
+        )
+        self._spin(form, "autonomy_minutes", "Otonomi aralığı (dakika)", 5, 120, prefs)
+        self.fields["auto_screen_watch"].setToolTip(
+            "Açıkken Nora seyrek aralıklarla ekran görüntüsü alıp Groq'a analiz için gönderebilir. "
+            "Varsayılan kapalıdır; odak/sessiz modda ve gece daha az çalışır."
+        )
+        self.fields["auto_camera_watch"].setToolTip(
+            "Açıkken Nora seyrek aralıklarla kameradan bir kare alıp Groq'a analiz için gönderebilir. "
+            "Kamera izni gerekir; varsayılan kapalıdır."
+        )
+        self.fields["auto_media"].setToolTip(
+            "Açıkken Nora canı isterse Spotify/YouTube araması açıp dans edebilir veya video izleme "
+            "pozuna geçebilir. Varsayılan kapalıdır; tarayıcı/uygulama açılabilir."
+        )
+        self._combo(
+            form,
+            "stt_backend",
+            "Komut ses tanıma",
+            (("google", "Google (internet gerekir)"), ("local", "Whisper (yerel)")),
+            prefs,
+        )
+        self.fields["stt_backend"].setToolTip(
+            "Yalnızca Hey Nora/🎤 sonrası dinler. Nora adı Nova/no ra gibi duyulursa "
+            "sınırlı komut bağlamında düzeltilir; Ses Tanıma Testi ile kontrol edebilirsin."
+        )
+        self._combo(
+            form,
+            "whisper_model",
+            "Whisper modeli",
+            (
+                ("tiny", "Tiny · hızlı"),
+                ("base", "Base"),
+                ("small", "Small · önerilen"),
+                ("medium", "Medium · güçlü PC"),
+            ),
+            prefs,
+        )
+        self._combo(
+            form,
+            "whisper_device",
+            "Whisper cihazı",
+            (("auto", "Otomatik"), ("cpu", "CPU"), ("cuda", "CUDA ekran kartı")),
+            prefs,
+        )
+        self._spin(form, "focus_minutes", "Odak süresi (dakika)", 5, 120, prefs)
+        self._spin(
+            form, "hydration_minutes", "Su hatırlatması (0: kapalı)", 0, 240, prefs
+        )
+        self._spin(
+            form, "break_minutes", "Mola hatırlatması (0: kapalı)", 0, 180, prefs
+        )
+        scroll.setWidget(content)
+        root.addWidget(scroll)
+        buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Apply).setText("Uygula")
+        buttons.button(QDialogButtonBox.Cancel).setText("Vazgeç")
+        buttons.button(QDialogButtonBox.Apply).clicked.connect(self.apply)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _add(self, form: QFormLayout, key: str, label: str, widget: QWidget) -> None:
+        widget.setAccessibleName(label)
+        self.fields[key] = widget
+        form.addRow(label, widget)
+
+    def _combo(self, form, key, label, choices, prefs) -> None:
+        widget = QComboBox()
+        for value, title in choices:
+            widget.addItem(title, value)
+        index = widget.findData(prefs[key])
+        widget.setCurrentIndex(max(0, index))
+        self._add(form, key, label, widget)
+
+    def _groq_key(self, form: QFormLayout) -> None:
+        """Masked API-key entry that is never written into state.json."""
+        widget = QLineEdit()
+        widget.setEchoMode(QLineEdit.Password)
+        widget.setMaxLength(200)
+        widget.setPlaceholderText(
+            "gsk_… (boş bırak: mevcut anahtar korunur)"
+            if groq_key_present()
+            else "gsk_… (isteğe bağlı; yerel mod da çalışır)"
+        )
+        self.fields["groq_api_key"] = widget
+        form.addRow("Groq API anahtarı", widget)
+        widget.setToolTip(
+            "Anahtar yalnızca işletim sistemi anahtar kasasında (keyring) tutulur; "
+            "state.json dosyasına yazılmaz. Kasa yoksa anahtar bu oturum için bellekte tutulur."
+        )
+
+    def _line(self, form, key, label, prefs, limit) -> None:
+        widget = QLineEdit(str(prefs[key]))
+        widget.setMaxLength(limit)
+        self._add(form, key, label, widget)
+
+    def _check(self, form, key, label, prefs) -> None:
+        widget = QCheckBox()
+        widget.setChecked(bool(prefs[key]))
+        self._add(form, key, label, widget)
+
+    def _spin(self, form, key, label, low, high, prefs) -> None:
+        widget = QSpinBox()
+        widget.setRange(low, high)
+        widget.setValue(int(prefs[key]))
+        self._add(form, key, label, widget)
+
+    def values(self) -> dict[str, Any]:
+        result = {}
+        for key, widget in self.fields.items():
+            if key == "groq_api_key":
+                continue
+            if isinstance(widget, QComboBox):
+                result[key] = widget.currentData()
+            elif isinstance(widget, QCheckBox):
+                result[key] = widget.isChecked()
+            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                result[key] = widget.value()
+            elif isinstance(widget, QLineEdit):
+                result[key] = widget.text().strip()
+        return result
+
+    def api_key(self) -> str:
+        widget = self.fields.get("groq_api_key")
+        return widget.text().strip() if isinstance(widget, QLineEdit) else ""
+
+    def apply(self) -> None:
+        try:
+            values = self.values()
+            for key, value in values.items():
+                self.store.validate_preference(key, value)
+            key_status = ""
+            if self.api_key():
+                key_status = save_groq_key(self.api_key())
+            if self.on_apply:
+                self.on_apply(values)
+            if key_status:
+                QMessageBox.information(self, "Groq anahtarı", key_status)
+            self.accept()
+        except (ValueError, TypeError) as exc:
+            QMessageBox.warning(self, "Ayar kaydedilemedi", str(exc))
