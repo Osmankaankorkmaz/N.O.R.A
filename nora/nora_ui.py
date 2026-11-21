@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from PyQt5.QtCore import QEvent, QPoint, Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QIcon, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -44,6 +44,8 @@ from .nora_commands import normalize_text, parse_direct_command, parse_direct_se
 from .nora_companion import mood_summary, reaction_details
 from .nora_desktop import DesktopLayouts
 from .nora_files import NoraFiles
+from .nora_avatar import DEFAULT_HAIR
+from .nora_sprite import SpriteCharacter
 from .nora_glass import (
     AvatarDot,
     FrostedPanel,
@@ -218,6 +220,37 @@ class ChatBubble(GlassBubble):
     def __init__(self, text: str, sender: str, parent=None) -> None:  # noqa: D107
         super().__init__(text, sender, parent)
         self.setStyleSheet("background: transparent;")
+
+
+def _tint_hair(image: QImage, colour: QColor) -> QImage:
+    """Recolour the brown hair in an illustrated portrait.
+
+    The sprite sheets ship with kumral hair.  Only strongly brown pixels are
+    shifted towards ``colour`` so the skin, sweater and eyes stay untouched.
+    """
+    result = QImage(image)
+    for y in range(result.height()):
+        for x in range(result.width()):
+            pixel = result.pixelColor(x, y)
+            if pixel.alpha() < 40:
+                continue
+            hue = pixel.hue()
+            if not (10 <= hue <= 40):
+                continue
+            if pixel.red() <= pixel.green() or pixel.green() <= pixel.blue():
+                continue
+            ratio = colour.lightnessF() / max(0.05, pixel.lightnessF())
+            result.setPixelColor(
+                x,
+                y,
+                QColor(
+                    min(255, int(colour.red() * ratio)),
+                    min(255, int(colour.green() * ratio)),
+                    min(255, int(colour.blue() * ratio)),
+                    pixel.alpha(),
+                ),
+            )
+    return result
 
 
 class NoraApp(QWidget):
@@ -582,17 +615,31 @@ class NoraApp(QWidget):
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
-        style = getattr(self.pet, "character_style", "body")
+        style = getattr(self.pet, "character_style", "sprite")
         if style == "pixel":
             PixelCharacter.draw_icon(painter, 64, self.store.preferences)
         else:
-            # ``body`` and ``realistic`` share the same art: use the head of
-            # the full-body character for a crisp, consistent tray icon.
             painter.setRenderHint(QPainter.Antialiasing, True)
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            image = FullBodyCharacter().portrait(
-                64, appearance=self.store.preferences, crop="face"
-            )
+            image = None
+            if style == "sprite":
+                # Same illustrated art as the desktop character.  The sheets
+                # have a fixed hair colour, so a recoloured preference must be
+                # tinted here or the tray icon would silently stop updating.
+                library = getattr(self.pet, "_sprite_assets", None)
+                if library is not None and library.usable:
+                    image = SpriteCharacter(library.library).portrait(
+                        64, self.pet.emotion
+                    )
+                    tint = str(self.store.preferences.get("hair_color") or "")
+                    if tint and tint.lower() != DEFAULT_HAIR.lower():
+                        image = _tint_hair(image, QColor(tint))
+            if image is None:
+                # ``body`` and ``realistic`` share the same art: use the head of
+                # the full-body character for a crisp, consistent tray icon.
+                image = FullBodyCharacter().portrait(
+                    64, appearance=self.store.preferences, crop="face"
+                )
             painter.drawImage(0, 0, image)
         painter.end()
         return QIcon(pixmap)
@@ -1698,8 +1745,6 @@ class NoraApp(QWidget):
         animation.  If the tag is missing or invalid the pet falls back to
         body language that matches the emotion (chosen at random).
         """
-        if self.pet.character_style != "body":
-            return
         if not self.pet.perform_move(reply.move, fallback=True):
             return
         if reply.move:

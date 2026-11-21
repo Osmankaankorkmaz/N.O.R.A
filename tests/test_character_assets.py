@@ -91,11 +91,15 @@ def test_every_pose_and_animation_is_exported_and_animated(qapp, tmp_path):
         assert gif.n_frames >= 2
 
 
-def test_default_full_body_character_is_kumral_with_green_eyes(qapp):
+def test_default_character_is_kumral_with_green_eyes(qapp):
+    """Both the illustrated default and the drawn fallback must read kumral/green."""
     pet = NoraPet()
     pet._timer.stop()
-    assert pet.character_style == "body"
-    assert pet.width() == 132 and pet.height() == 312
+    assert pet.character_style in {"sprite", "body"}
+    if pet.character_style == "sprite":
+        assert pet.width() == 168 and pet.height() == 330
+    else:
+        assert pet.width() == 132 and pet.height() == 312
     assert pet._appearance["hair_color"] == DEFAULT_HAIR
     assert pet._appearance["eye_color"] == "yesil"
     image = pet.grab().toImage()
@@ -103,8 +107,8 @@ def test_default_full_body_character_is_kumral_with_green_eyes(qapp):
     # check hue instead of identity.
     greens = 0
     browns = 0
-    for x in range(0, 132, 1):
-        for y in range(0, 312, 1):
+    for x in range(0, image.width(), 1):
+        for y in range(0, image.height(), 1):
             color = image.pixelColor(x, y)
             if color.alpha() < 200:
                 continue

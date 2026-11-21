@@ -22,10 +22,22 @@ def process_until(qapp, predicate, timeout=3.0):
     return False
 
 
+def _render(widget):
+    """Render a widget synchronously; ``grab()`` is unreliable offscreen."""
+    from PyQt5.QtGui import QColor, QImage
+
+    image = QImage(widget.width(), widget.height(), QImage.Format_ARGB32)
+    image.fill(QColor(0, 0, 0, 0))
+    widget.render(image)
+    return image
+
+
 def test_pet_size_states_and_render(qapp):
     pet = NoraPet()
     pet._timer.stop()
-    assert pet.width() == 132 and pet.height() == 312
+    # The default is the illustrated sheet when it ships, else the drawn body.
+    expected = (168, 330) if pet.character_style == "sprite" else (132, 312)
+    assert (pet.width(), pet.height()) == expected
     assert pet.testAttribute(Qt.WA_TranslucentBackground)
     pet.set_emotion("love")
     assert pet.emotion == "love" and pet.state == PetState.LOVE
@@ -37,12 +49,12 @@ def test_pet_size_states_and_render(qapp):
     pet.show_speech("x" * 100, 1000)
     assert pet._bubble is not None
     assert len(pet._bubble._text) == 63
-    image = pet.grab().toImage()
-    assert not image.isNull() and image.width() == 132
+    image = _render(pet)
+    assert not image.isNull() and image.width() == pet.width()
     assert any(
         image.pixelColor(x, y).alpha() > 0
-        for x in range(0, 132, 4)
-        for y in range(0, 312, 4)
+        for x in range(0, image.width(), 4)
+        for y in range(0, image.height(), 4)
     )
     pet.shutdown()
 
@@ -125,11 +137,15 @@ def test_pet_listening_pose_is_sticky_and_renderable(qapp):
     assert pet.state == PetState.LISTENING
     pet._choose_state()
     assert pet.state == PetState.LISTENING
-    image = pet.grab().toImage()
+    image = _render(pet)
+    # Sample the head area proportionally: the window is 132x312 for the drawn
+    # body and 168x330 for the illustrated sheet, so fixed pixel boxes lie.
+    left, right = int(image.width() * 0.60), int(image.width() * 0.87)
+    top, bottom = int(image.height() * 0.13), int(image.height() * 0.22)
     assert any(
         image.pixelColor(x, y).alpha() > 0
-        for x in range(80, 115, 3)
-        for y in range(40, 70, 3)
+        for x in range(left, right, 3)
+        for y in range(top, bottom, 3)
     )
     pet.set_speaking(True)
     pet.set_speaking(False)

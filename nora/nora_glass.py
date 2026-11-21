@@ -606,14 +606,22 @@ class AvatarDot(QWidget):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
 
-    def set_appearance(self, appearance: dict | None) -> None:
+    def set_appearance(self, appearance: dict | None, emotion: str = "idle") -> None:
+        """Show the same character the desktop pet uses, cropped to the face."""
+        self._pixmap = None
         try:
-            from .nora_body import FullBodyCharacter
+            from .nora_sprite import SpriteAssets, SpriteCharacter
 
-            # same renderer as the desktop pet: one character, one art style
-            image = FullBodyCharacter().portrait(
-                128, appearance=appearance or {}, crop="face"
-            )
+            assets = SpriteAssets()
+            if assets.usable:
+                # illustrated sheets first: one character, one art style
+                image = SpriteCharacter(assets.library).portrait(128, emotion)
+            else:
+                from .nora_body import FullBodyCharacter
+
+                image = FullBodyCharacter().portrait(
+                    128, appearance=appearance or {}, crop="face"
+                )
             self._pixmap = QPixmap.fromImage(image)
         except Exception:
             self._pixmap = None

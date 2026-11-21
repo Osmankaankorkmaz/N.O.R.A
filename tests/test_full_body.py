@@ -304,11 +304,13 @@ def test_draw_fills_the_requested_rect():
 # --------------------------------------------------------------------- pet GUI
 
 
-def test_pet_uses_the_full_body_renderer_by_default(qapp):
+def test_pet_can_use_the_full_body_renderer(qapp):
+    """The drawn body stays fully functional as an explicit style choice."""
     from nora.nora_pet import NoraPet
 
     pet = NoraPet(rng=random.Random(2))
     pet._timer.stop()
+    pet.set_appearance({"character_style": "body"})
     assert pet.character_style == "body"
     assert (pet.width(), pet.height()) == (132, 312)
     pet._tick_body()
@@ -416,7 +418,11 @@ def test_ai_move_reaches_the_pet(qapp, tmp_path):
         "Selam!", "happy", move={"steps": [{"gesture": "wave", "intensity": 1.0}]}
     )
     app._apply_reply_motion(reply)
-    assert app.pet._motion.busy or app.pet._motion.sustained == "wave"
+    if app.pet.character_style == "sprite":
+        # the illustrated character "performs" the move as a timed pose
+        assert app.pet._sprite_artist.active_sprite() is not None
+    else:
+        assert app.pet._motion.busy or app.pet._motion.sustained == "wave"
     app.shutdown()
 
 
@@ -432,17 +438,22 @@ def test_invalid_ai_move_falls_back_to_emotional_body_language(qapp, tmp_path):
     app.pet._timer.stop()
     app.pet.set_emotion("sad")
     app._apply_reply_motion(ChatReply("offff", "sad", move={"gesture": "nope"}))
-    assert app.pet._motion.busy or app.pet._motion.sustained is not None
+    if app.pet.character_style == "sprite":
+        assert app.pet._sprite_artist.active_sprite() is not None
+    else:
+        assert app.pet._motion.busy or app.pet._motion.sustained is not None
     app.shutdown()
 
 
-def test_store_migrates_to_full_body_default(tmp_path):
+def test_store_defaults_to_the_illustrated_character(tmp_path):
     from nora.nora_store import NoraStore
 
     store = NoraStore(tmp_path / "state.json")
-    assert store.preference("character_style") == "body"
-    store.set_preference("character_style", "pixel")
-    assert NoraStore(tmp_path / "state.json").preference("character_style") == "pixel"
+    assert store.preference("character_style") == "sprite"
+    # every style is still selectable, and a bogus one is refused
+    for style in ("body", "realistic", "pixel"):
+        store.set_preference("character_style", style)
+        assert NoraStore(tmp_path / "state.json").preference("character_style") == style
     with pytest.raises(ValueError):
         store.set_preference("character_style", "anime")
 
