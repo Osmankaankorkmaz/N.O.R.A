@@ -430,6 +430,59 @@ class SpotifyClient:
             for device in devices[:10]
         )
 
+    def search_track(self, query: str) -> dict[str, Any] | None:
+        """Top track for a free-text query, or None when nothing matches."""
+        query = str(query or "").strip()[:200]
+        if not query:
+            return None
+        data = self._request(
+            "GET", "/search", params={"q": query, "type": "track", "limit": 5}
+        )
+        items = (
+            data.get("tracks", {}).get("items", []) if isinstance(data, dict) else []
+        )
+        for item in items:
+            if isinstance(item, dict) and item.get("uri"):
+                return item
+        return None
+
+    def play_track(self, query: str) -> str:
+        """Start playback of the best match; returns a Turkish status line."""
+        query = str(query or "").strip()[:200]
+        if not query:
+            raise SpotifyError("Ne çalayım senpai? Şarkı adı boş.")
+        track = self.search_track(query)
+        if track is None:
+            raise SpotifyError(
+                f"Spotify'da '{query}' için parça bulamadım. Yazımı kontrol et senpai."
+            )
+        artists = ", ".join(
+            str(artist.get("name", ""))
+            for artist in track.get("artists", [])
+            if isinstance(artist, dict)
+        )
+        name = str(track.get("name", query))
+        uri = str(track["uri"])
+        # Prefer an explicitly active device, then any available one.
+        body: dict[str, Any] = {"uris": [uri]}
+        devices = self._request("GET", "/me/player/devices")
+        chosen = ""
+        if isinstance(devices, dict):
+            available = [
+                device
+                for device in devices.get("devices", [])
+                if isinstance(device, dict) and device.get("id")
+            ]
+            active = [d for d in available if d.get("is_active")]
+            if active:
+                chosen = str(active[0]["id"])
+            elif available:
+                chosen = str(available[0]["id"])
+        if chosen:
+            body["device_id"] = chosen
+        self._request("PUT", "/me/player/play", body=body)
+        return f"Spotify'da çalıyorum: {name} — {artists or 'bilinmeyen sanatçı'} 🎧"
+
     def control(self, action: str) -> str:
         if action == "now_playing":
             return self.now_playing()

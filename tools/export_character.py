@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Export Nora's QPainter pixel character as PNG poses and animated GIFs.
+"""Export Nora's QPainter characters as PNG poses, sheets and animated GIFs.
 
-Runtime Nora still draws herself with QPainter; these files are documentation /
-preview assets generated from the exact same renderer.  No external sprite is
-used by the application.
+Two renderers are exported from the exact same code paths the app uses:
+
+* ``realistic/``: the default semi-realistic VTuber portrait (kumral hair,
+  green-leaning eyes, smooth shading)
+* the top-level ``poses/`` … ``animations/`` folders: the legacy 8-bit chibi,
+  kept so both styles stay documented and regression-tested
+
+No external sprite is used by the application.
 
 Usage:
     python tools/export_character.py --output docs/character
+    python tools/export_character.py --style realistic     # only the new avatar
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 from PyQt5.QtGui import QImage, QPainter  # noqa: E402
 from PyQt5.QtWidgets import QApplication  # noqa: E402
 
+from nora.nora_avatar import AVATAR_HEIGHT, AVATAR_WIDTH, RealisticCharacter  # noqa: E402
 from nora.nora_personality import EMOTIONS  # noqa: E402
 from nora.nora_pixel_art import (  # noqa: E402
     DEFAULT_HAIR_COLOR,
@@ -122,6 +129,137 @@ ANIMATIONS: dict[str, list[Frame]] = {
         "love", [0, 10, 20, 30, 40, 50], emotion="love", affection=True
     ),
 }
+
+
+REALISTIC_APPEARANCE = {
+    "outfit": "classic",
+    "hair_color": "#7d5a44",
+    "accessory": "none",
+    "eye_color": "yesil",
+}
+REALISTIC_SIZE = (AVATAR_WIDTH, AVATAR_HEIGHT)
+
+
+def render_realistic(spec: Frame, appearance: dict | None = None) -> QImage:
+    """Render the semi-realistic portrait through the app's own renderer."""
+    image = QImage(*REALISTIC_SIZE, QImage.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    RealisticCharacter().draw(
+        painter,
+        state=spec.state,
+        emotion=spec.emotion,
+        frame=spec.frame,
+        appearance=appearance or REALISTIC_APPEARANCE,
+        talking=spec.talking,
+        listening=spec.listening,
+        blinking=spec.blinking,
+        affection=spec.affection,
+        grounded=spec.grounded,
+    )
+    painter.end()
+    return image
+
+
+def save_realistic(
+    spec: Frame, path: Path, *, appearance: dict | None = None, scale: int = 1
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = render_realistic(spec, appearance)
+    result = _pil(image, 1)
+    if scale != 1:
+        result = result.resize(
+            (result.width * scale, result.height * scale),
+            Image.Resampling.LANCZOS,
+        )
+    result.save(path)
+
+
+def save_realistic_gif(
+    name: str,
+    path: Path,
+    *,
+    duration: int = 120,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frames = [_pil(render_realistic(spec), 1) for spec in ANIMATIONS[name]]
+    converted = []
+    for frame in frames:
+        palette = frame.convert("RGB").convert(
+            "P", palette=Image.Palette.ADAPTIVE, colors=255
+        )
+        mask = frame.getchannel("A").point(lambda alpha: 255 if alpha <= 128 else 0)
+        palette.paste(255, mask)
+        converted.append(palette)
+    converted[0].save(
+        path,
+        save_all=True,
+        append_images=converted[1:],
+        duration=duration,
+        loop=0,
+        transparency=255,
+        disposal=2,
+        optimize=False,
+    )
+
+
+def export_realistic(output: Path) -> dict[str, int]:
+    """Write the semi-realistic avatar as poses, sheets and GIFs."""
+    ensure_app()
+    output = Path(output) / "realistic"
+    for folder in (
+        "poses",
+        "emotions",
+        "accessories",
+        "outfits",
+        "sheets",
+        "animations",
+    ):
+        (output / folder).mkdir(parents=True, exist_ok=True)
+    for name, spec in POSE_FRAMES.items():
+        save_realistic(spec, output / "poses" / f"{name}.png")
+    for emotion in EMOTIONS:
+        save_realistic(
+            Frame("idle", emotion=emotion),
+            output / "emotions" / f"{emotion}.png",
+        )
+    for accessory in ("none", "headphones", "glasses", "ribbon"):
+        save_realistic(
+            Frame("idle"),
+            output / "accessories" / f"{accessory}.png",
+            appearance={**REALISTIC_APPEARANCE, "accessory": accessory},
+        )
+    for outfit in ("classic", "casual", "night"):
+        save_realistic(
+            Frame("idle"),
+            output / "outfits" / f"{outfit}.png",
+            appearance={**REALISTIC_APPEARANCE, "outfit": outfit},
+        )
+    for name in ANIMATIONS:
+        save_realistic_gif(name, output / "animations" / f"{name}.gif")
+    # one contact sheet of every pose at native resolution
+    cell_w, cell_h = 270, 370
+    columns = 6
+    items = list(POSE_FRAMES.items())
+    rows = (len(items) + columns - 1) // columns
+    sheet = Image.new("RGBA", (columns * cell_w, rows * cell_h), "#201a2b")
+    draw = ImageDraw.Draw(sheet)
+    font = ImageFont.load_default()
+    for index, (label, spec) in enumerate(items):
+        x = (index % columns) * cell_w
+        y = (index // columns) * cell_h
+        sheet.alpha_composite(_pil(render_realistic(spec), 1), (x + 5, y + 4))
+        draw.text((x + 14, y + cell_h - 18), label, fill="#f7ecff", font=font)
+    sheet.save(output / "sheets" / "poses.png")
+    save_realistic(Frame("idle"), output / "hero.png", scale=2)
+    _realistic_index_html(output.parent if output.name == "realistic" else output)
+    return {
+        "poses": len(POSE_FRAMES),
+        "emotions": len(EMOTIONS),
+        "accessories": 4,
+        "outfits": 3,
+        "animations": len(ANIMATIONS),
+    }
 
 
 def ensure_app() -> QApplication:
@@ -247,6 +385,42 @@ figcaption{{margin-top:8px;font-size:13px;color:#d7a8cc}}
     (output / "index.html").write_text(html, encoding="utf-8")
 
 
+def _realistic_index_html(output: Path) -> None:
+    realistic = output / "realistic"
+    poses = "".join(
+        f'<figure><img src="poses/{name}.png" alt="{name}"><figcaption>{name}</figcaption></figure>'
+        for name in POSE_FRAMES
+    )
+    emotions = "".join(
+        f'<figure><img src="emotions/{name}.png" alt="{name}"><figcaption>{name}</figcaption></figure>'
+        for name in EMOTIONS
+    )
+    animations = "".join(
+        f'<figure><img src="animations/{name}.gif" alt="{name}"><figcaption>{name}</figcaption></figure>'
+        for name in ANIMATIONS
+    )
+    html = f"""<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><title>Nora gerçekçi VTuber avatar galerisi</title>
+<style>
+body{{background:#141119;color:#f4ecf7;font-family:system-ui,sans-serif;margin:24px}}
+h1,h2{{color:#f2a7d0;font-weight:600}}section{{display:flex;flex-wrap:wrap;gap:16px}}
+figure{{margin:0;background:linear-gradient(160deg,#2b2237,#1d1826);border:1px solid rgba(255,255,255,.10);
+border-radius:16px;padding:10px;text-align:center;box-shadow:0 10px 26px rgba(0,0,0,.35)}}
+img{{width:200px;height:277px;object-fit:contain}}
+figcaption{{margin-top:8px;font-size:12px;color:#c4b2cf;letter-spacing:.3px}}
+p{{max-width:70ch;color:#c4b2cf;line-height:1.6}}
+</style></head><body>
+<h1>Nora · gerçekçi VTuber avatarı</h1>
+<p>Kumral saç, yeşilimsi ela gözler, yumuşak gölgeli cilt. Bu görseller uygulamanın
+kendi QPainter çiziminden, 3× süper örnekleme ile üretildi; çalışma zamanında
+harici sprite veya model dosyası kullanılmaz. <a href="../index.html">8-bit chibi galerisi →</a></p>
+<h2>Pozlar</h2><section>{poses}</section>
+<h2>Duygular</h2><section>{emotions}</section>
+<h2>Animasyonlar</h2><section>{animations}</section>
+</body></html>"""
+    (realistic / "index.html").write_text(html, encoding="utf-8")
+
+
 def export_all(
     output: Path, *, png_scale: int = 3, gif_scale: int = 2
 ) -> dict[str, int]:
@@ -302,16 +476,30 @@ def export_all(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Nora 8-bit PNG/GIF dışa aktarımı")
+    parser = argparse.ArgumentParser(description="Nora PNG/GIF dışa aktarımı")
     parser.add_argument("--output", type=Path, default=ROOT / "docs" / "character")
     parser.add_argument("--png-scale", type=int, default=3)
     parser.add_argument("--gif-scale", type=int, default=2)
+    parser.add_argument(
+        "--style",
+        choices=("all", "realistic", "pixel"),
+        default="all",
+        help="Hangi karakter stili dışa aktarılsın (varsayılan: ikisi).",
+    )
     args = parser.parse_args(argv)
     app = ensure_app()  # keep the QApplication alive while painting
-    counts = export_all(args.output, png_scale=args.png_scale, gif_scale=args.gif_scale)
-    print(f"Nora karakter görselleri yazıldı: {args.output}")
-    for key, value in counts.items():
-        print(f"  {key}: {value}")
+    if args.style in {"all", "realistic"}:
+        counts = export_realistic(args.output)
+        print(f"Nora gerçekçi avatar görselleri: {args.output / 'realistic'}")
+        for key, value in counts.items():
+            print(f"  {key}: {value}")
+    if args.style in {"all", "pixel"}:
+        counts = export_all(
+            args.output, png_scale=args.png_scale, gif_scale=args.gif_scale
+        )
+        print(f"Nora 8-bit görselleri: {args.output}")
+        for key, value in counts.items():
+            print(f"  {key}: {value}")
     del app
     return 0
 

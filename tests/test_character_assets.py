@@ -6,6 +6,7 @@ pytest.importorskip("PyQt5.QtWidgets")
 from PyQt5.QtGui import QColor, QImage
 
 from nora.nora_pet import NoraPet, PetState
+from nora.nora_avatar import DEFAULT_HAIR
 from nora.nora_pixel_art import DEFAULT_HAIR_COLOR
 from nora.nora_store import NoraStore
 from tools.export_character import ANIMATIONS, POSE_FRAMES, export_all, render_frame
@@ -19,11 +20,13 @@ def _colors(image: QImage) -> set[int]:
     }
 
 
-def test_requested_wolfcut_palette_is_the_default(qapp):
+def test_legacy_pixel_palette_still_renders(qapp):
+    """The 8-bit chibi remains selectable and keeps its documented palette."""
     pet = NoraPet()
     pet._timer.stop()
+    pet.set_appearance({"character_style": "pixel"})
+    pet.set_appearance({"hair_color": DEFAULT_HAIR_COLOR})
     assert pet._appearance["hair_color"] == DEFAULT_HAIR_COLOR == "#f5f3f0"
-    assert NoraStore().preference("hair_color") == DEFAULT_HAIR_COLOR
     colors = _colors(pet.grab().toImage())
     assert QColor("#f5f3f0").rgba() in colors  # white wolfcut hair
     assert QColor("#1c1c24").rgba() in colors  # black dress
@@ -34,7 +37,7 @@ def test_requested_wolfcut_palette_is_the_default(qapp):
     pet.shutdown()
 
 
-def test_old_factory_purple_migrates_once_but_custom_colors_are_kept(tmp_path):
+def test_factory_colours_migrate_to_kumral_but_custom_ones_survive(tmp_path):
     path = tmp_path / "state.json"
     path.write_text(
         json.dumps(
@@ -46,10 +49,10 @@ def test_old_factory_purple_migrates_once_but_custom_colors_are_kept(tmp_path):
         encoding="utf-8",
     )
     store = NoraStore(path)
-    assert store.preference("hair_color") == DEFAULT_HAIR_COLOR
-    assert store.preference("appearance_version") == 2
+    assert store.preference("hair_color") == DEFAULT_HAIR == "#7d5a44"
+    assert store.preference("appearance_version") == 3
     store.set_preference("address", "Kaan")
-    assert NoraStore(path).preference("hair_color") == DEFAULT_HAIR_COLOR
+    assert NoraStore(path).preference("hair_color") == DEFAULT_HAIR
     store.set_preference("hair_color", "#33204d")
     assert NoraStore(path).preference("hair_color") == "#33204d"
 
@@ -86,3 +89,33 @@ def test_every_pose_and_animation_is_exported_and_animated(qapp, tmp_path):
 
     with Image.open(tmp_path / "animations" / "dance.gif") as gif:
         assert gif.n_frames >= 2
+
+
+def test_default_realistic_avatar_is_kumral_with_green_eyes(qapp):
+    from nora.nora_avatar import RealisticCharacter
+
+    pet = NoraPet()
+    pet._timer.stop()
+    assert pet.character_style == "realistic"
+    assert pet.width() == 260 and pet.height() == 360
+    assert pet._appearance["hair_color"] == DEFAULT_HAIR
+    assert pet._appearance["eye_color"] == "yesil"
+    image = pet.grab().toImage()
+    # the portrait is smoothly shaded, so exact palette matches are useless:
+    # check hue instead of identity.
+    greens = 0
+    browns = 0
+    for x in range(0, 260, 2):
+        for y in range(0, 360, 2):
+            color = image.pixelColor(x, y)
+            if color.alpha() < 200:
+                continue
+            hue = color.hue()
+            if 60 <= hue <= 130 and color.green() > color.red() + 8:
+                greens += 1
+            if 15 <= hue <= 35 and color.red() > color.green() > color.blue():
+                browns += 1
+    assert greens > 20, "green-leaning eyes missing"
+    assert browns > 400, "kumral hair missing"
+    assert not RealisticCharacter().portrait().isNull()
+    pet.shutdown()

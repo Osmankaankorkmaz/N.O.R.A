@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
+import time
+from urllib.parse import quote
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +29,6 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
@@ -41,6 +43,14 @@ from .nora_commands import normalize_text, parse_direct_command, parse_direct_se
 from .nora_companion import mood_summary, reaction_details
 from .nora_desktop import DesktopLayouts
 from .nora_files import NoraFiles
+from .nora_glass import (
+    AvatarDot,
+    FrostedPanel,
+    GlassBubble,
+    TypingIndicator,
+    _shadow_effect,
+    glass_style,
+)
 from .nora_hotkeys import DEFAULT_PTT_KEY, PushToTalkHotkey
 from .nora_embeddings import LocalEmbeddings
 from .nora_local_ai import LocalModelMissing, LocalOCR, LocalSpeech
@@ -53,13 +63,14 @@ from .nora_personality import (
     normalize_command,
     startup_greeting,
 )
+from .nora_avatar import RealisticCharacter
 from .nora_pet import NoraPet
 from .nora_plugins import PluginRegistry
 from .nora_pixel_art import PixelCharacter
 from .nora_piper import PiperSpeech
 from .nora_proactive import ProactiveEngine
 from .nora_settings_dialog import NoraSettingsDialog
-from .nora_spotify import SpotifyClient
+from .nora_spotify import SpotifyClient, SpotifyError
 from .nora_store import NoraStore, default_data_dir, now_local, parse_datetime
 from .nora_tools import NoraTools
 from .nora_voice import NoraVoice
@@ -195,25 +206,17 @@ class TextWorker(QThread):
         self.done.emit(self.request_id, reply)
 
 
-class ChatBubble(QFrame):
-    def __init__(self, text: str, sender: str, parent=None) -> None:
-        super().__init__(parent)
-        color = "#7c4dff" if sender == "user" else "#ff6b9d"
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
-            f"ChatBubble {{ background: {color}; border-radius: 14px; }}"
-        )
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(11, 8, 11, 8)
-        label = QLabel(str(text))
-        label.setWordWrap(True)
-        label.setMaximumWidth(280)
-        label.setTextFormat(Qt.PlainText)
-        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        label.setStyleSheet("color: white; background: transparent; font-size: 13px;")
-        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-        layout.addWidget(label)
-        self.setMaximumWidth(304)
+class ChatBubble(GlassBubble):
+    """Backwards-compatible alias for the glass message bubble.
+
+    The class name and ``QLabel`` child shape are kept so existing tests and the
+    accessibility tree keep working, while the painting is the new translucent
+    glass style.
+    """
+
+    def __init__(self, text: str, sender: str, parent=None) -> None:  # noqa: D107
+        super().__init__(text, sender, parent)
+        self.setStyleSheet("background: transparent;")
 
 
 class NoraApp(QWidget):
@@ -377,116 +380,135 @@ class NoraApp(QWidget):
         return font
 
     def _build_chat(self) -> None:
+        """Frosted-glass chat panel (ChatGPT-desktop-like), unified NoraApp shell.
+
+        The window keeps the historical attributes (``NoraApp`` owns it, it is a
+        frameless translucent Qt.Tool and closing hides it) but the interior is
+        the translucent glass card from :mod:`nora.nora_glass`.
+        """
         self.chat_window = QWidget(None)
         self.chat_window.setWindowFlags(
             Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         )
         self.chat_window.setAttribute(Qt.WA_TranslucentBackground)
         self.chat_window.setWindowTitle("Nora · Sohbet")
-        self.chat_window.resize(380, 560)
-        self.chat_window.setMinimumSize(340, 430)
-        root = QVBoxLayout(self.chat_window)
-        root.setContentsMargins(6, 6, 6, 6)
-        shell = QFrame()
-        shell.setObjectName("chatShell")
-        shell.setStyleSheet("""
-            QFrame#chatShell { background: rgba(30,20,40,235); border: 1px solid #ff6b9d; border-radius: 20px; }
-            QLabel { color: #f7ecff; background: transparent; }
-            QLabel#title { color: #ff6b9d; font-size: 17px; font-weight: 700; }
-            QLabel#status { color: #d7a8cc; font-size: 11px; }
-            QPushButton { background: rgba(255,107,157,35); color: #ffd6e6; border: 1px solid rgba(255,107,157,80);
-                          border-radius: 9px; padding: 4px 7px; font-size: 12px; }
-            QPushButton:hover { background: #7c4dff; border-color: #b388ff; }
-            QPushButton:pressed { background: #ff6b9d; }
-            QPushButton:disabled { color: #796b85; background: rgba(80,60,95,60); }
-            QLineEdit { background: rgba(15,10,24,170); color: white; border: 1px solid #a45c8c;
-                        border-radius: 12px; padding: 8px 10px; font-size: 13px; selection-background-color: #7c4dff; }
-            QLineEdit:focus { border: 1px solid #ff6b9d; }
-            QScrollArea { background: rgba(15,10,24,120); border: none; border-radius: 12px; }
-            QScrollBar:vertical { background: rgba(30,20,40,100); width: 6px; border-radius: 3px; }
-            QScrollBar::handle:vertical { background: #ff6b9d; border-radius: 3px; min-height: 24px; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QToolTip { color: white; background: #3a204c; border: 1px solid #ff6b9d; padding: 4px; }
-        """)
-        root.addWidget(shell)
-        layout = QVBoxLayout(shell)
-        layout.setContentsMargins(14, 10, 14, 12)
-        layout.setSpacing(8)
+        self.chat_window.resize(430, 640)
+        self.chat_window.setMinimumSize(380, 470)
+        self.chat_window.setStyleSheet(glass_style())
 
+        root = QVBoxLayout(self.chat_window)
+        root.setContentsMargins(18, 18, 18, 18)
+        self.glass_panel = FrostedPanel(self.chat_window)
+        self.glass_panel.setObjectName("glassCard")
+        shadow = _shadow_effect(self.glass_panel)
+        if shadow is not None:
+            self.glass_panel.setGraphicsEffect(shadow)
+        root.addWidget(self.glass_panel)
+
+        layout = QVBoxLayout(self.glass_panel)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(9)
+
+        # ---- header -----------------------------------------------------
         header = QWidget()
-        header.setFixedHeight(34)
+        header.setFixedHeight(40)
         header.setCursor(Qt.SizeAllCursor)
         header.installEventFilter(self)
         self.chat_header = header
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_outer = QHBoxLayout(header)
+        header_outer.setContentsMargins(2, 0, 0, 0)
+        header_outer.setSpacing(9)
+
+        self.chat_avatar = AvatarDot()
+        self.chat_avatar.setFixedSize(28, 28)
+        self.chat_avatar.set_appearance(self.store.preferences)
+        header_outer.addWidget(self.chat_avatar)
+
+        titles = QVBoxLayout()
+        titles.setContentsMargins(0, 0, 0, 0)
+        titles.setSpacing(0)
         title = QLabel("Nora")
         title.setObjectName("title")
-        header_layout.addWidget(title)
+        titles.addWidget(title)
+        self.chat_subtitle = QLabel("companion")
+        self.chat_subtitle.setObjectName("subtitle")
+        titles.addWidget(self.chat_subtitle)
+        header_outer.addLayout(titles)
+        header_outer.addStretch(1)
+
         self.mic_indicator = QLabel("🎙️")
-        self.mic_indicator.setFont(self._emoji_font(10))
+        self.mic_indicator.setFont(self._emoji_font(9))
         self.mic_indicator.setToolTip("Mikrofon durumu")
-        header_layout.addWidget(self.mic_indicator)
+        header_outer.addWidget(self.mic_indicator)
         self.speaker_indicator = QLabel("🔊")
-        self.speaker_indicator.setFont(self._emoji_font(10))
+        self.speaker_indicator.setFont(self._emoji_font(9))
         self.speaker_indicator.setToolTip("Sesli yanıt durumu")
-        header_layout.addWidget(self.speaker_indicator)
-        header_layout.addStretch()
-        for text, tip, slot in (
-            ("📸", "Ekran görüntüsü al ve analiz et", self._analyze_screen),
-            ("📷", "Kameradan bir kare analiz et", self._analyze_camera),
-            ("🎤", "Sesli komut ver", lambda: self._start_listening()),
-            ("💻", "Sistem bilgisi", self._show_system_info),
-            ("─", "Sohbeti küçült", self.chat_window.hide),
-            ("✕", "Sohbeti gizle (Nora çalışmaya devam eder)", self.chat_window.hide),
+        header_outer.addWidget(self.speaker_indicator)
+
+        for text, tip, slot, attr in (
+            ("🎤", "Sesli komut ver", lambda: self._start_listening(), "mic_button"),
+            ("⚙", "Ayarlar", self._show_settings, "settings_button"),
+            ("⋯", "Ekran, kamera ve sistem araçları", None, "more_button"),
+            ("─", "Sohbeti küçült", self.chat_window.hide, "minimize_button"),
+            (
+                "✕",
+                "Sohbeti gizle (Nora çalışmaya devam eder)",
+                self.chat_window.hide,
+                "close_button",
+            ),
         ):
             button = QPushButton(text)
             button.setToolTip(tip)
             button.setAccessibleName(tip)
             button.setFont(self._emoji_font(10))
-            button.setFixedSize(29, 28)
-            button.clicked.connect(slot)
-            header_layout.addWidget(button)
-            if text == "📸":
-                self.screen_button = button
-            elif text == "📷":
-                self.camera_button = button
-            elif text == "🎤":
-                self.mic_button = button
-            elif text == "💻":
-                self.system_button = button
+            button.setFixedSize(28, 28)
+            if slot is not None:
+                button.clicked.connect(slot)
+            header_outer.addWidget(button)
+            setattr(self, attr, button)
+
+        # Screen/camera/system tools live in a compact overflow menu so the
+        # header keeps room for the title on narrow windows.
+        self.more_button.clicked.connect(self._chat_more_menu)
+        self.screen_button = self.more_button
+        self.camera_button = self.more_button
+        self.system_button = self.more_button
         layout.addWidget(header)
 
+        # ---- message list ----------------------------------------------
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setStyleSheet("background: transparent;")
         content = QWidget()
         content.setStyleSheet("background: transparent;")
         self.message_layout = QVBoxLayout(content)
-        self.message_layout.setContentsMargins(8, 10, 8, 10)
-        self.message_layout.setSpacing(8)
+        self.message_layout.setContentsMargins(2, 8, 2, 8)
+        self.message_layout.setSpacing(9)
         self.message_layout.addStretch(1)
         self.scroll.setWidget(content)
         layout.addWidget(self.scroll, 1)
 
+        self.typing_indicator = TypingIndicator()
+        self.typing_indicator.hide()
+        layout.addWidget(self.typing_indicator)
+
         self.status_label = QLabel("")
         self.status_label.setObjectName("status")
-        self.status_label.setFixedHeight(18)
+        self.status_label.setFixedHeight(16)
         layout.addWidget(self.status_label)
+
+        # ---- composer ---------------------------------------------------
         input_row = QHBoxLayout()
+        input_row.setSpacing(8)
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Mesajını yaz senpai~ 💕")
+        self.input.setPlaceholderText("Nora'ya bir şey yaz…")
         self.input.setMaxLength(4000)
         self.input.returnPressed.connect(self._send_from_input)
-        self.send_button = QPushButton("💝")
-        self.send_button.setFixedSize(38, 36)
-        self.send_button.setToolTip("Gönder (Enter)")
-        self.send_button.setFont(self._emoji_font(11))
-        self.send_button.clicked.connect(self._send_from_input)
         input_row.addWidget(self.input, 1)
         self.cancel_button = QPushButton("⏹")
-        self.cancel_button.setFixedSize(38, 36)
+        self.cancel_button.setFixedSize(36, 36)
         self.cancel_button.setToolTip(
             "İsteği iptal et. Yerel üretim tokenlar arasında durur; bulut isteği ağda sürebilir ama yanıtı kullanılmaz."
         )
@@ -494,9 +516,16 @@ class NoraApp(QWidget):
         self.cancel_button.clicked.connect(self._cancel_current_request)
         self.cancel_button.hide()
         input_row.addWidget(self.cancel_button)
+        self.send_button = QPushButton("➤")
+        self.send_button.setObjectName("sendButton")
+        self.send_button.setFixedSize(44, 36)
+        self.send_button.setToolTip("Gönder (Enter)")
+        self.send_button.clicked.connect(self._send_from_input)
         input_row.addWidget(self.send_button)
         layout.addLayout(input_row)
+
         quick_row = QHBoxLayout()
+        quick_row.setSpacing(6)
         self.quick_buttons: list[QPushButton] = []
         for text, slot in (
             ("🔍 Ara", self._quick_search),
@@ -510,17 +539,44 @@ class NoraApp(QWidget):
         ):
             button = QPushButton(text)
             button.setFont(self._emoji_font(9))
+            button.setStyleSheet("font-size: 11px; padding: 4px 6px;")
             button.clicked.connect(slot)
             quick_row.addWidget(button)
             self.quick_buttons.append(button)
         layout.addLayout(quick_row)
         self.chat_window.installEventFilter(self)
+        self._glass_blur_timer = QTimer(self)
+        self._glass_blur_timer.setSingleShot(True)
+        self._glass_blur_timer.setInterval(200)
+        self._glass_blur_timer.timeout.connect(self._refresh_glass_backdrop)
+
+    def _chat_more_menu(self) -> None:
+        menu = QMenu(self.chat_window)
+        menu.setStyleSheet(self._menu_style())
+        menu.addAction("📸 Ekranı analiz et", self._analyze_screen)
+        menu.addAction("📷 Kamerayı analiz et", self._analyze_camera)
+        menu.addAction("💻 Sistem bilgisi", self._show_system_info)
+        menu.addAction(
+            "🧠 Yerel modeller", lambda: self._local_ai_command({"action": "models"})
+        )
+        menu.addAction("🩺 Groq bağlantısı", self._check_groq)
+        menu.addAction("🔑 Groq anahtarı gir", self._groq_setup_dialog)
+        button = self.more_button
+        menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _refresh_glass_backdrop(self) -> None:
+        if not hasattr(self, "glass_panel") or not self.chat_window.isVisible():
+            return
+        self.glass_panel.refresh_backdrop()
 
     def _tray_icon(self) -> QIcon:
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
-        PixelCharacter.draw_icon(painter, 64, self.store.preferences)
+        if getattr(self.pet, "character_style", "realistic") == "pixel":
+            PixelCharacter.draw_icon(painter, 64, self.store.preferences)
+        else:
+            RealisticCharacter().draw_icon(painter, 64, self.store.preferences)
         painter.end()
         return QIcon(pixmap)
 
@@ -881,6 +937,7 @@ class NoraApp(QWidget):
         menu.addAction("🔊 Sesli Yanıt Testi", self._test_speech)
         menu.addAction("🎧 Mikrofon Seç", self._select_microphone)
         menu.addAction("🩺 Groq Bağlantısı", self._check_groq)
+        menu.addAction("🔑 Groq Anahtarı Gir", self._groq_setup_dialog)
         emotions = menu.addMenu("Duygular")
         emotions.setStyleSheet(self._menu_style())
         labels = {
@@ -1126,11 +1183,13 @@ class NoraApp(QWidget):
         query = str(cmd.get("query", ""))[:200]
         if action == "music":
             self.pet.perform_action("dance")
+            open_app = bool(cmd.get("open_app")) or bool(cmd.get("prefer_desktop"))
             self._report(
-                f"Canım müzik istedi; Spotify'da “{query or 'lofi hip hop'}” açıyorum 🎧"
+                f"Canım müzik istedi; “{query or 'lofi hip hop'}” çalıyorum 🎧"
             )
             self._run_tool(
-                lambda: self.tools.spotify_search(query), "Spotify açılıyor…"
+                lambda: self._play_music(query, open_app=open_app),
+                "Spotify hazırlanıyor…",
             )
         else:
             self.pet.perform_action("watch")
@@ -1141,12 +1200,63 @@ class NoraApp(QWidget):
                 lambda: self.tools.video_search(query), "Video araması açılıyor…"
             )
 
+    def _play_music(self, query: str, *, open_app: bool = False) -> str:
+        """Open the Spotify desktop app (best effort) and start real playback.
+
+        Order of preference:
+        1. Spotify Web API playback (exact track, no browser tab) when connected
+        2. Desktop app launch + deep link, so playback starts in the app itself
+        3. Browser search page, clearly announced as a fallback
+
+        Never claims a song is playing unless the API call succeeded.
+        """
+        notes: list[str] = []
+        if open_app:
+            launched = self.tools.open_app("spotify")
+            if "başlattım" in launched:
+                notes.append("Spotify uygulamasını açtım")
+            time.sleep(1.2)
+
+        if self.spotify.connected():
+            try:
+                result = self.spotify.play_track(query)
+                if notes:
+                    return " · ".join(notes) + ". " + result
+                return result
+            except SpotifyError as exc:
+                notes.append(f"API ile çalınamadı ({exc})")
+
+        if sys.platform == "win32" and query:
+            # Spotify ships a URL handler: this queued playback inside the app.
+            try:
+                os.startfile("spotify:search:" + quote(query))  # type: ignore[attr-defined]
+                notes.append("Spotify uygulamasında aramayı açtım")
+            except OSError:
+                notes.append("Spotify derin bağlantısı açılamadı")
+
+        if not any("Spotify uygulamasında" in note for note in notes):
+            result = self.tools.spotify_search(query)
+            notes.append(result.replace("Bağlantıyı", "Spotify aramasını"))
+        if self.spotify.connected():
+            return " · ".join(notes)
+        return (
+            " · ".join(notes) + " Şarkıyı uygulamada başlatmak için Spotify'ı bağla "
+            "(sağ tık → Spotify Bağlantısı) veya sonuçtan çal. 🎧"
+        )
+
     def _set_busy(
         self, busy: bool, status: str = "", *, cancellable: bool = False
     ) -> None:
         self._busy = busy
         self._cancel_supported = bool(busy and cancellable)
         self.status_label.setText(status)
+        if hasattr(self, "typing_indicator"):
+            self.typing_indicator.setVisible(bool(busy))
+            if busy:
+                self.typing_indicator.start()
+                self._scroll_to_bottom()
+            else:
+                self.typing_indicator.stop()
         if hasattr(self, "cancel_button"):
             self.cancel_button.setVisible(bool(busy and cancellable))
             self.cancel_button.setEnabled(bool(busy and cancellable))
@@ -1361,6 +1471,7 @@ class NoraApp(QWidget):
         menu.addAction("🎙️ Mikrofon Testi", self._test_microphone)
         menu.addAction("🎧 Mikrofon Seç", self._select_microphone)
         menu.addAction("🩺 Groq Bağlantısı", self._check_groq)
+        menu.addAction("🔑 Groq Anahtarı Gir", self._groq_setup_dialog)
         menu.addAction("💻 Sistem Bilgisi", self._show_system_info)
         menu.addAction("📝 Notlarım", self._show_notes)
         menu.addAction("🌤️ Hava Durumu", self._quick_weather)
@@ -2477,6 +2588,10 @@ class NoraApp(QWidget):
             self.voice.set_tts_backend(prefs["tts_backend"])
             self.voice.configure_barge_in(prefs["voice_barge_in"])
             self.brain.set_chat_backend(prefs["chat_backend"])
+            if prefs.get("chat_model"):
+                self.brain.set_chat_model(prefs["chat_model"])
+            if prefs["chat_backend"] == "groq":
+                self._reload_groq()
             self.spotify.configure(
                 prefs["spotify_client_id"] or os.getenv("SPOTIFY_CLIENT_ID", "")
             )
@@ -2869,6 +2984,51 @@ class NoraApp(QWidget):
                     or "Ekrandaki yazıları kısaca açıkla; hata varsa çözüm öner.",
                 )
 
+    def _reload_groq(self) -> bool:
+        """Re-create the Groq client after a key was saved in settings."""
+        status = self.brain.reload_credentials()
+        if self.brain.available:
+            logger.info("Groq istemcisi yeniden hazır.")
+            return True
+        logger.info("Groq hâlâ kapalı: %s", status)
+        self.add_message(
+            f"Groq bağlantısı kurulamadı: {status} Anahtarı sağ tık → "
+            "Groq Bağlantısı ile kontrol edebilirsin. 🐾",
+            "bot",
+            speak=False,
+        )
+        return False
+
+    def _groq_setup_dialog(self) -> None:
+        """First-run helper: enter the key without editing environment vars."""
+        from .nora_secrets import groq_key_present, groq_key_source, resolve_groq_key
+
+        self.show_chat()
+        if groq_key_present():
+            self._report(
+                f"Groq anahtarı hazır ({groq_key_source()}). Bağlantıyı test ediyorum…",
+                speak=False,
+            )
+            self._check_groq()
+            return
+        text, ok = QInputDialog.getText(
+            self.chat_window,
+            "Groq API anahtarı",
+            "Groq anahtarını yapıştır (gsk_…).\n"
+            "Anahtar işletim sistemi kasasında saklanır, state.json'a yazılmaz.\n"
+            "İstersen boş bırakıp yalnızca yerel modu kullanabilirsin.",
+            QLineEdit.Password,
+        )
+        if not ok:
+            return
+        from .nora_secrets import save_groq_key
+
+        status = save_groq_key(text) if text.strip() else "Anahtar girilmedi."
+        self._report(status, speak=False)
+        if text.strip() and resolve_groq_key():
+            self._reload_groq()
+            self._check_groq()
+
     def _show_settings(self) -> None:
         self.show_chat()
         if self.settings_dialog is not None:
@@ -3070,7 +3230,7 @@ class NoraApp(QWidget):
         if not self.brain.available:
             self.show_chat()
             self.add_message(
-                "Ekran analizi için Groq bağlantısı gerekli senpai. GROQ_API_KEY ayarla. 🐾",
+                "Ekran analizi için Groq bağlantısı gerekli senpai. Sağ tık → 🔑 Groq Anahtarı Gir ile anahtarını ekleyebilirsin. 🐾",
                 "bot",
             )
             return
@@ -3121,7 +3281,7 @@ class NoraApp(QWidget):
         if not self.brain.available:
             self.show_chat()
             self.add_message(
-                "Kamera analizi için Groq bağlantısı gerekli senpai. GROQ_API_KEY ayarla. 🐾",
+                "Kamera analizi için Groq bağlantısı gerekli senpai. Sağ tık → 🔑 Groq Anahtarı Gir ile anahtarını ekleyebilirsin. 🐾",
                 "bot",
             )
             return
@@ -3356,10 +3516,16 @@ class NoraApp(QWidget):
             return
         self.show_chat()
         self._run_tool(
-            self.brain.diagnose_connection,
+            self._groq_check_result,
             "Groq bağlantısı kontrol ediliyor…",
             speak=False,
         )
+
+    def _groq_check_result(self) -> str:
+        """Network probe; workers run it, so the UI thread never blocks."""
+        ok, message = self.brain.probe()
+        self._groq_probe_ok = bool(ok)
+        return message
 
     def _on_wake_word(self, remainder: str = "") -> None:
         import time
@@ -3475,7 +3641,7 @@ class NoraApp(QWidget):
             message = (
                 "Yerel sohbet seçili ama GGUF modeli hazır değil. Menüden model içe aktar senpai; buluta geçmiyorum. 🧠"
                 if self.brain.chat_backend == "local"
-                else "Heh, şu an çevrimdışı temel komut modundayım. Serbest sohbet için GROQ_API_KEY ayarla veya yerel GGUF modeli seç senpai. 🐾"
+                else "Heh, şu an çevrimdışı temel komut modundayım. Serbest sohbet için sağ tık → 🔑 Groq Anahtarı Gir (ya da GROQ_API_KEY) veya yerel GGUF modeli seç senpai. 🐾"
             )
             self.add_message(message, "bot")
         if self.store.preference("briefing_on_startup"):

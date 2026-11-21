@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from .nora_secrets import groq_key_present, save_groq_key
 from .nora_store import NoraStore
 
 
@@ -57,6 +58,19 @@ class NoraSettingsDialog(QDialog):
         self._line(form, "address", "Hitap", prefs, 30)
         self._combo(
             form,
+            "character_style",
+            "Karakter stili",
+            (
+                ("realistic", "Gerçekçi VTuber (önerilen)"),
+                ("pixel", "8-bit piksel chibi (eski)"),
+            ),
+            prefs,
+        )
+        self.fields["character_style"].setToolTip(
+            "Gerçekçi stil: yumuşak gölgeli yarım boy portre (260×360). Piksel stil eski 8-bit chibi'yi korur."
+        )
+        self._combo(
+            form,
             "outfit",
             "Kıyafet",
             (
@@ -69,15 +83,36 @@ class NoraSettingsDialog(QDialog):
         self._combo(
             form,
             "hair_color",
-            "Saç rengi (wolfcut)",
+            "Saç rengi",
             (
-                ("#f5f3f0", "Beyaz wolfcut"),
-                ("#33204d", "Mor"),
-                ("#202b52", "Gece mavisi"),
+                ("#7d5a44", "Kumral (varsayılan)"),
+                ("#5a4132", "Koyu kumral"),
+                ("#a8836a", "Açık kumral"),
                 ("#4a2c32", "Kestane"),
-                ("#6b3159", "Gül kurusu"),
+                ("#202b52", "Gece mavisi"),
+                ("#33204d", "Mor"),
+                ("#f5f3f0", "Beyaz (piksel stil)"),
             ),
             prefs,
+        )
+        self.fields["hair_color"].setToolTip(
+            "Gerçekçi stilde kumral tonlar doğal durur; beyaz yalnızca 8-bit stilde önerilir."
+        )
+        self._combo(
+            form,
+            "eye_color",
+            "Göz rengi",
+            (
+                ("yesil", "Yeşilimsi ela (varsayılan)"),
+                ("hazel", "Ela"),
+                ("kahve", "Kahverengi"),
+                ("mavi", "Mavi"),
+                ("gri", "Gri"),
+            ),
+            prefs,
+        )
+        self.fields["eye_color"].setToolTip(
+            "Gerçekçi avatarda iris tonunu belirler; göz bebeği ve ışık yansıması korunur."
         )
         self._combo(
             form,
@@ -149,6 +184,11 @@ class NoraSettingsDialog(QDialog):
             prefs,
         )
         self._line(form, "piper_model", "Piper modeli (.onnx)", prefs, 120)
+        self._groq_key(form)
+        self._line(form, "chat_model", "Groq sohbet modeli", prefs, 120)
+        self.fields["chat_model"].setToolTip(
+            "Varsayılan openai/gpt-oss-120b. Emekli model adları otomatik öneriyle bildirilir."
+        )
         self._line(form, "spotify_client_id", "Spotify Client ID", prefs, 80)
         self.fields["spotify_client_id"].setToolTip(
             "Spotify Developer uygulamanın Client ID'si. Gizli client secret istenmez; OAuth PKCE kullanılır. Tokenlar mümkünse sistem kasasında tutulur."
@@ -266,6 +306,23 @@ class NoraSettingsDialog(QDialog):
         widget.setCurrentIndex(max(0, index))
         self._add(form, key, label, widget)
 
+    def _groq_key(self, form: QFormLayout) -> None:
+        """Masked API-key entry that is never written into state.json."""
+        widget = QLineEdit()
+        widget.setEchoMode(QLineEdit.Password)
+        widget.setMaxLength(200)
+        widget.setPlaceholderText(
+            "gsk_… (boş bırak: mevcut anahtar korunur)"
+            if groq_key_present()
+            else "gsk_… (isteğe bağlı; yerel mod da çalışır)"
+        )
+        self.fields["groq_api_key"] = widget
+        form.addRow("Groq API anahtarı", widget)
+        widget.setToolTip(
+            "Anahtar yalnızca işletim sistemi anahtar kasasında (keyring) tutulur; "
+            "state.json dosyasına yazılmaz. Kasa yoksa anahtar bu oturum için bellekte tutulur."
+        )
+
     def _line(self, form, key, label, prefs, limit) -> None:
         widget = QLineEdit(str(prefs[key]))
         widget.setMaxLength(limit)
@@ -285,6 +342,8 @@ class NoraSettingsDialog(QDialog):
     def values(self) -> dict[str, Any]:
         result = {}
         for key, widget in self.fields.items():
+            if key == "groq_api_key":
+                continue
             if isinstance(widget, QComboBox):
                 result[key] = widget.currentData()
             elif isinstance(widget, QCheckBox):
@@ -295,13 +354,22 @@ class NoraSettingsDialog(QDialog):
                 result[key] = widget.text().strip()
         return result
 
+    def api_key(self) -> str:
+        widget = self.fields.get("groq_api_key")
+        return widget.text().strip() if isinstance(widget, QLineEdit) else ""
+
     def apply(self) -> None:
         try:
             values = self.values()
             for key, value in values.items():
                 self.store.validate_preference(key, value)
+            key_status = ""
+            if self.api_key():
+                key_status = save_groq_key(self.api_key())
             if self.on_apply:
                 self.on_apply(values)
+            if key_status:
+                QMessageBox.information(self, "Groq anahtarı", key_status)
             self.accept()
         except (ValueError, TypeError) as exc:
             QMessageBox.warning(self, "Ayar kaydedilemedi", str(exc))

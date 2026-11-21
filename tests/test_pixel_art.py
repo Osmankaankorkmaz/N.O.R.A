@@ -30,6 +30,7 @@ def _opaque_count(image: QImage) -> int:
 def test_every_pet_pose_is_crisp_and_fits_the_transparent_canvas(qapp, state):
     pet = NoraPet()
     pet._timer.stop()
+    pet.set_appearance({"character_style": "pixel"})
     pet._set_state(state, 100000)
     image = pet.grab().toImage()
     assert image.width() == GRID_WIDTH * PIXEL_SIZE == 120
@@ -48,6 +49,7 @@ def test_every_pet_pose_is_crisp_and_fits_the_transparent_canvas(qapp, state):
 def test_hair_outfit_and_accessories_change_the_pixel_art(qapp):
     pet = NoraPet()
     pet._timer.stop()
+    pet.set_appearance({"character_style": "pixel"})
     base = pet.grab().toImage()
     pet.set_appearance({"hair_color": "#202b52"})
     assert pet.grab().toImage() != base
@@ -67,6 +69,7 @@ def test_hair_outfit_and_accessories_change_the_pixel_art(qapp):
 def test_listening_hand_talking_mouth_and_decorative_toggle_are_visible(qapp):
     pet = NoraPet()
     pet._timer.stop()
+    pet.set_appearance({"character_style": "pixel"})
     pet.set_listening(True)
     assert pet.state == PetState.LISTENING
     listening = pet.grab().toImage()
@@ -89,6 +92,7 @@ def test_listening_hand_talking_mouth_and_decorative_toggle_are_visible(qapp):
 def test_sleep_walk_love_and_dance_have_distinct_pixel_frames(qapp):
     pet = NoraPet()
     pet._timer.stop()
+    pet.set_appearance({"character_style": "pixel"})
     for state, next_frame in (
         (PetState.SLEEP, 12),
         (PetState.WALK_RIGHT, 6),

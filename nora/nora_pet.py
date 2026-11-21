@@ -1,22 +1,34 @@
-"""A 120×150 transparent 8-bit-style desktop pet, drawn with QPainter.
+"""A transparent semi-realistic VTuber-style desktop companion.
 
 The character has a small physics/behaviour loop, weighted idle choices,
 multi-monitor awareness, sticky screen edges and a separate speech bubble so
-the bubble does not shrink the character.  Artwork is generated on a crisp
-40×50 logical pixel grid; no sprite or image files are used.
+the bubble does not shrink the character.
+
+Two renderers ship with the app: the default smoothed portrait
+(:mod:`nora.nora_avatar`, 260×360) and the legacy 8-bit chibi
+(:mod:`nora.nora_pixel_art`) that can be selected with ``NORA_CHARACTER=pixel``.
+No sprite or image files are used by either one.
 """
 
 from __future__ import annotations
 
+import os
 import random
 from collections import deque
 from enum import Enum, auto
+from typing import Any, Mapping
 
 from PyQt5.QtCore import QPoint, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import QApplication, QWidget
 
-from .nora_pixel_art import PixelCharacter
+from .nora_avatar import (
+    AVATAR_HEIGHT,
+    AVATAR_WIDTH,
+    DEFAULT_HAIR,
+    RealisticCharacter,
+)
+from .nora_pixel_art import DEFAULT_HAIR_COLOR, PixelCharacter
 
 
 class PetState(Enum):
@@ -38,6 +50,28 @@ class PetState(Enum):
     YAWN = auto()
     WATCH = auto()
     LAND = auto()
+
+
+def _character_style(settings: Mapping[str, Any] | None = None) -> str:
+    """Preference > environment > default; unknown values fall back safely."""
+    settings = settings or {}
+    candidates = (
+        settings.get("character_style"),
+        os.getenv("NORA_CHARACTER"),
+    )
+    for value in candidates:
+        text = str(value or "").strip().lower()
+        if text in {"realistic", "pixel"}:
+            return text
+    return "realistic"
+
+
+def _tooltip_for(style: str) -> str:
+    if style == "pixel":
+        return "Nora 💕 · 8-bit mod · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
+    return (
+        "Nora 💕 · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı · Çift tık: sohbet"
+    )
 
 
 class SpeechBubble(QWidget):
@@ -103,8 +137,10 @@ class NoraPet(QWidget):
     double_clicked = pyqtSignal()
     position_changed = pyqtSignal(QPoint)
 
-    WIDTH = 120
-    HEIGHT = 150
+    PIXEL_WIDTH = 120
+    PIXEL_HEIGHT = 150
+    WIDTH = AVATAR_WIDTH
+    HEIGHT = AVATAR_HEIGHT
     GRAVITY = 0.4
     WALK_SPEED = 1.2
     FPS_INTERVAL = 33
@@ -118,6 +154,8 @@ class NoraPet(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
+        self.character_style = _character_style()
+        self._apply_character_style(self.character_style, update=False)
         self.setFixedSize(self.WIDTH, self.HEIGHT)
         self.setWindowTitle("Nora")
         self.setCursor(Qt.PointingHandCursor)
@@ -143,10 +181,14 @@ class NoraPet(QWidget):
         self._affection_frames = 0
         self._appearance = {
             "outfit": "classic",
-            "hair_color": "#f5f3f0",
+            "hair_color": (
+                DEFAULT_HAIR_COLOR if self.character_style == "pixel" else DEFAULT_HAIR
+            ),
             "accessory": "none",
+            "eye_color": "yesil",
         }
         self._pixel_artist = PixelCharacter()
+        self._realistic_artist = RealisticCharacter()
         self._blink_left = 0
         self._next_blink = self.rng.randint(100, 200)
         self._drag_offset = QPoint()
@@ -545,9 +587,13 @@ class NoraPet(QWidget):
         return "Bu hareketi bilmiyorum senpai."
 
     def set_appearance(self, settings: dict) -> None:
-        for key in ("outfit", "hair_color", "accessory"):
+        for key in ("outfit", "hair_color", "accessory", "eye_color"):
             if key in settings:
                 self._appearance[key] = str(settings[key])
+        if "character_style" in settings:
+            requested = str(settings["character_style"])
+            if requested in {"realistic", "pixel"}:
+                self._apply_character_style(requested)
         if "animations" in settings:
             self._animations = bool(settings["animations"])
         if "autonomous" in settings:
@@ -692,9 +738,26 @@ class NoraPet(QWidget):
         painter = QPainter(self)
         # The renderer snaps every rectangle to a 3×3 grid.  Smoothing or
         # fractional transforms here would blur the deliberately retro art.
-        painter.setRenderHint(QPainter.Antialiasing, False)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
-        self._pixel_artist.draw(
+        if self.character_style == "pixel":
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
+            self._pixel_artist.draw(
+                painter,
+                state=self.state.name,
+                emotion=self.emotion,
+                frame=self._frame,
+                appearance=self._appearance,
+                talking=self._talking,
+                listening=self._listening,
+                blinking=self._blink_left > 0,
+                affection=self._affection_frames > 0,
+                grounded=self._grounded,
+                animations=self._animations,
+            )
+            return
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        self._realistic_artist.draw(
             painter,
             state=self.state.name,
             emotion=self.emotion,
@@ -707,3 +770,33 @@ class NoraPet(QWidget):
             grounded=self._grounded,
             animations=self._animations,
         )
+
+    # ------------------------------------------------------------ character
+    def _apply_character_style(self, style: str, *, update: bool = True) -> None:
+        """Switch renderers and resize the window without teleporting the pet."""
+        style = style if style in {"realistic", "pixel"} else "realistic"
+        self.character_style = style
+        old_width, old_height = self.WIDTH, self.HEIGHT
+        if style == "pixel":
+            self.WIDTH, self.HEIGHT = self.PIXEL_WIDTH, self.PIXEL_HEIGHT
+        else:
+            self.WIDTH, self.HEIGHT = AVATAR_WIDTH, AVATAR_HEIGHT
+        if not update:
+            self.setToolTip(_tooltip_for(style))
+            return
+        self.setToolTip(_tooltip_for(style))
+        if old_width == self.WIDTH and old_height == self.HEIGHT:
+            self.update()
+            return
+        # keep the feet on the floor and the window inside the screen
+        available, _ = self._screen_rects()
+        self._x = min(
+            max(float(available.left() + 2), self._x),
+            float(available.right() - self.WIDTH + 1),
+        )
+        self._y = float(available.bottom() - self.HEIGHT + 1)
+        self._floor_y = self._y
+        self.setFixedSize(self.WIDTH, self.HEIGHT)
+        self.move(int(round(self._x)), int(round(self._y)))
+        self._update_bubble_position()
+        self.update()

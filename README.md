@@ -1,8 +1,17 @@
 # Nora 💕 · Anime Kız Masaüstü Asistanı
 
-Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakter; **beyaz wolfcut saçlı, kırmızı gözlü, siyah elbiseli ve kırmızı ayakkabılı** daha tatlı bir **8-bit piksel chibi** olarak tamamı **QPainter ile kod içinde çizilir**; çalışma zamanında harici sprite veya resim dosyası kullanılmaz.
+Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera analizi yapan ve günlük işlerini organize eden PyQt5 asistanıdır. Karakter varsayılan olarak **gerçekçi, VTuber tarzı yarı boy bir portredir**: **kumral saç, yeşilimsi ela gözler, yumuşak gölgeli cilt**, tamamı **QPainter ile kod içinde çizilir** — çalışma zamanında harici sprite, model dosyası veya görsel varlık kullanılmaz. Eski **8-bit piksel chibi** stili ayarlardan hâlâ seçilebilir (`NORA_CHARACTER=pixel`). Sohbet paneli **saydam, bulanık camsı (glassmorphism)** tasarımdadır.
 
 > **Groq model notu:** `llama-3.3-70b-versatile` free/developer hesapları için 16 Ağustos 2026’da emekliye ayrıldı. Varsayılan sohbet modeli `openai/gpt-oss-120b`, vision modeli `qwen/qwen3.8-27b` olarak güncellendi. Sağ tık → **🩺 Groq Bağlantısı** anahtarınla erişilebilen modelleri listeler. Kaynaklar: [1](https://console.groq.com/docs/deprecations) · [2](https://console.groq.com/docs/models.md) · [3](https://console.groq.com/docs/vision)
+
+## 1.11.0 · Gerçekçi karakter, cam sohbet paneli, tek dosya kurulum
+
+- **Gerçekçi VTuber avatarı (varsayılan):** 260×360 yarı boy portre; kumral saç, yeşilimsi ela iris, yumuşak cilt gölgeleri, gerçek kirpik/çene/anatomik oranlar. 3× süper örnekleme + yumuşak ölçekleme ile "gerçekçi animasyon" hissi. Göz rengi, saç tonu, kıyafet ve aksesuar ayarlardan değişir; tüm pozlar (uyku, dans, izleme, dinleme, konuşma, sürüklenme…) korunur. Eski 8-bit chibi `NORA_CHARACTER=pixel` veya **Ayarlar → Karakter stili** ile geri gelir.
+- **Cam (glass) sohbet paneli:** ChatGPT masaüstü tarzı; yuvarlatılmış saydam kart, arkasındaki ekranın bulanık kopyası, üst kenarda ince ışık çizgisi, yumuşak dış gölge, saydam mesaj balonları, animasyonlu "yazıyor" noktaları ve fade-in. Windows'ta gerçek DWM blur/acrylic denenir, desteklenmezse bulanık ekran anlık görüntüsü, o da olmazsa yalnızca saydam degrade kullanılır — hiçbir durumda donma/pencere kaybı yok.
+- **Groq bağlantısı düzeltildi:** Anahtar artık ortam değişkeni şartı olmadan **sağ tık → 🔑 Groq Anahtarı Gir** veya **Ayarlar** üzerinden girilebilir; işletim sistemi anahtar kasasında (keyring) saklanır, `state.json`'a asla yazılmaz. Kasa yoksa anahtarın yalnızca oturum belleğinde tutulduğu açıkça söylenir. Bağlantı testi modele istek atmadan model listesini yoklar; 401/403/429/404/timeout için ayrı Türkçe mesajlar verir. Ayarlarda Groq sohbet modeli adı düzenlenebilir.
+- **Tek dosya kurulum:** `python install.py` tek komutla sanal ortamı kurar, zorunlu paketleri + Piper'ı yükler ve `--doctor` teşhisini çalıştırır. `--full`, `--base`, `--features chat,piper`, `--no-venv`, `--doctor-only`, `--dev` seçenekleri vardır. Hiçbir model dosyası indirilmez, yönetici izni istenmez; Linux sistem paketleri **çalıştırılmadan** kopyalanabilir komut olarak yazdırılır. İsteğe bağlı bir özellik derlenemezse yalnızca o özellik atlanır.
+- **Spotify: uygulama + gerçek çalma:** "spotify aç ve back in black çal", "back in black'i spotify'da çal", "spotify uygulamasını aç ve … çal" komutları artık şarkı adını ayıklar, masaüstü Spotify uygulamasını başlatır ve Web API bağlıysa **parçayı doğrudan uygulamada çalar** (`/me/player/play`, aktif cihaz seçimi). API yoksa uygulama araması açılır ve bunun bir arama olduğu açıkça söylenir; "çalıyorum" denip çalınmaması imkânsızdır.
+- **Doküman/teşhis:** `--doctor` Groq anahtarının nereden geldiğini (ortam/kasa) değerini yazmadan bildirir. Karakter galerisi `docs/character/realistic/` altında yeni avatarla yeniden üretilir (`python tools/export_character.py`).
 
 ## 1.10.0 · Yerel model yönetimi ve iptal
 
@@ -46,7 +55,8 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 
 ### Karakter ve ses
 - 120×150 şeffaf, always-on-top pet; 40×50 mantıksal ızgarada 3×3 keskin pikseller, keskin kenarlı 8-bit görünüm ve aynı tarzda tepsi ikonu. Varsayılan görünüm: beyaz wolfcut, kırmızı göz, siyah elbise, kırmızı ayakkabı; daha büyük parıltılı gözler, pembe yanaklar, kalp toka ve etek danteli. Yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme; piksel kalp, yıldız, nota ve uyku efektleri.
-- Tüm poz/duygu PNG’leri ve animasyon GIF’leri `docs/character/` altında: 18 poz, 8 duygu, 24 animasyon, aksesuar/kıyafet varyantları ve `index.html` galerisi. Üretici: `python tools/export_character.py`. Bunlar önizleme/doc çıktısıdır; uygulama çizimi yine QPainter’dır.
+- Tüm poz/duygu PNG’leri ve animasyon GIF’leri `docs/character/` altında: 18 poz, 8 duygu, 24 animasyon, aksesuar/kıyafet varyantları ve `index.html` galerisi. Gerçekçi avatar çıktıları `docs/character/realistic/` altındadır. Üretici: `python tools/export_character.py` (`--style realistic|pixel|all`). Bunlar önizleme/doc çıktısıdır; uygulama çizimi yine QPainter’dır.
+- **Karakter stili:** Varsayılan gerçekçi portre; 8-bit chibi'yi geri istersen **Ayarlar → Karakter stili** (veya `NORA_CHARACTER=pixel`) seç. Pencere boyutu stile göre kendiliğinden 260×360 ↔ 120×150 olur ve ayakları yerde kalır.
 - **Komutla hareket:** “ikinci monitöre geç”, “uyu”, “uyan”, “dolaş”, “dur”, “zıpla”, “dans et”, “otur”. Bu komutlar Groq/internet olmadan çalışır.
 - “Uyu” ve “dolaş” siz değiştirene kadar sürer. “Zıpla ve uyu” gibi en fazla dört açık hareket komutu arka arkaya çalışabilir.
 - Çoklu monitör algılama, numaralı/sonraki/ana monitöre geçme, kenarlara yapışma ve görev çubuğu üstünde oturma.
@@ -56,7 +66,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 - **Sürekli konuşma modu:** Nora cevap verdikten sonra tekrar dinler; `dinlemeyi bırak` / `sürekli konuşmayı kapat` ile durur. İki kez sessizlik olursa kendiliğinden bırakır.
 - **Bas-konuş:** Ayarlardan seçilen global kısayola (varsayılan `Ctrl+Alt+Space`) basılı tutunca dinler, bırakınca cevaplar. Global kısayol için `requirements-local.txt` içindeki `keyboard` paketi gerekir; bazı sistemlerde yönetici izni isteyebilir.
 - **Otonomi (varsayılan kapalı):** Kullanıcı açıkça açarsa Nora ara sıra ekranını/kamerasını inceleyebilir veya Spotify/YouTube araması açıp dans edebilir/video izleme pozuna geçebilir. Odak/sessiz modda ve gece sessizliğinde çalışmaz; aralık ayarlanabilir.
-- **Medya:** `müzik aç`, `spotifyda lofi aç`, `video aç` Spotify/YouTube araması açar; Nora dans eder veya mısır alıp izleme pozuna geçer. Spotify API bağlıysa `duraklat`, `sonraki şarkı`, `önceki şarkı`, `müziği durdur`, `şu an ne çalıyor` gerçek Web API kontrolüdür. API bağlı değilse OS medya tuşları kullanılır; API seçili ama token yoksa Nora bunu açıkça söyler.
+- **Medya:** `spotify aç ve back in black çal` Spotify masaüstü uygulamasını açar; API bağlıysa parçayı uygulamada çalar, değilse uygulama aramasını açar ve bunu söyler. `müzik aç`, `spotifyda lofi aç`, `video aç` arama açar; Nora dans eder veya mısır alıp izleme pozuna geçer. Spotify API bağlıysa `duraklat`, `sonraki şarkı`, `önceki şarkı`, `müziği durdur`, `şu an ne çalıyor` gerçek Web API kontrolüdür. API bağlı değilse OS medya tuşları kullanılır; API seçili ama token yoksa Nora bunu açıkça söyler.
 - Havada uzun tutulunca rahatsız olup söylenir; düşüşte hareket çizgileri, yere inince kısa squash/toz animasyonu vardır. Video izleme ve landenme pozlarıPainter ile çizilir.
 - Bot yanıtları merkezi sesli yanıt politikasından geçer; uzun yanıtlar kesilmeden cümlelere bölünür. Sohbet başlığındaki 🔊/🔇 göstergesi, tepsi **Sesli Yanıt Testi** ve “sesli yanıtı aç/kapat”, “ses testi” komutları sessiz kalma nedenini görünür kılar.
 
@@ -126,6 +136,8 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 | `spotify bağlan` / `spotify durumu` / `spotify cihazları` | OAuth PKCE bağlantısı ve cihaz listesi |
 | `spotify bağlantısını kes` | Yerel token kaydını temizleme |
 | `anlamsal arama modelini indir` / `yerel ai durumu` | Yerel embedding modeli ve durum |
+| `spotify aç ve back in black çal` | Spotify uygulamasını açar ve parçayı çalar |
+| `back in black'i spotify'da çal` | Aynı işlem, doğal Türkçe sıralamasıyla |
 | `yerel modeller` / `model listesi` | GGUF + Piper model kataloğu |
 | `gguf model seç` / `piper model seç v.onnx` | Yerel model seçimi |
 | `gguf model bilgi a.gguf` / `piper model doğrula v.onnx` | Model meta verisi / SHA-256 doğrulaması |
@@ -152,10 +164,30 @@ Spotify token kasası temel paketteki `keyring` ile çalışır. Diğer özellik
 | Tümü | `requirements-ai.txt` | Yukarıdakilerin tümü |
 
 ```bash
-# Yalnızca ihtiyacın olanı kur; hepsini kurmak zorunda değilsin.
+# Tek komut: sanal ortam + zorunlu paketler + Piper + teşhis
+python install.py
+
+# Diğer seçenekler
+python install.py --full             # tüm isteğe bağlı özellikleri dene
+python install.py --base             # en küçük kurulum
+python install.py --features chat    # yalnızca GGUF sohbeti
+python install.py --doctor-only      # kurulum yapmadan teşhis
+
+# İstersen eski yöntem de çalışır
 python -m pip install -r requirements-piper.txt
 python main.py --doctor --check piper
 ```
+
+**Kurulum notları:** `install.py` model indirmez, yönetici izni istemez ve bir
+özellik derlenemezse yalnızca onu atlar. Linux'ta Qt/PortAudio için gereken
+`apt-get` satırı **çalıştırılmadan** yazdırılır.
+
+### Groq anahtarı (2 dakika)
+
+1. [console.groq.com/keys](https://console.groq.com/keys) adresinde ücretsiz anahtar oluştur.
+2. Nora'yı aç → **sağ tık → 🔑 Groq Anahtarı Gir** (veya sohbet paneli → ⋯ → Groq anahtarı gir).
+3. Anahtar işletim sistemi kasasına yazılır; `state.json`'a **girmez**.
+4. **🩺 Groq Bağlantısı** ile model erişimini doğrula. Bağlanamıyorsan: 401 → anahtar yanlış, 404 → model adı eskimiş (Ayarlar → Groq sohbet modeli), 429 → hız limiti, timeout → ağ/proxy.
 
 - `llama-cpp-python` bazı sistemlerde C++ derleme araçları isteyebilir; hazır wheel yoksa kurulum belgesi gerekir.
 - Embedding modeli yaklaşık 220 MB olabilir; Nora açılışta indirmez. **Özellikler → Embedding modelini indir** açık onay ister.
@@ -232,7 +264,7 @@ Kalıcı veriler varsayılan olarak:
 
 `NORA_DATA_DIR` veya `python main.py --data-dir D:\NoraVeri` ile değiştirilebilir. Yerel modeller bu klasörün `models/` altındadır.
 
-**Saklananlar:** ayarlar, açıkça kaydedilen kişisel bilgiler, notlar, görevler, hatırlatıcılar, rutinler, içe aktarılan takvim etkinlikleri, companion bağlılık/ruh hali, etkin eklenti kimlikleri, içe aktarılan GGUF/Piper modellerinin SHA-256/kaynak/lisans yan dosyaları ve isteğe bağlı son 200 komutluk denetim kaydı. Denetim kaydı komut metinlerini/pano içerğini değil eylem türünü yazar. Spotify tokenları mümkünse sistem anahtar kasasında tutulur; JSON state’e yazılmaz. **Saklanmayanlar:** ham sohbet geçmişi, mikrofon sesi, kalıcı pano geçmişi. Pano geçmişi açıkça açılırsa yalnızca bellekte 30 dakika tutulur.
+**Saklananlar:** ayarlar, açıkça kaydedilen kişisel bilgiler, notlar, görevler, hatırlatıcılar, rutinler, içe aktarılan takvim etkinlikleri, companion bağlılık/ruh hali, etkin eklenti kimlikleri, içe aktarılan GGUF/Piper modellerinin SHA-256/kaynak/lisans yan dosyaları ve isteğe bağlı son 200 komutluk denetim kaydı. Denetim kaydı komut metinlerini/pano içerğini değil eylem türünü yazar. Spotify ve Groq tokenları/anahtarı mümkünse sistem anahtar kasasında tutulur; JSON state’e yazılmaz. Groq anahtarı girildiğinde yalnızca `keyring` kaydı oluşur, `state.json` içinde anahtar araması boş döner. **Saklanmayanlar:** ham sohbet geçmişi, mikrofon sesi, kalıcı pano geçmişi. Pano geçmişi açıkça açılırsa yalnızca bellekte 30 dakika tutulur.
  Sohbet bağlamı oturumda son 30 mesajdır; “Sohbet Geçmişini Sıfırla” kişisel hafızayı silmez. Kişisel hafıza ayrı bir onaylı menüyle silinebilir.
 
 ## Gizlilik ve güvenlik sınırları
@@ -254,7 +286,8 @@ Kalıcı veriler varsayılan olarak:
 
 | Değişken | Varsayılan | Açıklama |
 |---|---|---|
-| `GROQ_API_KEY` | boş | Serbest sohbet/vision/metin analizi anahtarı |
+| `GROQ_API_KEY` | boş | Serbest sohbet/vision/metin analizi anahtarı (ayarlardan girilen anahtarı geçersiz kılar) |
+| `NORA_CHARACTER` | `realistic` | `realistic` veya `pixel` karakter stili |
 | `NORA_CHAT_MODEL` | `openai/gpt-oss-120b` | Sohbet modeli |
 | `NORA_VISION_MODEL` | `qwen/qwen3.8-27b` | Vision modeli |
 | `NORA_WAKE_WORD` | `1` | Yerel Hey Nora bekçisi |
@@ -311,6 +344,7 @@ python main.py --version
 
 ```text
 main.py
+install.py                # tek dosya kurulum (venv + paketler + teşhis)
 nora/
   main.py                 # CLI / QApplication
   nora_personality.py     # persona, duygu ve güvenli komut şeması
@@ -332,6 +366,9 @@ nora/
   nora_desktop.py         # Windows pencere düzeni kaydetme/geri yükleme
   nora_local_ai.py        # isteğe bağlı Whisper ve RapidOCR
   nora_embeddings.py      # isteğe bağlı yerel çok dilli embedding
+  nora_avatar.py          # gerçekçi VTuber portresi (varsayılan karakter)
+  nora_glass.py           # saydam camsı sohbet paneli (glassmorphism)
+  nora_secrets.py         # Groq anahtarı: keyring/ortam, JSON'a yazılmaz
   nora_local_llm.py       # kullanıcı GGUF modeliyle akış/iptal destekli yerel sohbet
   nora_model_catalog.py   # GGUF/Piper SHA-256, kaynak/lisans yan dosyaları
   nora_piper.py           # kesilebilir yerel Piper TTS
@@ -351,6 +388,7 @@ docs/
 tests/
 requirements.txt
 requirements-local.txt
+install.py
 requirements-dev.txt
 requirements-ai.txt
 requirements-embeddings.txt
@@ -371,4 +409,4 @@ python -m compileall -q nora main.py tests
 ruff check nora tests tools main.py
 ```
 
-Yerel tam ortamda **325 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export, sayı oyunu, Spotify PKCE/state/token kasası, yerel embedding/GGUF/Piper, pano geçmişi sınırları, JSON eklenti güvenliği ve sözünü kesme kontrol edilmiştir. Yeni kapsam: GGUF akış/iptal ve bağlam bütçesi, iptalin buluta geçirmemesi/geçmişe yazmaması, model SHA-256 doğrulama/silme/kaynak notu, iptal edilebilir kopyalama ve yan dosya commit'i, token limiti çapraz doğrulaması, Türkçe model komutları, eklenti ifade çakışması/dosya adı sınırı, teşhis alt klasörleri ve GUI iptal düğmesi. Fiziksel Windows mikrofonu, gerçek Groq anahtarı, indirilmiş Whisper/GGUF/Piper/embedding modelleri ve Spotify hesabı bu ortamda canlı doğrulanamamıştır. Windows/Linux CI iş akışı eklendi; uzak çalışma sonucu ayrı doğrulanır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.
+Yerel tam ortamda **355 test** geçmiştir; offscreen GUI, 8-bit piksel ızgarası/keskinliği, tüm poz/animasyon dışa aktarımı, istenen siyah elbise-kırmızı ayakkabı-kırmızı göz-beyaz wolfcut paleti, eski görünüm migrasyonu, kıyafet-saç-aksesuar değişimi, tepsi ikonu, merkezi sesli yanıt politikası, TTS kuyruğu/yeniden deneme/hata görünürlüğü, komut şeması, sesli isim düzeltme/alternatif seçimi, ses tanıma testinin komut çalıştırmaması, bas-konuş/sürekli konuşma, opt-in otonomi, medya/dans/izleme, kaldırılma rahatsızlığı ve landenme animasyonu, kalıcı veri, hatırlatıcı tekrarları, modlar, dosya geri alma, takvim, gerçek sentetik görüntüyle OCR ve yerel STT’nin buluta geçmemesi, 1.8.0 mikrofon okuma uyumluluğu, brifing/companion/yerel arama/izin-denetim-export, sayı oyunu, Spotify PKCE/state/token kasası, yerel embedding/GGUF/Piper, pano geçmişi sınırları, JSON eklenti güvenliği ve sözünü kesme kontrol edilmiştir. 1.11.0 kapsamı: gerçekçi avatarda kumral saç/yeşil iris renk analizi, blink-dışı kare farkı, stil geçişinde pencere boyutu, cam panel saydamlığı, tipte "yazıyor" göstergesi, Groq anahtarının state.json'a yazılmaması ve kasa yokken dürüst uyarı, Spotify aç-ve-çal komutlarının şarkı adını doğru ayıklaması, API bağlı/bağlı değil davranışı, installer'ın sudo çalıştırmaması ve eski Python'u reddetmesi. Önceki kapsam: GGUF akış/iptal ve bağlam bütçesi, iptalin buluta geçirmemesi/geçmişe yazmaması, model SHA-256 doğrulama/silme/kaynak notu, iptal edilebilir kopyalama ve yan dosya commit'i, token limiti çapraz doğrulaması, Türkçe model komutları, eklenti ifade çakışması/dosya adı sınırı, teşhis alt klasörleri ve GUI iptal düğmesi. Fiziksel Windows mikrofonu, gerçek Groq anahtarı, indirilmiş Whisper/GGUF/Piper/embedding modelleri ve Spotify hesabı bu ortamda canlı doğrulanamamıştır. Windows/Linux CI iş akışı eklendi; uzak çalışma sonucu ayrı doğrulanır. Google’ın genel STT anahtarı ve üçüncü taraf servisler ileride değişebilir.

@@ -54,14 +54,17 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "piper_model": "",
     "voice_barge_in": False,
     "spotify_client_id": "",
+    "chat_model": "",
     "tts": True,
     "proactive": True,
     "quiet_hours": True,
     "hydration_minutes": 0,
     "break_minutes": 0,
     "outfit": "classic",
-    "hair_color": "#f5f3f0",
-    "appearance_version": 2,
+    "hair_color": "#7d5a44",
+    "eye_color": "yesil",
+    "character_style": "realistic",
+    "appearance_version": 3,
     "accessory": "none",
     "animations": True,
     "autonomous": True,
@@ -72,6 +75,8 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 }
 _MODES = {"normal", "focus", "game", "quiet"}
 _OUTFITS = {"classic", "casual", "night"}
+_CHARACTER_STYLES = {"realistic", "pixel"}
+_EYE_COLORS = {"yesil", "hazel", "kahve", "mavi", "gri"}
 _ACCESSORIES = {"none", "headphones", "glasses", "ribbon"}
 
 
@@ -164,13 +169,21 @@ class NoraStore:
                     self._data["preferences"][key] = value
                 except (ValueError, TypeError):
                     logger.warning("Geçersiz kayıtlı tercih yok sayıldı: %s", key)
-            # One-time migration from the old factory purple hair to the
-            # requested white wolfcut. Other explicit hair colors are kept.
+            # Migration: the old factory purple and the white-wolfcut chibi are
+            # both replaced by the realistic kumral avatar. A deliberately
+            # customised colour is preserved.
             saved = self._data["preferences"]
-            if "appearance_version" not in saved:
-                if str(saved.get("hair_color", "")).lower() == "#33204d":
-                    saved["hair_color"] = "#f5f3f0"
-                saved["appearance_version"] = 2
+            version = saved.get("appearance_version", 1)
+            if not isinstance(version, int):
+                version = 1
+            if version < 3:
+                if str(saved.get("hair_color", "")).lower() in {
+                    "#33204d",
+                    "#f5f3f0",
+                    DEFAULT_PREFERENCES["hair_color"],
+                }:
+                    saved["hair_color"] = DEFAULT_PREFERENCES["hair_color"]
+                saved["appearance_version"] = 3
         except Exception as exc:
             self.load_warning = "Kayıtlı veriler okunamadı; eski dosya korunuyor."
             logger.warning("Nora veri okuma hatası: %s", type(exc).__name__)
@@ -196,7 +209,7 @@ class NoraStore:
                 "speech_rate": (100, 260),
                 "speech_volume": (0, 1),
                 "focus_minutes": (5, 120),
-                "appearance_version": (1, 2),
+                "appearance_version": (1, 3),
                 "hydration_minutes": (0, 240),
                 "break_minutes": (0, 180),
                 "autonomy_minutes": (5, 120),
@@ -218,6 +231,8 @@ class NoraStore:
                 "whisper_model": {"tiny", "base", "small", "medium"},
                 "whisper_device": {"auto", "cpu", "cuda"},
                 "outfit": _OUTFITS,
+                "character_style": _CHARACTER_STYLES,
+                "eye_color": _EYE_COLORS,
                 "accessory": _ACCESSORIES,
                 "double_click_action": {"chat", "game", "pet"},
                 "mode": _MODES,
@@ -226,6 +241,12 @@ class NoraStore:
             }
             if key in choices and value not in choices[key]:
                 raise ValueError("Bu seçenek desteklenmiyor.")
+            if (
+                key == "chat_model"
+                and value
+                and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]{1,119}", value)
+            ):
+                raise ValueError("Model adı geçersiz karakter içeriyor.")
             if key == "hair_color" and not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
                 raise ValueError("Renk #RRGGBB biçiminde olmalı.")
             if key in {"local_chat_model", "piper_model"} and value:

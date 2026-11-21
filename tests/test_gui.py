@@ -25,7 +25,7 @@ def process_until(qapp, predicate, timeout=3.0):
 def test_pet_size_states_and_render(qapp):
     pet = NoraPet()
     pet._timer.stop()
-    assert pet.width() == 120 and pet.height() == 150
+    assert pet.width() == 260 and pet.height() == 360
     assert pet.testAttribute(Qt.WA_TranslucentBackground)
     pet.set_emotion("love")
     assert pet.emotion == "love" and pet.state == PetState.LOVE
@@ -38,11 +38,11 @@ def test_pet_size_states_and_render(qapp):
     assert pet._bubble is not None
     assert len(pet._bubble._text) == 63
     image = pet.grab().toImage()
-    assert not image.isNull() and image.width() == 120
+    assert not image.isNull() and image.width() == 260
     assert any(
         image.pixelColor(x, y).alpha() > 0
-        for x in range(0, 120, 5)
-        for y in range(0, 150, 5)
+        for x in range(0, 260, 5)
+        for y in range(0, 360, 5)
     )
     pet.shutdown()
 

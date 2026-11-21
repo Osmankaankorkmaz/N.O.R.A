@@ -57,6 +57,18 @@ class ChatReply:
     error: bool = False
 
 
+def _stored_key() -> str:
+    """Key from the OS keyring, if the user saved one in settings."""
+    try:
+        from .nora_secrets import stored_groq_key
+    except Exception:  # pragma: no cover - circular import safety
+        return ""
+    try:
+        return stored_groq_key()
+    except Exception:  # pragma: no cover - keyring failures are non-fatal
+        return ""
+
+
 class NoraBrain:
     def __init__(
         self,
@@ -104,28 +116,66 @@ class NoraBrain:
         self._closed = False
         self._client = client
         self._unavailable_reason = ""
-        key = (
-            api_key if api_key is not None else os.getenv("GROQ_API_KEY", "")
-        ).strip()
+        if api_key is not None:
+            key = api_key.strip()
+        else:
+            key = os.getenv("GROQ_API_KEY", "").strip() or _stored_key()
+        self._timeout = timeout
         if client is not None:
             return
         if offline:
             self._unavailable_reason = "Çevrimdışı mod açık."
-        elif not key:
-            self._unavailable_reason = "GROQ_API_KEY tanımlı değil."
-        else:
-            try:
-                from groq import Groq
+            return
+        if not key:
+            self._unavailable_reason = "Groq anahtarı tanımlı değil."
+            return
+        self._open_client(key)
 
-                self._client = Groq(api_key=key, timeout=timeout, max_retries=1)
-            except ImportError:
-                self._unavailable_reason = "groq paketi kurulu değil."
-                logger.warning(
-                    "groq paketi yok; çevrimdışı temel komutlar kullanılacak."
-                )
-            except Exception as exc:
-                self._unavailable_reason = "Groq istemcisi başlatılamadı."
-                logger.warning("Groq istemcisi başlatılamadı: %s", type(exc).__name__)
+    def _open_client(self, key: str) -> bool:
+        """Build the Groq client; returns True when it is usable."""
+        self._unavailable_reason = ""
+        try:
+            from groq import Groq
+
+            self._client = Groq(api_key=key, timeout=self._timeout, max_retries=1)
+        except ImportError:
+            self._client = None
+            self._unavailable_reason = "groq paketi kurulu değil."
+            logger.warning("groq paketi yok; çevrimdışı temel komutlar kullanılacak.")
+            return False
+        except Exception as exc:
+            self._client = None
+            self._unavailable_reason = "Groq istemcisi başlatılamadı."
+            logger.warning("Groq istemcisi başlatılamadı: %s", type(exc).__name__)
+            return False
+        return True
+
+    def reload_credentials(self, api_key: str | None = None) -> str:
+        """Re-read the key after the user saves one in settings.
+
+        Returns a Turkish status line.  An already working client is kept when
+        no new key is available, so a transient keyring miss cannot silently
+        downgrade a working session.
+        """
+        if self.offline:
+            return "Çevrimdışı mod açık; anahtar kullanılmadı."
+        key = (api_key or "").strip()
+        if not key:
+            key = os.getenv("GROQ_API_KEY", "").strip() or _stored_key()
+        if not key:
+            return "Groq anahtarı bulunamadı."
+        if self._client is not None and not api_key:
+            return "Groq bağlantısı zaten açık."
+        previous = self._client
+        if self._open_client(key):
+            if previous is not None and previous is not self._client:
+                try:
+                    previous.close()
+                except Exception:
+                    logger.debug("Eski Groq istemcisi kapatılamadı", exc_info=True)
+            self._unavailable_reason = ""
+            return "Groq bağlantısı hazır. 🩺"
+        return self._unavailable_reason or "Groq istemcisi başlatılamadı."
 
     @property
     def available(self) -> bool:
@@ -135,6 +185,14 @@ class NoraBrain:
         if backend not in {"groq", "local"}:
             raise ValueError("Sohbet motoru groq/local olmalı.")
         self.chat_backend = backend
+
+    def set_chat_model(self, model: str) -> None:
+        model = str(model or "").strip()
+        if not model:
+            return
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]{1,119}", model):
+            raise ValueError("Model adı geçersiz karakter içeriyor.")
+        self.chat_model = model
 
     @property
     def chat_available(self) -> bool:
@@ -149,6 +207,55 @@ class NoraBrain:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    def probe(self, timeout: float = 6.0) -> tuple[bool, str]:
+        """Cheap connectivity test that never sends conversation data.
+
+        Lists models visible to the key (the same call the doctor uses) and
+        returns a Turkish one-liner.  Run it in a worker thread.
+        """
+        if self.offline:
+            return False, "Çevrimdışı mod açık; buluta bağlanmıyorum."
+        if self._client is None:
+            return False, self._unavailable_reason or "Groq istemcisi yok."
+        try:
+            response = self._client.with_options(
+                timeout=timeout, max_retries=0
+            ).models.list()
+            data = getattr(response, "data", response) or []
+            ids = {str(getattr(item, "id", item)) for item in data}
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status == 401:
+                return False, "Anahtar reddedildi (401). Yeni bir gsk_ anahtarı gir. 🔑"
+            if status == 403:
+                return False, "Bu anahtarın modele erişimi yok (403). 🔑"
+            if status == 429:
+                return True, "Anahtar geçerli ama şu an hız limiti var (429)."
+            name = type(exc).__name__.lower()
+            if "timeout" in name or "connection" in name:
+                detail, _ = self._provider_detail(exc)
+                suffix = f" ({detail})" if detail else ""
+                return (
+                    False,
+                    "İnternete/ağa ulaşamadım. Bağlantıyı, güvenlik duvarını veya "
+                    f"proxy ayarını kontrol et{suffix}. 🌐",
+                )
+            detail, _ = self._provider_detail(exc)
+            return False, detail or f"Bağlantı hatası ({type(exc).__name__})."
+        ok = self.chat_model in ids
+        count = len(ids)
+        if ok:
+            return (
+                True,
+                f"Groq hazır: {self.chat_model} erişilebilir ({count} model). ✅",
+            )
+        replacement = MODEL_REPLACEMENTS.get(self.chat_model)
+        hint = f" Önerilen: {replacement}." if replacement else ""
+        return False, (
+            f"Anahtar çalışıyor ama {self.chat_model} listede yok ({count} model).{hint} "
+            "Ayarlardan model adını değiştir. 😾"
+        )
 
     @property
     def status(self) -> str:
@@ -348,7 +455,7 @@ class NoraBrain:
     def analyze_image(self, image_base64: str, prompt: str | None = None) -> ChatReply:
         if not self.available:
             return ChatReply(
-                "Görsel analiz için Groq bağlantısı gerekli senpai. GROQ_API_KEY ayarla veya çevrimdışı modu kapat. 🐾",
+                "Görsel analiz için Groq bağlantısı gerekli senpai. Sağ tık → 🔑 Groq Anahtarı Gir ile anahtar ekle veya çevrimdışı modu kapat. 🐾",
                 "sad",
                 error=True,
             )

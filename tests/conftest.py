@@ -19,3 +19,16 @@ def qapp():
     app = widgets.QApplication.instance() or widgets.QApplication([])
     app.setQuitOnLastWindowClosed(False)
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _clear_session_groq_key():
+    """Never let one test's in-memory API key leak into the next one."""
+    try:
+        from nora import nora_secrets
+    except Exception:
+        yield
+        return
+    nora_secrets._session_key = ""
+    yield
+    nora_secrets._session_key = ""

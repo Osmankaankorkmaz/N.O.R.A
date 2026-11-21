@@ -320,6 +320,27 @@ def _appearance(low: str) -> DirectCommand | None:
     return None
 
 
+_TRACK_STOPWORDS = (
+    r"\s+(?:bilgisayar\w*|uygulam\w*|program\w*|masaüstü\w*)\b",
+    r"\s+(?:ve|ile)\s+.*$",
+    r"\s+(?:çal|oynat|aç|dinle)\b.*$",
+)
+
+
+def _clean_track(text: str) -> str:
+    """Strip sentence glue from a song request.
+
+    "back in black i çal bilgisayarımdaki uygulamasını aç" → "back in black"
+    """
+    value = str(text or "").strip(" '’\"")
+    for pattern in _TRACK_STOPWORDS:
+        value = re.split(pattern, value, maxsplit=1)[0]
+    value = value.strip(" '’\"")
+    # Turkish accusative written as a separate syllable ("black i çal").
+    value = re.sub(r"\s+(?:ı|i|u|ü|yi|yı|yu|yü|ni|nı|nu|nü)$", "", value)
+    return value.strip()
+
+
 def parse_direct_command(
     text: str, now: datetime | None = None
 ) -> DirectCommand | None:
@@ -670,9 +691,49 @@ def parse_direct_command(
         return _cmd(
             "media", "Spotify'da bir şeyler açıyorum senpai~ 🎧", action="music"
         )
-    match = re.fullmatch(r"spotify(?:da)?\s+(.+?)\s+(?:aç|çal)", low)
+    # "spotify aç ve back in black çal", "back in black'i spotify'da çal",
+    # "spotify uygulamasını aç ve ... çal" → open the desktop app and play.
+    match = re.fullmatch(
+        r"(?:spotify(?:['’]?(?:ı|i|u|ü|da|de|daki|deki)?)?\s*)?(?:uygulama(?:sını|yı|yı)?\s*)?"
+        r"aç\s*(?:ve|,)?\s*(.+?)\s*(?:['’]?(?:ı|i|u|ü|yi|yı|yu|yü|ni|nı|nu|nü))?\s*"
+        r"(?:çal|oynat|aç)\b",
+        low,
+    )
+    if match:
+        track = _clean_track(match.group(1))
+        if track and len(track) >= 2:
+            return _cmd(
+                "media",
+                action="music",
+                query=track[:200],
+                open_app=True,
+                prefer_desktop=True,
+            )
+    match = re.fullmatch(
+        r"spotify(?:['’]?(?:da|de|daki|deki))?\s+(.+?)\s*(?:['’]?(?:ı|i|u|ü|yi|yı|yu|yü|ni|nı|nu|nü))?\s*"
+        r"(?:çal|oynat)\b",
+        low,
+    )
+    if match:
+        return _cmd("media", action="music", query=_clean_track(match.group(1))[:200])
+    match = re.fullmatch(r"spotify(?:da|de)?\s+(.+?)\s+(?:aç|çal)", low)
     if match:
         return _cmd("media", action="music", query=match.group(1)[:200])
+    # tolerate the "da/de" apostrophe being dropped once already in `low`
+    match = re.fullmatch(
+        r"(.+?)\s+['’]?(?:ı|i|u|ü|yi|yı|yu|yü)?\s*spotify\s*(?:da|de)?\s+(?:çal|oynat)",
+        low,
+    )
+    if match:
+        track = _clean_track(match.group(1))
+        if len(track) >= 2:
+            return _cmd(
+                "media",
+                action="music",
+                query=track[:200],
+                open_app=True,
+                prefer_desktop=True,
+            )
     if low in {"video aç", "video izle", "bir şeyler izle"}:
         return _cmd(
             "media", "Bir video açıyorum, birlikte izleyelim~ 🍿", action="video"

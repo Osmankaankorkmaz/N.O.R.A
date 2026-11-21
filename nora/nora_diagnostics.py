@@ -76,6 +76,22 @@ def package_found(module: str) -> bool:
         return False
 
 
+def _groq_key_detail() -> str:
+    """Report where a key would come from without printing or storing it."""
+    try:
+        from .nora_secrets import groq_key_source
+
+        source = groq_key_source()
+    except Exception:
+        source = "ortam değişkeni" if os.environ.get("GROQ_API_KEY") else ""
+    if source:
+        return f"Groq anahtarı bulundu ({source}); değer okunmadı."
+    return (
+        "Groq anahtarı tanımsız; yerel komutlar çalışabilir. Bulut sohbeti için "
+        "uygulamada sağ tık → 🔑 Groq Anahtarı Gir ya da GROQ_API_KEY ortam değişkeni."
+    )
+
+
 def _preferences(data_dir: Path) -> tuple[dict, Check]:
     path = data_dir / "state.json"
     if not path.exists():
@@ -151,15 +167,7 @@ def run_diagnostics(
     )
     prefs, state_check = _preferences(directory)
     checks.append(state_check)
-    checks.append(
-        Check(
-            "Groq anahtarı",
-            "info",
-            "GROQ_API_KEY tanımlı (değer okunmadı)."
-            if "GROQ_API_KEY" in os.environ
-            else "GROQ_API_KEY tanımsız; yerel komutlar çalışabilir, bulut sohbeti için anahtarı ortam değişkeni olarak tanımla.",
-        )
-    )
+    checks.append(Check("Groq anahtarı", "info", _groq_key_detail()))
     models = directory / "models"
     for feature in selected:
         absent = [
