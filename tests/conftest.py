@@ -23,12 +23,22 @@ def qapp():
 
 @pytest.fixture(autouse=True)
 def _clear_session_groq_key():
-    """Never let one test's in-memory API key leak into the next one."""
+    """Never let a test's API key leak into the next one — or the real keyring.
+
+    Windows runners have a working Credential Manager backend, so a test that
+    saves a fake key would otherwise persist it in the OS and break every later
+    "no key configured" test.
+    """
     try:
         from nora import nora_secrets
     except Exception:
         yield
         return
     nora_secrets._session_key = ""
-    yield
-    nora_secrets._session_key = ""
+    real_keyring = nora_secrets._keyring
+    nora_secrets._keyring = lambda: None
+    try:
+        yield
+    finally:
+        nora_secrets._keyring = real_keyring
+        nora_secrets._session_key = ""

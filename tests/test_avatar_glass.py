@@ -320,6 +320,13 @@ def test_play_music_opens_app_then_reports_honestly(qapp, tmp_path, monkeypatch)
         "open_app",
         lambda name: opened.append(name) or "spotify başlattım senpai~",
     )
+    # Never touch the real spotify: URL handler (it exists on Windows/macOS CI).
+    deep_links: list[str] = []
+    monkeypatch.setattr(
+        type(app),
+        "_open_spotify_deep_link",
+        lambda self, query: deep_links.append(query) or False,
+    )
     searched = []
     monkeypatch.setattr(
         app.tools,
@@ -331,6 +338,7 @@ def test_play_music_opens_app_then_reports_honestly(qapp, tmp_path, monkeypatch)
     message = app._play_music("back in black", open_app=True)
     assert opened == ["spotify"]
     assert searched == ["back in black"]
+    assert deep_links == ["back in black"]
     assert "Spotify aramasını" in message
     assert "çalıyorum" not in message.split("Spotify aramasını")[0]
     app.shutdown()
@@ -413,3 +421,40 @@ def test_installer_never_runs_sudo(monkeypatch, capsys):
     install.linux_hint()
     assert "sudo apt-get install" in capsys.readouterr().out
     assert commands == []
+
+
+def test_deep_link_success_is_reported_without_browser_fallback(
+    qapp, tmp_path, monkeypatch
+):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    monkeypatch.setattr(type(app.spotify), "connected", lambda self: False)
+    monkeypatch.setattr(type(app), "_open_spotify_deep_link", lambda self, query: True)
+    searched: list[str] = []
+    monkeypatch.setattr(
+        app.tools, "spotify_search", lambda query: searched.append(query) or "x"
+    )
+    message = app._play_music("back in black")
+    assert "Spotify uygulamasında aramayı açtım" in message
+    assert searched == []  # no browser tab when the app accepted the link
+    assert "bağla" in message  # still honest that playback needs the API
+    app.shutdown()
+
+
+def test_deep_link_is_platform_guarded(qapp, tmp_path, monkeypatch):
+    app = NoraApp(
+        NoraOptions(
+            wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
+        )
+    )
+    monkeypatch.setattr("nora.nora_ui.sys.platform", "linux")
+    started: list[str] = []
+    monkeypatch.setattr(
+        "nora.nora_ui.os.startfile", lambda uri: started.append(uri), raising=False
+    )
+    assert app._open_spotify_deep_link("back in black") is False
+    assert started == []
+    app.shutdown()

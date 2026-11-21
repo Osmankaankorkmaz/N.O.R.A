@@ -51,8 +51,12 @@ def test_pet_falls_to_floor_after_drag(qapp):
     pet = NoraPet()
     pet._timer.stop()
     pet.jump_to(pet.x(), pet.y() - 120)
-    for _ in range(200):
+    # Tick until gravity settles instead of assuming a fixed frame budget:
+    # the taller realistic avatar falls for more frames than the old chibi.
+    for _ in range(600):
         pet._tick()
+        if pet._grounded:
+            break
     assert pet.state != PetState.FALL
     assert abs(pet.y() - pet._current_floor()) <= 1
     pet.shutdown()

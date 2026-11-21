@@ -61,7 +61,31 @@ jobs:
           grep -q 'piper paketleri' doctor.txt
       - name: Tests (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest -q
+        shell: bash
+        run: |
+          set +e
+          xvfb-run -a python -m pytest -q -rf --tb=line > pytest.log 2>&1
+          status=$?
+          tail -n 60 pytest.log
+          if [ $status -ne 0 ]; then
+            grep -E '^(FAILED|ERROR)' pytest.log | head -20 | while read -r line; do
+              echo "::error title=Pytest failure::$line"
+            done
+            echo "::error title=Pytest exit code::xvfb-run pytest exited with $status"
+          fi
+          exit $status
       - name: Tests (Windows)
         if: runner.os == 'Windows'
-        run: python -m pytest -q
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          python -m pytest -q -rf --tb=line *> pytest.log
+          $status = $LASTEXITCODE
+          Get-Content pytest.log -Tail 60
+          if ($status -ne 0) {
+            Select-String -Path pytest.log -Pattern '^(FAILED|ERROR)' | Select-Object -First 20 | ForEach-Object {
+              Write-Host "::error title=Pytest failure::$($_.Line)"
+            }
+            Write-Host "::error title=Pytest exit code::pytest exited with $status"
+          }
+          exit $status

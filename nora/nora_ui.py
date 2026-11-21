@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -1226,13 +1227,8 @@ class NoraApp(QWidget):
             except SpotifyError as exc:
                 notes.append(f"API ile çalınamadı ({exc})")
 
-        if sys.platform == "win32" and query:
-            # Spotify ships a URL handler: this queued playback inside the app.
-            try:
-                os.startfile("spotify:search:" + quote(query))  # type: ignore[attr-defined]
-                notes.append("Spotify uygulamasında aramayı açtım")
-            except OSError:
-                notes.append("Spotify derin bağlantısı açılamadı")
+        if self._open_spotify_deep_link(query):
+            notes.append("Spotify uygulamasında aramayı açtım")
 
         if not any("Spotify uygulamasında" in note for note in notes):
             result = self.tools.spotify_search(query)
@@ -1243,6 +1239,31 @@ class NoraApp(QWidget):
             " · ".join(notes) + " Şarkıyı uygulamada başlatmak için Spotify'ı bağla "
             "(sağ tık → Spotify Bağlantısı) veya sonuçtan çal. 🎧"
         )
+
+    def _open_spotify_deep_link(self, query: str) -> bool:
+        """Hand ``spotify:search:`` to the installed app. True only if it opened.
+
+        Spotify registers the ``spotify:`` URL scheme on Windows/macOS; the
+        handler focuses the desktop app and shows the search results, so the
+        user can start playback there. Returns False on unsupported platforms
+        or when no handler is registered, so callers can be honest about it.
+        """
+        if not query or sys.platform not in {"win32", "darwin"}:
+            return False
+        uri = "spotify:search:" + quote(query)
+        try:
+            if sys.platform == "win32":
+                os.startfile(uri)  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(
+                    ["open", uri],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        except (OSError, subprocess.SubprocessError):
+            logger.debug("Spotify derin bağlantısı açılamadı", exc_info=True)
+            return False
+        return True
 
     def _set_busy(
         self, busy: bool, status: str = "", *, cancellable: bool = False
