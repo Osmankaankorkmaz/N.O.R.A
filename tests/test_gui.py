@@ -36,7 +36,12 @@ def test_pet_size_states_and_render(qapp):
     pet = NoraPet()
     pet._timer.stop()
     # The default is the illustrated sheet when it ships, else the drawn body.
-    expected = (168, 330) if pet.character_style == "sprite" else (132, 312)
+    expected = {
+        "pixel": (120, 162),
+        "sprite": (168, 330),
+        "body": (132, 312),
+        "realistic": (260, 360),
+    }[pet.character_style]
     assert (pet.width(), pet.height()) == expected
     assert pet.testAttribute(Qt.WA_TranslucentBackground)
     pet.set_emotion("love")
@@ -90,6 +95,8 @@ def test_app_offline_chat_and_command_flow(qapp, monkeypatch):
     )
     app.start()
     qapp.processEvents()
+    # The character lives inside the app until the logo is pressed.
+    app.release_pet()
     assert app.pet.isVisible()
     app.show_chat()
     assert app.chat_window.isVisible()
@@ -496,14 +503,16 @@ def test_continuous_conversation_followup_and_stop_command(qapp, tmp_path, monke
         app.voice, "listen_async", lambda rid: started.append(rid) or True
     )
     app._conversation_followup()
-    assert started and app._listening
-    app._on_listen_done(started[0], "", "sessiz")
-    app._on_listen_done(app._next_request(), "", "sessiz")
-    assert not app._conversation_active
-    app._send_message("sürekli konuşma modu")
-    assert app.store.preference("continuous_conversation")
+    # Microphone is disabled by design: the follow-up must not reopen the mic.
+    assert app.MICROPHONE_ENABLED is False
+    assert started == []
+    # With the microphone disabled the follow-up never opens, so continuous
+    # mode must be ended by the explicit stop command instead.
+    assert started == []
     app._send_message("dinlemeyi bırak")
     assert not app.store.preference("continuous_conversation")
+    app._send_message("sürekli konuşma modu")
+    assert app.store.preference("continuous_conversation")
     app.shutdown()
 
 

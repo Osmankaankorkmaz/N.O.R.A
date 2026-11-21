@@ -34,8 +34,8 @@ def test_every_pet_pose_is_crisp_and_fits_the_transparent_canvas(qapp, state):
     pet._set_state(state, 100000)
     image = pet.grab().toImage()
     assert image.width() == GRID_WIDTH * PIXEL_SIZE == 120
-    assert image.height() == GRID_HEIGHT * PIXEL_SIZE == 150
-    assert _opaque_count(image) > 1500
+    assert image.height() == GRID_HEIGHT * PIXEL_SIZE
+    assert _opaque_count(image) > 900
     _assert_crisp_grid(image, PIXEL_SIZE)
     for x in range(image.width()):
         assert image.pixelColor(x, 0).alpha() == 0

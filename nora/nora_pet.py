@@ -54,6 +54,9 @@ class PetState(Enum):
     YAWN = auto()
     WATCH = auto()
     LAND = auto()
+    GIGGLE = auto()
+    SAD = auto()
+    CHEER = auto()
 
 
 def _character_style(settings: Mapping[str, Any] | None = None) -> str:
@@ -65,16 +68,19 @@ def _character_style(settings: Mapping[str, Any] | None = None) -> str:
     )
     for value in candidates:
         text = str(value or "").strip().lower()
-        if text in {"sprite", "body", "realistic", "pixel"}:
+        if text in {"pixel", "sprite", "body", "realistic"}:
             return text
-    return "sprite"
+    # The 8-bit Nora is the default look again.
+    return "pixel"
 
 
 def _tooltip_for(style: str) -> str:
+    if style == "pixel":
+        return (
+            "Nora 💕 · 8-bit · Sol tık: gıdıkla · Çift tık: özel panel · Sağ tık: menü"
+        )
     if style == "sprite":
         return "Nora 💕 · çizim · Sol tık: sohbet · Sağ tık: menü · Sürükle: kaldır & bırak"
-    if style == "pixel":
-        return "Nora 💕 · 8-bit mod · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
     if style == "realistic":
         return "Nora 💕 · portre · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
     return "Nora 💕 · tam vücut · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
@@ -144,7 +150,7 @@ class NoraPet(QWidget):
     position_changed = pyqtSignal(QPoint)
 
     PIXEL_WIDTH = 120
-    PIXEL_HEIGHT = 150
+    PIXEL_HEIGHT = 162
     #: Full-body character (default): small on screen, but with real legs and
     #: arms that the motion engine can move.
     BODY_WIDTH = 132
@@ -870,6 +876,9 @@ class NoraPet(QWidget):
             elif self.state is PetState.DANCE:
                 self._sprite_artist.set_locomotion(None)
                 self._sprite_artist.set_mood("dance")
+            elif self.state is PetState.GIGGLE:
+                self._sprite_artist.set_locomotion(None)
+                self._sprite_artist.set_mood("laugh")
             else:
                 self._sprite_artist.set_locomotion(None)
                 self._sprite_artist.set_mood(style_emotion)
@@ -890,6 +899,8 @@ class NoraPet(QWidget):
         """
         if self.character_style == "sprite":
             return self._perform_sprite_move(move, fallback=fallback)
+        if self.character_style == "pixel":
+            return self._perform_pixel_move(move, fallback=fallback)
         if self.character_style != "body":
             return False
         normalized = normalize_move(move)
@@ -898,6 +909,88 @@ class NoraPet(QWidget):
         if normalized is None:
             return False
         return self._motion.play(normalized)
+
+    def tickle(self) -> bool:
+        """React to a single click: squirm, laugh and show a ticklish bubble.
+
+        This is the "gıdıkla" interaction.  It is deliberately *not* the chat
+        opener any more — a single click plays with her, a double click opens
+        the personal panel.
+        """
+        if getattr(self, "character_style", "") not in {"pixel", "sprite", "body"}:
+            return False
+        air = getattr(self, "_air", None)
+        if air is not None and air.busy:
+            # she is in the air; a tickle mid-fall would look broken
+            return False
+        self._tickles = getattr(self, "_tickles", 0) + 1
+        self.set_emotion("happy")
+        self._set_state(PetState.GIGGLE, 26)
+        self.show_speech(
+            self.rng.choice(
+                (
+                    "Hihi! Yapma canımı acıtıyorsun~",
+                    "A-ah! Gıdıklıyorsun beni! 😆",
+                    "Dur, dur! Kahkahadan öleceğim!",
+                    "Hihihi! Bu haksızlık!",
+                )
+            ),
+            2600,
+        )
+        return True
+
+    #: Gesture -> the 8-bit state that reads as that gesture.
+    PIXEL_GESTURES: dict[str, PetState] = {
+        "wave": PetState.WAVE,
+        "jump": PetState.JUMP,
+        "dance": PetState.DANCE,
+        "talk": PetState.TALK,
+        "listen": PetState.LISTENING,
+        "think": PetState.IDLE,
+        "laugh": PetState.GIGGLE,
+        "smile_only": PetState.LOVE,
+        "surprised": PetState.SURPRISED,
+        "shy": PetState.LOVE,
+        "angry": PetState.ANGRY,
+        "sad": PetState.SAD,
+        "sleep": PetState.SLEEP,
+        "sit": PetState.SIT,
+        "walk_left": PetState.WALK_LEFT,
+        "walk_right": PetState.WALK_RIGHT,
+        "shrug": PetState.IDLE,
+        "stretch": PetState.JUMP,
+        "nod": PetState.WAVE,
+        "shake_head": PetState.SURPRISED,
+        "cheer": PetState.CHEER,
+        "point": PetState.WAVE,
+        "clap": PetState.CHEER,
+        "bow": PetState.SIT,
+        "tilt_head": PetState.LOVE,
+        "idle": PetState.IDLE,
+        "breathe": PetState.IDLE,
+    }
+
+    def _perform_pixel_move(self, move: Any, *, fallback: bool) -> bool:
+        """Play an AI-chosen gesture with the 8-bit animation states."""
+        normalized = normalize_move(move)
+        if normalized is None and fallback:
+            normalized = fallback_move(self.emotion, self.rng)
+        if normalized is None:
+            return False
+        steps = normalized.get("steps") or []
+        if not steps:
+            return False
+        played = False
+        for step in steps[:3]:
+            gesture = str(step.get("gesture", "")).strip().lower()
+            state = self.PIXEL_GESTURES.get(gesture)
+            if state is None:
+                continue
+            # 30 fps: a 1.6 s gesture is ~48 frames.
+            duration = float(step.get("duration", 1.6) or 1.6)
+            self._set_state(state, max(12, int(duration * 30)))
+            played = True
+        return played
 
     def _perform_sprite_move(self, move: Any, *, fallback: bool) -> bool:
         """Show an AI-chosen gesture with the illustrated sheets.

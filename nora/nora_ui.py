@@ -47,7 +47,7 @@ from .nora_files import NoraFiles
 from .nora_avatar import DEFAULT_HAIR
 from .nora_sprite import SpriteCharacter
 from .nora_glass import (
-    AvatarDot,
+    PetLogoButton,
     FrostedPanel,
     GlassBubble,
     TypingIndicator,
@@ -374,7 +374,8 @@ class NoraApp(QWidget):
         self.wake_action.setChecked(bool(wake))
         self.proactive_action.setChecked(proactive_enabled)
         self._apply_mode_appearance()
-        if wake:
+        # Microphone is off by design: no wake-word listener, no push-to-talk.
+        if wake and self.MICROPHONE_ENABLED:
             self.voice.start_wake_word_listener()
         if proactive_enabled:
             self.proactive.start()
@@ -459,10 +460,12 @@ class NoraApp(QWidget):
         header_outer.setContentsMargins(2, 0, 0, 0)
         header_outer.setSpacing(9)
 
-        self.chat_avatar = AvatarDot()
-        self.chat_avatar.setFixedSize(38, 38)
-        self.chat_avatar.set_appearance(self.store.preferences)
-        header_outer.addWidget(self.chat_avatar)
+        # The 8-bit logo is the only avatar in the header: it *is* Nora, and
+        # pressing it lets her step out of the app, so "she comes from the
+        # logo" is literally on screen instead of a second decorative badge.
+        self.logo_button = PetLogoButton(size=46)
+        self.logo_button.clicked.connect(self.toggle_pet)
+        header_outer.addWidget(self.logo_button)
 
         titles = QVBoxLayout()
         titles.setContentsMargins(0, 0, 0, 0)
@@ -486,7 +489,12 @@ class NoraApp(QWidget):
         header_outer.addWidget(self.speaker_indicator)
 
         for text, tip, slot, attr in (
-            ("🎤", "Sesli komut ver", lambda: self._start_listening(), "mic_button"),
+            (
+                "🎤",
+                "Mikrofon kapalı — yazarak konuş",
+                lambda: self._microphone_blocked(),
+                "mic_button",
+            ),
             ("⚙", "Ayarlar", self._show_settings, "settings_button"),
             ("⋯", "Ekran, kamera ve sistem araçları", None, "more_button"),
             ("─", "Sohbeti küçült", self.chat_window.hide, "minimize_button"),
@@ -1049,7 +1057,8 @@ class NoraApp(QWidget):
                   QMenu::separator { height: 1px; background: #6a3d7e; margin: 4px 8px; }"""
 
     def _connect_signals(self) -> None:
-        self.pet.clicked.connect(self.toggle_chat)
+        # Single click = tickle (she giggles); double click = personal panel.
+        self.pet.clicked.connect(self._on_pet_tickle)
         self.pet.double_clicked.connect(self._on_double_click)
         self.pet.right_clicked.connect(self._pet_menu)
         self.pet.position_changed.connect(self._on_pet_moved)
@@ -1078,9 +1087,63 @@ class NoraApp(QWidget):
         if app:
             app.aboutToQuit.connect(self.shutdown)
 
+    #: The microphone is intentionally disabled.  The user talks to Nora by
+    #: typing; Nora answers out loud.  Turning this on would need a microphone
+    #: permission prompt that the product deliberately does not ask for.
+    MICROPHONE_ENABLED = False
+
+    def _microphone_blocked(self) -> bool:
+        if self.MICROPHONE_ENABLED:
+            return False
+        self.status_label.setText(
+            "Mikrofon kapalı — Nora'yı yazarak konuş, o sesli cevap verir."
+        )
+        self.add_message(
+            "Mikrofon bu sürümde kapalı. Sen yazarak konuşuyorsun, ben sesli "
+            "cevap veriyorum. 🐾",
+            "system",
+        )
+        return True
+
     def start(self) -> None:
+        """Open like a normal desktop app: the chat window first.
+
+        Nora is *inside* the app until the user clicks the little 8-bit logo in
+        the corner; only then does she step out onto the desktop.  That is the
+        behaviour the reference app has, and it keeps the desktop tidy on
+        launch.
+        """
+        self.show_chat()
+        # The pet is created but stays hidden until ``release_pet`` runs.
+        self._pet_released = False
+
+    def release_pet(self) -> None:
+        """Let the character climb out of the logo and onto the desktop."""
+        if getattr(self, "_pet_released", False):
+            return
+        self._pet_released = True
         self.pet.show()
         self.pet.raise_()
+        self.pet.show_speech("Dışarı çıktım! 🐾", 2200)
+        if self.logo_button is not None:
+            self.logo_button.setToolTip("Nora masada — yine basarsa içeri girer")
+            self.logo_button.set_released(True)
+
+    def tuck_pet(self) -> None:
+        """Send her back into the logo (the pet window hides, app stays)."""
+        if not getattr(self, "_pet_released", False):
+            return
+        self._pet_released = False
+        self.pet.hide()
+        if self.logo_button is not None:
+            self.logo_button.setToolTip("Nora'yı masaüstüne indir")
+            self.logo_button.set_released(False)
+
+    def toggle_pet(self) -> None:
+        if getattr(self, "_pet_released", False):
+            self.tuck_pet()
+        else:
+            self.release_pet()
 
     # ------------------------------------------------------------------- helpers
     def _next_request(self) -> int:
@@ -1463,7 +1526,10 @@ class NoraApp(QWidget):
         if self._closing:
             return
         self.proactive.user_interacted()
-        self.pet.show()
+        # Opening the chat must *not* release the character: she only leaves
+        # the logo when the user asks for it, so the desktop stays tidy.
+        if getattr(self, "_pet_released", False):
+            self.pet.show()
         self._chat_user_moved = False
         self._position_chat()
         self.chat_window.show()
@@ -1608,7 +1674,7 @@ class NoraApp(QWidget):
             self.store.set_preference("wake_word", bool(enabled))
         except ValueError as exc:
             self.status_label.setText(str(exc)[:70])
-        if enabled:
+        if enabled and self.MICROPHONE_ENABLED:
             self.voice.start_wake_word_listener()
         else:
             self.voice.stop_wake_word_listener()
@@ -3310,14 +3376,99 @@ class NoraApp(QWidget):
             result = str(exc)
         self._report(result)
 
+    def _on_pet_tickle(self) -> None:
+        """A single click plays with her — she squirms and giggles."""
+        if self._closing:
+            return
+        self.proactive.user_interacted()
+        self.pet.tickle()
+
     def _on_double_click(self) -> None:
+        """A double click opens her personal panel (mood, memories, style)."""
+        if self._closing:
+            return
         action = self.store.preference("double_click_action")
         if action == "game":
             self._execute_command({"command": "game", "action": "start"})
-        elif action == "pet" and self.store.preference("pet_reactions"):
-            self._report(self.pet.perform_action("pet"))
-        else:
-            self.show_chat()
+            return
+        self.show_personal_panel()
+
+    def show_personal_panel(self) -> None:
+        """Open the glass panel with her moods, memories and preferences."""
+        from .nora_personal import PersonalPanel
+
+        if getattr(self, "personal_panel", None) is None:
+            self.personal_panel = PersonalPanel(None)
+            self.personal_panel.mood_chosen.connect(self._on_mood_chosen)
+            self.personal_panel.preference_changed.connect(self._on_personal_preference)
+            self.personal_panel.memory_deleted.connect(self._on_memory_deleted)
+        panel = self.personal_panel
+        panel.show_for(self.pet.emotion, self.store.preferences)
+        panel.set_memories(self._memory_rows())
+        self._position_personal_panel(panel)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _position_personal_panel(self, panel) -> None:
+        """Sit the panel next to the character, or centre it if she is hidden."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        if getattr(self, "_pet_released", False):
+            x = self.pet.x() + self.pet.width() + 12
+            if x + panel.width() > area.right():
+                x = self.pet.x() - panel.width() - 12
+            y = self.pet.y() + self.pet.height() - panel.height()
+            panel.move(
+                max(area.left() + 8, x),
+                max(area.top() + 8, min(y, area.bottom() - panel.height() - 8)),
+            )
+            return
+        panel.move(
+            area.center().x() - panel.width() // 2,
+            area.center().y() - panel.height() // 2,
+        )
+
+    def _on_mood_chosen(self, mood: str) -> None:
+        """The user pinned a mood from the panel."""
+        self.pet.set_emotion(mood)
+        self.add_message(
+            f"Ruh hâlimi «{mood}» olarak ayarladın. Böyle kalacağım! 💜", "bot"
+        )
+        self.store.add_audit("mood", {"source": "panel", "mood": mood})
+
+    def _on_personal_preference(self, key: str, value) -> None:
+        try:
+            self.store.set_preference(key, value)
+        except ValueError:
+            self.add_message(f"«{value}» bu ayar için geçerli değil.", "system")
+            return
+        self._report(f"Kaydedildi: {key} → {value}")
+
+    def _on_memory_deleted(self, key: str) -> None:
+        self._memory_command({"command": "memory", "action": "forget", "key": key})
+        if getattr(self, "personal_panel", None) is not None:
+            self.personal_panel.set_memories(self._memory_rows())
+
+    def _memory_rows(self) -> list[tuple[str, str, str]]:
+        """Read the stored memories for the panel, newest first."""
+        try:
+            items = self.store.memories() if hasattr(self.store, "memories") else []
+        except Exception:
+            items = []
+        rows: list[tuple[str, str, str]] = []
+        for index, item in enumerate(items):
+            if isinstance(item, dict):
+                text = str(item.get("text") or item.get("value") or "")
+                when = str(item.get("created") or item.get("when") or "")
+                key = str(item.get("key") or index)
+            else:
+                text, when, key = str(item), "", str(index)
+            if text:
+                rows.append((key, text, when))
+        return rows
 
     def _forget_all_memories(self) -> None:
         self._memory_command({"command": "memory", "action": "clear"})
@@ -3436,6 +3587,8 @@ class NoraApp(QWidget):
     # --------------------------------------------------------------------- voice
     def _start_listening(self, *, recognition_test: bool = False) -> None:
         if self._closing or self._busy or self._listening:
+            return
+        if self._microphone_blocked():
             return
         self.show_chat()
         self.proactive.user_interacted()
@@ -3823,6 +3976,14 @@ class NoraApp(QWidget):
         self._pending_commands.clear()
         if self.settings_dialog is not None:
             self.settings_dialog.close()
+        # The personal panel is a separate top-level window: leaving it open
+        # would outlive the app (and keep painting her portrait after the
+        # character itself is gone).
+        panel = getattr(self, "personal_panel", None)
+        if panel is not None:
+            panel.hide()
+            panel.deleteLater()
+            self.personal_panel = None
         self.proactive.stop()
         self.clipboard_history.stop()
         self.clipboard_history.clear()

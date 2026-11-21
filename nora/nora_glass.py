@@ -26,6 +26,7 @@ from typing import Any
 
 from PyQt5.QtCore import (
     QEasingCurve,
+    pyqtSignal,
     QPoint,
     QPointF,
     QPropertyAnimation,
@@ -660,3 +661,122 @@ def _shadow_effect(widget: QWidget) -> QGraphicsDropShadowEffect | None:
 
 def glass_style() -> str:
     return STYLE
+
+
+class PetLogoButton(QWidget):
+    """The 8-bit Nora logo that lives in the chat header.
+
+    Clicking it lets the character step out of the app and onto the desktop;
+    clicking again tucks her back in.  The badge draws the same pixel art as the
+    desktop pet, so the "she comes from the logo" idea reads on screen.
+    """
+
+    clicked = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None, size: int = 46) -> None:
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Nora'yı masaüstüne indir")
+        self._released = False
+        self._hover = False
+        self._pulse = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(120)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    # ------------------------------------------------------------- behaviour
+    def set_released(self, released: bool) -> None:
+        self._released = bool(released)
+        self.update()
+
+    @property
+    def released(self) -> bool:
+        return self._released
+
+    def _tick(self) -> None:
+        self._pulse = (self._pulse + 0.12) % 1.0
+        self.update()
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    # --------------------------------------------------------------- drawing
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        from .nora_pixel_art import PixelCharacter
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+
+        # glass disc, warmer while hovered or when she is outside
+        fill = QColor(255, 255, 255, 34 if not self._hover else 52)
+        if self._released:
+            fill = QColor(242, 167, 208, 90)
+        painter.setBrush(fill)
+        border = QColor(255, 255, 255, 90 if self._hover else 56)
+        if self._released:
+            border = QColor(255, 205, 232, 190)
+        painter.setPen(QPen(border, 1.4))
+        painter.drawEllipse(rect)
+
+        # a slow halo when she is out on the desktop
+        if self._released:
+            glow = QColor(255, 190, 225, int(60 * (1.0 - self._pulse)))
+            painter.setPen(QPen(glow, 2.0))
+            grow = 3.0 * self._pulse
+            painter.drawEllipse(rect.adjusted(-grow, -grow, grow, grow))
+
+        # the 8-bit head, clipped to the disc
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.save()
+        path = QPainterPath()
+        path.addEllipse(rect)
+        painter.setClipPath(path)
+        # Centre the *face* (logical x 11..29, y 2..21) inside the disc.
+        scale = 2 if self.width() >= 40 else 1
+        painter.translate(
+            rect.width() / 2.0 - 20 * scale,
+            -6 * scale,
+        )
+        PixelCharacter().draw_scaled(
+            painter,
+            scale=scale,
+            state="idle",
+            emotion="happy",
+            frame=0,
+            appearance={"outfit": "cream"},
+            animations=False,
+        )
+        painter.restore()
+
+        # small "in/out" arrow hint in the corner
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(255, 255, 255, 170), 1.2))
+        tip_x = rect.right() - 7.0
+        tip_y = rect.bottom() - 7.0
+        direction = -1.0 if self._released else 1.0
+        painter.drawLine(
+            QPointF(tip_x - 4.0, tip_y - 3.0 * direction),
+            QPointF(tip_x, tip_y + 1.0 * direction),
+        )
+        painter.drawLine(
+            QPointF(tip_x - 4.0, tip_y + 1.0 * direction),
+            QPointF(tip_x, tip_y + 1.0 * direction),
+        )
+        painter.end()

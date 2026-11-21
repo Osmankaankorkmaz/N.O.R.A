@@ -385,11 +385,13 @@ def pet(tmp_path: Path, app, monkeypatch):
     widget.close()
 
 
-def test_default_style_is_the_illustrated_character(pet) -> None:
-    assert pet.character_style in {"sprite", "body"}
+def test_default_style_is_the_8_bit_character(pet) -> None:
+    # The pixel girl is the default look; the illustrated sheets stay available.
+    assert pet.character_style in {"pixel", "sprite", "body"}
 
 
 def test_sprite_style_uses_the_illustrated_window_size(pet) -> None:
+    pet._apply_character_style("sprite")
     if pet._sprite_assets.usable:
         assert (pet.WIDTH, pet.HEIGHT) == (pet.SPRITE_WIDTH, pet.SPRITE_HEIGHT)
 
@@ -409,6 +411,7 @@ def test_missing_art_falls_back_to_the_drawn_body(app, monkeypatch, tmp_path) ->
 
 
 def test_emotion_lands_on_the_right_sprite(pet) -> None:
+    pet._apply_character_style("sprite")
     if not pet._sprite_assets.usable:
         pytest.skip("artwork not present")
     for emotion, expected in (
@@ -424,6 +427,7 @@ def test_emotion_lands_on_the_right_sprite(pet) -> None:
 
 
 def test_walking_uses_the_walk_cycle(pet) -> None:
+    pet._apply_character_style("sprite")
     if not pet._sprite_assets.usable:
         pytest.skip("artwork not present")
     from nora.nora_pet import PetState
@@ -434,6 +438,7 @@ def test_walking_uses_the_walk_cycle(pet) -> None:
 
 
 def test_grab_sets_the_pickup_sprite(pet) -> None:
+    pet._apply_character_style("sprite")
     if not pet._sprite_assets.usable:
         pytest.skip("artwork not present")
     from PyQt5.QtCore import QPoint
@@ -447,12 +452,14 @@ def test_grab_sets_the_pickup_sprite(pet) -> None:
         Qt.LeftButton,
         Qt.NoModifier,
     )
+    pet._apply_character_style("sprite")
     pet.mousePressEvent(event)
     pet._tick_sprite()
     assert pet._sprite_artist.active_sprite() == AIR_FRAMES["picked_up"]
 
 
 def test_airborne_sprites_own_the_frame_while_held(pet) -> None:
+    pet._apply_character_style("sprite")
     if not pet._sprite_assets.usable:
         pytest.skip("artwork not present")
     pet._air.grab()
@@ -461,6 +468,7 @@ def test_airborne_sprites_own_the_frame_while_held(pet) -> None:
 
 
 def test_reset_air_returns_to_the_mood_sprite(pet) -> None:
+    pet._apply_character_style("sprite")
     if not pet._sprite_assets.usable:
         pytest.skip("artwork not present")
     pet._air.grab()
