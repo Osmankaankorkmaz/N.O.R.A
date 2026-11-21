@@ -30,7 +30,9 @@ from .nora_avatar import (
 )
 from .nora_body import FullBodyCharacter
 from .nora_motion import MotionController, fallback_move, normalize_move
+from .nora_physics import AirStages
 from .nora_pixel_art import DEFAULT_HAIR_COLOR, PixelCharacter
+from .nora_sprite import SpriteAssets, SpriteCharacter
 
 
 class PetState(Enum):
@@ -63,12 +65,14 @@ def _character_style(settings: Mapping[str, Any] | None = None) -> str:
     )
     for value in candidates:
         text = str(value or "").strip().lower()
-        if text in {"body", "realistic", "pixel"}:
+        if text in {"sprite", "body", "realistic", "pixel"}:
             return text
-    return "body"
+    return "sprite"
 
 
 def _tooltip_for(style: str) -> str:
+    if style == "sprite":
+        return "Nora 💕 · çizim · Sol tık: sohbet · Sağ tık: menü · Sürükle: kaldır & bırak"
     if style == "pixel":
         return "Nora 💕 · 8-bit mod · Sol tık: sohbet · Sağ tık: menü · Sürükle: taşı"
     if style == "realistic":
@@ -145,6 +149,10 @@ class NoraPet(QWidget):
     #: arms that the motion engine can move.
     BODY_WIDTH = 132
     BODY_HEIGHT = 312
+    # The illustrated sheets are portrait shaped; the window is sized to give
+    # the figure roughly the same on-screen height as the drawn body.
+    SPRITE_WIDTH = 168
+    SPRITE_HEIGHT = 330
     WIDTH = BODY_WIDTH
     HEIGHT = BODY_HEIGHT
     GRAVITY = 0.4
@@ -161,6 +169,11 @@ class NoraPet(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
         self.character_style = _character_style()
+        # The sprite library must exist before the style is applied: the style
+        # switch checks whether the illustrated sheets are actually present.
+        self._sprite_assets = SpriteAssets()
+        self._sprite_artist = SpriteCharacter(self._sprite_assets.library)
+        self._air = AirStages()
         self._apply_character_style(self.character_style, update=False)
         self.setFixedSize(self.WIDTH, self.HEIGHT)
         self.setWindowTitle("Nora")
@@ -355,6 +368,8 @@ class NoraPet(QWidget):
                 self._blink_left = 6
                 self._next_blink = self.rng.randint(100, 200)
         self._tick_body()
+        if self.character_style == "sprite":
+            self._tick_sprite()
         self._floor_y = self._current_floor()
 
         if self.state != PetState.DRAG:
@@ -377,6 +392,8 @@ class NoraPet(QWidget):
                     self._grounded = True
                     if self.state in (PetState.JUMP, PetState.FALL):
                         if self.state == PetState.FALL:
+                            if self.character_style == "sprite":
+                                self._air.landed(speed=abs(self._vy))
                             self._set_state(PetState.LAND, 18)
                         elif self._listening:
                             self._set_state(PetState.LISTENING, 100000)
@@ -607,7 +624,7 @@ class NoraPet(QWidget):
                 self._appearance[key] = str(settings[key])
         if "character_style" in settings:
             requested = str(settings["character_style"])
-            if requested in {"body", "realistic", "pixel"}:
+            if requested in {"sprite", "body", "realistic", "pixel"}:
                 self._apply_character_style(requested)
         if "animations" in settings:
             self._animations = bool(settings["animations"])
@@ -695,6 +712,8 @@ class NoraPet(QWidget):
             self._press_pos = event.globalPos()
             self._drag_offset = event.globalPos() - self.pos()
             self._dragging = False
+            if self.character_style == "sprite":
+                self._air.grab()
             event.accept()
         elif event.button() == Qt.RightButton:
             self.right_clicked.emit(event.globalPos())
@@ -721,7 +740,12 @@ class NoraPet(QWidget):
             if self._dragging:
                 self._dragging = False
                 self._grounded = False
+                origin_y = self._y
                 self._vy = 0.0
+                if self.character_style == "sprite":
+                    # Height above the floor decides how hard the landing looks.
+                    drop = max(0.0, self._floor_y - origin_y)
+                    self._air.release(speed=drop)
                 self._set_state(PetState.FALL)
             else:
                 self._click_timer.start()
@@ -772,6 +796,9 @@ class NoraPet(QWidget):
             return
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        if self.character_style == "sprite":
+            self._sprite_artist.paint(painter, QRectF(0, 0, self.WIDTH, self.HEIGHT))
+            return
         if self.character_style == "body":
             pose = self._last_pose
             if pose is None:
@@ -823,6 +850,36 @@ class NoraPet(QWidget):
             self._motion.stop_sustained()
         self._last_pose = self._motion.tick(dt)
 
+    def _tick_sprite(self) -> None:
+        """Advance the illustrated character: mood sprite + walk cycle + air."""
+        dt = self.FPS_INTERVAL / 1000.0
+        self._air.tick(dt)
+        if self._air.busy:
+            # Airborne sprites own the frame; the walk cycle pauses underneath.
+            self._sprite_artist.set_locomotion(None)
+            self._sprite_artist.set_airborne(self._air.stage())
+        else:
+            self._sprite_artist.set_airborne(None)
+            style_emotion = self.emotion
+            if self.state in (PetState.WALK_LEFT, PetState.WALK_RIGHT):
+                self._sprite_artist.set_locomotion(
+                    "walk", mirrored=self.state == PetState.WALK_LEFT
+                )
+            elif self.state in (PetState.DRAG, PetState.FALL):
+                self._sprite_artist.set_locomotion(None)
+            elif self.state is PetState.DANCE:
+                self._sprite_artist.set_locomotion(None)
+                self._sprite_artist.set_mood("dance")
+            else:
+                self._sprite_artist.set_locomotion(None)
+                self._sprite_artist.set_mood(style_emotion)
+        self._sprite_artist.tick(dt)
+
+    def _reset_air(self) -> None:
+        """Return to the standing sprite set (also used when the style changes)."""
+        self._air.reset()
+        self._sprite_artist.set_airborne(None)
+
     def perform_move(self, move: Any, *, fallback: bool = True) -> bool:
         """Run an AI-chosen move (already parsed JSON) on the body.
 
@@ -831,6 +888,8 @@ class NoraPet(QWidget):
         payload is unusable and ``fallback`` is set, body language matching the
         current emotion is chosen at random instead — she never freezes.
         """
+        if self.character_style == "sprite":
+            return self._perform_sprite_move(move, fallback=fallback)
         if self.character_style != "body":
             return False
         normalized = normalize_move(move)
@@ -840,6 +899,28 @@ class NoraPet(QWidget):
             return False
         return self._motion.play(normalized)
 
+    def _perform_sprite_move(self, move: Any, *, fallback: bool) -> bool:
+        """Show an AI-chosen gesture with the illustrated sheets.
+
+        Validation is shared with the drawn body (same ``normalize_move``), so a
+        model cannot invent a gesture or an absurd duration in either style.
+        """
+        normalized = normalize_move(move)
+        if normalized is None and fallback:
+            normalized = fallback_move(self.emotion, self.rng)
+        if normalized is None:
+            return False
+        steps = normalized.get("steps") or []
+        if not steps:
+            return False
+        played = False
+        for step in steps[:3]:
+            gesture = str(step.get("gesture", ""))
+            duration = float(step.get("duration", 1.6) or 1.6)
+            if self._sprite_artist.express(gesture, duration):
+                played = True
+        return played
+
     def current_pose(self):
         """Latest pose, for tests and for the chat panel's small avatar."""
         return self._last_pose
@@ -847,13 +928,18 @@ class NoraPet(QWidget):
     # ------------------------------------------------------------ character
     def _apply_character_style(self, style: str, *, update: bool = True) -> None:
         """Switch renderers and resize the window without teleporting the pet."""
-        style = style if style in {"body", "realistic", "pixel"} else "body"
+        style = style if style in {"sprite", "body", "realistic", "pixel"} else "sprite"
+        if style == "sprite" and not self._sprite_assets.usable:
+            # Honest fallback: no illustrated sheets on disk -> drawn body.
+            style = "body"
         self.character_style = style
         old_width, old_height = self.WIDTH, self.HEIGHT
         if style == "pixel":
             self.WIDTH, self.HEIGHT = self.PIXEL_WIDTH, self.PIXEL_HEIGHT
         elif style == "realistic":
             self.WIDTH, self.HEIGHT = AVATAR_WIDTH, AVATAR_HEIGHT
+        elif style == "sprite":
+            self.WIDTH, self.HEIGHT = self.SPRITE_WIDTH, self.SPRITE_HEIGHT
         else:
             self.WIDTH, self.HEIGHT = self.BODY_WIDTH, self.BODY_HEIGHT
         if not update:

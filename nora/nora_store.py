@@ -63,7 +63,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "outfit": "cream",
     "hair_color": "#7d5a44",
     "eye_color": "yesil",
-    "character_style": "body",
+    "character_style": "sprite",
     "appearance_version": 3,
     "accessory": "none",
     "animations": True,
@@ -75,7 +75,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 }
 _MODES = {"normal", "focus", "game", "quiet"}
 _OUTFITS = {"classic", "casual", "night"}
-_CHARACTER_STYLES = {"body", "realistic", "pixel"}
+_CHARACTER_STYLES = {"sprite", "body", "realistic", "pixel"}
 _EYE_COLORS = {"yesil", "hazel", "kahve", "mavi", "gri"}
 _ACCESSORIES = {"none", "headphones", "glasses", "ribbon"}
 
