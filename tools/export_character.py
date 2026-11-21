@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Export Nora's QPainter characters as PNG poses, sheets and animated GIFs.
 
-Two renderers are exported from the exact same code paths the app uses:
+Three renderers are exported from the exact same code paths the app uses:
 
-* ``realistic/``: the default semi-realistic VTuber portrait (kumral hair,
+* ``body/``: the default full-body character (arms, legs, shoes) with one
+  frame per AI-selectable gesture
+* ``realistic/``: the semi-realistic VTuber portrait (kumral hair,
   green-leaning eyes, smooth shading)
 * the top-level ``poses/`` … ``animations/`` folders: the legacy 8-bit chibi,
   kept so both styles stay documented and regression-tested
@@ -12,14 +14,15 @@ No external sprite is used by the application.
 
 Usage:
     python tools/export_character.py --output docs/character
-    python tools/export_character.py --style realistic     # only the new avatar
+    python tools/export_character.py --style body          # only the full body
+    python tools/export_character.py --style realistic     # only the portrait
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 # Allow running as a plain script from a fresh checkout.
@@ -28,6 +31,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
+from PyQt5.QtCore import Qt  # noqa: E402
 from PyQt5.QtGui import QImage, QPainter  # noqa: E402
 from PyQt5.QtWidgets import QApplication  # noqa: E402
 
@@ -475,6 +479,107 @@ def export_all(
     }
 
 
+def export_full_body(output: Path) -> dict[str, int]:
+    """Render the full-body character: pose sheet + one frame per AI gesture."""
+    from nora.nora_body import FullBodyCharacter
+    from nora.nora_motion import GESTURES, MotionController
+
+    import random
+
+    ensure_app()
+    target = output / "body"
+    (target / "poses").mkdir(parents=True, exist_ok=True)
+    (target / "moves").mkdir(parents=True, exist_ok=True)
+    artist = FullBodyCharacter()
+    counts = {"poses": 0, "moves": 0}
+
+    # A) neutral poses across the emotions the model can emit
+    for emotion in (
+        "happy",
+        "love",
+        "thinking",
+        "surprised",
+        "angry",
+        "sad",
+        "sleepy",
+        "smug",
+    ):
+        pose = MotionController(random.Random(0)).tick(0.0)
+        pose = replace(pose, smile=_EMOTION_SMILE[emotion])
+        artist.frame(pose).scaled(
+            330, 780, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ).save(str(target / "poses" / f"{emotion}.png"))
+        counts["poses"] += 1
+
+    # B) every AI-selectable gesture at its most expressive frame
+    for name in GESTURES:
+        controller = MotionController(random.Random(7))
+        controller.play_name(name)
+        best = None
+        best_score = -1.0
+        for _ in range(70):
+            pose = controller.tick(1 / 30)
+            score = (
+                abs(pose.arm_l)
+                + abs(pose.arm_r)
+                + abs(pose.bounce)
+                + abs(pose.hip_shift)
+                + abs(pose.head_tilt)
+                + abs(pose.crouch)
+            )
+            if score > best_score:
+                best_score, best = score, pose
+        artist.frame(best).scaled(
+            330, 780, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ).save(str(target / "moves" / f"{name}.png"))
+        counts["moves"] += 1
+
+    # C) hero shot + preview sheet
+    artist.frame(MotionController(random.Random(3)).tick(0.0)).save(
+        str(target / "hero.png")
+    )
+    _body_index_html(target)
+    return counts
+
+
+_EMOTION_SMILE = {
+    "happy": 0.85,
+    "love": 0.95,
+    "thinking": 0.2,
+    "surprised": 0.1,
+    "angry": -0.5,
+    "sad": -0.65,
+    "sleepy": 0.3,
+    "smug": 0.7,
+}
+
+
+def _body_index_html(target: Path) -> None:
+    moves = sorted(path.stem for path in (target / "moves").glob("*.png"))
+    cards = "".join(
+        f'<figure><img src="moves/{name}.png" alt="{name}"><figcaption>{name}</figcaption></figure>'
+        for name in moves
+    )
+    html = f"""<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><title>Nora tam vücut karakter</title>
+<style>
+body{{background:#191622;color:#f2ecf7;font-family:system-ui,sans-serif;margin:24px}}
+h1{{color:#f2a7d0;font-weight:600}}section{{display:flex;flex-wrap:wrap;gap:14px}}
+figure{{margin:0;background:linear-gradient(160deg,#2b2438,#1d1826);border:1px solid rgba(255,255,255,.09);
+border-radius:14px;padding:8px;text-align:center}}
+img{{width:200px;height:auto}}
+figcaption{{margin-top:6px;font-size:12px;color:#c4b2cf}}
+p{{max-width:74ch;color:#c4b2cf;line-height:1.6}}
+</style></head><body>
+<h1>Nora · tam vücut karakter</h1>
+<p>Kollar, eller, bacaklar ve ayakkabılar dahil; her jest hareket motoru tarafından
+o anda üretilir. Bu görseller yapay zekânın seçebileceği {len(moves)} hareketin en
+belirgin karesidir. Uygulamada hareketler 30 fps akıcılığında ara karelerle oynar.</p>
+<section>{cards}</section>
+</body></html>"""
+    (target / "index.html").write_text(html, encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Nora PNG/GIF dışa aktarımı")
     parser.add_argument("--output", type=Path, default=ROOT / "docs" / "character")
@@ -482,12 +587,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gif-scale", type=int, default=2)
     parser.add_argument(
         "--style",
-        choices=("all", "realistic", "pixel"),
+        choices=("all", "body", "realistic", "pixel"),
         default="all",
-        help="Hangi karakter stili dışa aktarılsın (varsayılan: ikisi).",
+        help="Hangi karakter stili dışa aktarılsın (varsayılan: hepsi).",
     )
     args = parser.parse_args(argv)
     app = ensure_app()  # keep the QApplication alive while painting
+    if args.style in {"all", "body"}:
+        counts = export_full_body(args.output)
+        print(f"Nora tam vücut görselleri: {args.output / 'body'}")
+        for key, value in counts.items():
+            print(f"  {key}: {value}")
     if args.style in {"all", "realistic"}:
         counts = export_realistic(args.output)
         print(f"Nora gerçekçi avatar görselleri: {args.output / 'realistic'}")

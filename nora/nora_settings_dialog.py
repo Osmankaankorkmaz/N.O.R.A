@@ -61,13 +61,16 @@ class NoraSettingsDialog(QDialog):
             "character_style",
             "Karakter stili",
             (
-                ("realistic", "Gerçekçi VTuber (önerilen)"),
+                ("body", "Tam vücut · kollar, bacaklar, ayakkabılar (önerilen)"),
+                ("realistic", "Portre · yarım boy, sadece üst gövde"),
                 ("pixel", "8-bit piksel chibi (eski)"),
             ),
             prefs,
         )
         self.fields["character_style"].setToolTip(
-            "Gerçekçi stil: yumuşak gölgeli yarım boy portre (260×360). Piksel stil eski 8-bit chibi'yi korur."
+            "Tam vücut (132×312): kollar, eller, bacaklar ve ayakkabılar; "
+            "hareketler yapay zeka tarafından anlık seçilir. "
+            "Portre ve 8-bit stilleri de korunur."
         )
         self._combo(
             form,

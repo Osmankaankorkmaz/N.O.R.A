@@ -25,7 +25,7 @@ def process_until(qapp, predicate, timeout=3.0):
 def test_pet_size_states_and_render(qapp):
     pet = NoraPet()
     pet._timer.stop()
-    assert pet.width() == 260 and pet.height() == 360
+    assert pet.width() == 132 and pet.height() == 312
     assert pet.testAttribute(Qt.WA_TranslucentBackground)
     pet.set_emotion("love")
     assert pet.emotion == "love" and pet.state == PetState.LOVE
@@ -38,11 +38,11 @@ def test_pet_size_states_and_render(qapp):
     assert pet._bubble is not None
     assert len(pet._bubble._text) == 63
     image = pet.grab().toImage()
-    assert not image.isNull() and image.width() == 260
+    assert not image.isNull() and image.width() == 132
     assert any(
         image.pixelColor(x, y).alpha() > 0
-        for x in range(0, 260, 5)
-        for y in range(0, 360, 5)
+        for x in range(0, 132, 4)
+        for y in range(0, 312, 4)
     )
     pet.shutdown()
 
@@ -66,7 +66,9 @@ def test_chat_bubble_plain_text_and_alignment(qapp):
     bubble = ChatBubble("<b>html değil</b>", "user")
     label = bubble.findChild(QLabel)
     assert label.textFormat() == Qt.PlainText
-    assert label.maximumWidth() == 280
+    from nora.nora_glass import BUBBLE_LABEL_MAX
+
+    assert label.maximumWidth() == BUBBLE_LABEL_MAX
 
 
 def test_app_offline_chat_and_command_flow(qapp, monkeypatch):

@@ -91,13 +91,11 @@ def test_every_pose_and_animation_is_exported_and_animated(qapp, tmp_path):
         assert gif.n_frames >= 2
 
 
-def test_default_realistic_avatar_is_kumral_with_green_eyes(qapp):
-    from nora.nora_avatar import RealisticCharacter
-
+def test_default_full_body_character_is_kumral_with_green_eyes(qapp):
     pet = NoraPet()
     pet._timer.stop()
-    assert pet.character_style == "realistic"
-    assert pet.width() == 260 and pet.height() == 360
+    assert pet.character_style == "body"
+    assert pet.width() == 132 and pet.height() == 312
     assert pet._appearance["hair_color"] == DEFAULT_HAIR
     assert pet._appearance["eye_color"] == "yesil"
     image = pet.grab().toImage()
@@ -105,8 +103,8 @@ def test_default_realistic_avatar_is_kumral_with_green_eyes(qapp):
     # check hue instead of identity.
     greens = 0
     browns = 0
-    for x in range(0, 260, 2):
-        for y in range(0, 360, 2):
+    for x in range(0, 132, 1):
+        for y in range(0, 312, 1):
             color = image.pixelColor(x, y)
             if color.alpha() < 200:
                 continue
@@ -117,5 +115,7 @@ def test_default_realistic_avatar_is_kumral_with_green_eyes(qapp):
                 browns += 1
     assert greens > 20, "green-leaning eyes missing"
     assert browns > 400, "kumral hair missing"
+    from nora.nora_avatar import RealisticCharacter
+
     assert not RealisticCharacter().portrait().isNull()
     pet.shutdown()
