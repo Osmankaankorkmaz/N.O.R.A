@@ -56,6 +56,7 @@ Nora; masaüstünde gezen, Türkçe sohbet eden, sesli komut alan, ekran/kamera 
 ### Karakter ve ses
 - 120×150 şeffaf, always-on-top pet; 40×50 mantıksal ızgarada 3×3 keskin pikseller, keskin kenarlı 8-bit görünüm ve aynı tarzda tepsi ikonu. Varsayılan görünüm: beyaz wolfcut, kırmızı göz, siyah elbise, kırmızı ayakkabı; daha büyük parıltılı gözler, pembe yanaklar, kalp toka ve etek danteli. Yürüme, uyuma, zıplama, oturma, dans, esneme, göz kırpma, el sallama, sürüklenip düşme; piksel kalp, yıldız, nota ve uyku efektleri.
 - Tüm poz/duygu PNG’leri ve animasyon GIF’leri `docs/character/` altında: 18 poz, 8 duygu, 24 animasyon, aksesuar/kıyafet varyantları ve `index.html` galerisi. Gerçekçi avatar çıktıları `docs/character/realistic/` altındadır. Üretici: `python tools/export_character.py` (`--style realistic|pixel|all`). Bunlar önizleme/doc çıktısıdır; uygulama çizimi yine QPainter’dır.
+- **Önizleme:** `docs/character/realistic/onizleme.png` — cam sohbet paneli ve gerçekçi avatarın birlikte görünümü.
 - **Karakter stili:** Varsayılan gerçekçi portre; 8-bit chibi'yi geri istersen **Ayarlar → Karakter stili** (veya `NORA_CHARACTER=pixel`) seç. Pencere boyutu stile göre kendiliğinden 260×360 ↔ 120×150 olur ve ayakları yerde kalır.
 - **Komutla hareket:** “ikinci monitöre geç”, “uyu”, “uyan”, “dolaş”, “dur”, “zıpla”, “dans et”, “otur”. Bu komutlar Groq/internet olmadan çalışır.
 - “Uyu” ve “dolaş” siz değiştirene kadar sürer. “Zıpla ve uyu” gibi en fazla dört açık hareket komutu arka arkaya çalışabilir.
