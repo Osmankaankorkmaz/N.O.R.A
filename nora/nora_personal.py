@@ -22,7 +22,13 @@ from typing import Any, Iterable
 
 from PyQt5 import sip
 from PyQt5.QtCore import QRectF, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPen
+from PyQt5.QtGui import (
+    QBrush,
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+)
 from PyQt5.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -532,17 +538,30 @@ class PortraitBadge(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        full = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+
+        # A brand-gradient ring reads as "this is her" far better than a grey
+        # card, and it ties the panel to the logo and the send button.
+        ring = QLinearGradient(full.topLeft(), full.bottomRight())
+        ring.setColorAt(0.0, QColor("#7b5cff"))
+        ring.setColorAt(0.5, QColor("#b45cf5"))
+        ring.setColorAt(1.0, QColor("#ff4d94"))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(ring))
+        painter.drawEllipse(full)
+
+        inner = full.adjusted(3, 3, -3, -3)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 16, 16)
+        path.addEllipse(inner)
         painter.setClipPath(path)
-        painter.fillPath(path, QColor(255, 255, 255, 240))
-        painter.setPen(QPen(QColor(24, 18, 40, 30), 1))
-        painter.drawPath(path)
+        painter.fillPath(path, QColor(255, 255, 255, 248))
         painter.setRenderHint(QPainter.Antialiasing, False)
         painter.save()
         # Head only at 2x: 16 logical px of face fits the 64 px badge.
-        painter.setClipRect(0, 0, self.width(), 50)
-        painter.translate(4, -2)
+        # The head is 16x22 logical px; at 2x it needs 32x44. Centre it in the
+        # ring instead of shaving the top of her hair off.
+        painter.setClipRect(10, 10, self.width() - 20, self.height() - 20)
+        painter.translate(14, 9)
         PixelCharacter().draw_scaled(
             painter,
             scale=2,

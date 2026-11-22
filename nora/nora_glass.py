@@ -60,60 +60,152 @@ from PyQt5.QtWidgets import (
 
 from .nora_brand import CARD_RADIUS
 
-# Palette: white frosted glass with the brand's violet→pink as the only colour.
-# Everything dark here is ink, never pure black.
-GLASS_TINT = QColor(255, 255, 255, 216)
-GLASS_TINT_LIGHT = QColor(252, 250, 255, 232)
-HAIRLINE = QColor(24, 18, 40, 24)
+# ---------------------------------------------------------------------------
+# Design tokens.  One place for colour, type and rhythm so no widget invents
+# its own numbers and the whole app stays on the same grid.
+# ---------------------------------------------------------------------------
+
+#: Ink, not black: a warm violet-black reads as depth on white.
+TEXT = QColor("#181423")
+TEXT_DIM = QColor("#6e6a80")
+TEXT_FAINT = QColor("#9a95a8")
+
 ACCENT = QColor("#7b5cff")
+ACCENT_MID = QColor("#b45cf5")
 ACCENT_BRIGHT = QColor("#ff4d94")
-TEXT = QColor("#1b1725")
-TEXT_DIM = QColor("#6a6380")
+
+#: Surfaces, from the page up to the floating cards.
+PAGE_TOP = QColor("#fbfaff")
+PAGE_BOTTOM = QColor("#f6f4fd")
+SURFACE = QColor(255, 255, 255, 236)
+SURFACE_SOLID = QColor("#ffffff")
+HAIRLINE = QColor(24, 18, 40, 20)
+HAIRLINE_STRONG = QColor(24, 18, 40, 34)
+
+def css(color: QColor) -> str:
+    """A QColor as CSS, *including* its alpha.
+
+    ``QColor.name()`` silently drops the alpha channel, so ``rgba(24,18,40,34)``
+    becomes ``#181428`` — an almost-black hairline instead of a whisper of one.
+    Every translucent colour in the stylesheet goes through here.
+    """
+    if color.alpha() == 255:
+        return color.name()
+    return (
+        f"rgba({color.red()},{color.green()},{color.blue()},"
+        f"{color.alpha() / 255:.3f})"
+    )
+
+
+#: Kept for callers that still name the glass tint.
+GLASS_TINT = SURFACE
+GLASS_TINT_LIGHT = QColor(252, 250, 255, 232)
+
+#: The rhythm.  Every gap in the app is one of these.
+GAP_XS = 4
+GAP_SM = 8
+GAP_MD = 12
+GAP_LG = 18
+GAP_XL = 26
+
+#: Radii: pills for actions, cards for surfaces.
+RADIUS_PILL = 999
+RADIUS_CARD = 18
+RADIUS_INPUT = 22
+RADIUS_BUBBLE = 20
 
 STYLE = f"""
 QWidget#glassRoot {{ background: transparent; }}
 QWidget#whitePage {{ background: #ffffff; }}
-QFrame#glassCard {{
-    background: transparent;
-}}
+QFrame#glassCard {{ background: transparent; }}
 QWidget#chatHeader {{ background: transparent; }}
+QWidget#composerCard {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255,255,255,246), stop:1 rgba(250,248,255,240));
+    border: 1px solid {css(HAIRLINE)};
+    border-radius: {RADIUS_INPUT + 4}px;
+}}
+
 QLabel {{ color: {TEXT.name()}; background: transparent; }}
-QLabel#title {{ color: {TEXT.name()}; font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }}
-QLabel#subtitle {{ color: {TEXT_DIM.name()}; font-size: 11px; }}
+QLabel#title {{ color: {TEXT.name()}; font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }}
+QLabel#subtitle {{ color: {TEXT_DIM.name()}; font-size: 11px; letter-spacing: 0.3px; }}
 QLabel#status {{ color: {TEXT_DIM.name()}; font-size: 11px; }}
+QLabel#heroTitle {{ color: {TEXT.name()}; font-size: 30px; font-weight: 600; letter-spacing: -0.4px; }}
+QLabel#heroBody {{ color: {TEXT_DIM.name()}; font-size: 13px; }}
+
 QPushButton {{
-    background: rgba(24,18,40,10);
+    background: rgba(24,18,40,7);
     color: {TEXT.name()};
-    border: 1px solid rgba(24,18,40,26);
-    border-radius: 11px;
-    padding: 5px 9px;
+    border: 1px solid {css(HAIRLINE)};
+    border-radius: 13px;
+    padding: 6px 12px;
     font-size: 12px;
 }}
-QPushButton:hover {{ background: rgba(123,92,255,26); border-color: rgba(123,92,255,120); }}
-QPushButton:pressed {{ background: rgba(123,92,255,52); }}
-QPushButton:disabled {{ color: rgba(27,23,37,90); background: rgba(24,18,40,6); }}
+QPushButton:hover {{ background: rgba(123,92,255,20); border-color: rgba(123,92,255,110); }}
+QPushButton:pressed {{ background: rgba(123,92,255,44); }}
+QPushButton:disabled {{ color: {TEXT_FAINT.name()}; background: rgba(24,18,40,5); border-color: rgba(24,18,40,12); }}
+
 QPushButton#sendButton {{
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #7b5cff, stop:1 #ff4d94);
-    border: none; border-radius: 14px; color: white; font-size: 15px;
+    border: none; border-radius: 21px; color: white; font-size: 15px;
 }}
-QPushButton#sendButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #8f74ff, stop:1 #ff6ba6); }}
-QLineEdit {{
-    background: rgba(255,255,255,235);
+QPushButton#sendButton:hover {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #8f74ff, stop:1 #ff6ba6);
+}}
+QPushButton#sendButton:pressed {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #6a4bef, stop:1 #ef3d85);
+}}
+
+QPushButton#chip {{
+    background: {SURFACE_SOLID.name()};
+    border: 1px solid {css(HAIRLINE_STRONG)};
+    border-radius: 17px;
+    padding: 7px 14px;
+    font-size: 12px;
     color: {TEXT.name()};
-    border: 1px solid rgba(24,18,40,30);
-    border-radius: 16px;
-    padding: 9px 13px;
-    font-size: 13px;
+}}
+QPushButton#chip:hover {{
+    background: rgba(123,92,255,16);
+    border-color: rgba(123,92,255,130);
+    color: {ACCENT.name()};
+}}
+
+QPushButton#cancelButton {{
+    background: rgba(255,77,148,18);
+    border: 1px solid rgba(255,77,148,90);
+    border-radius: 20px;
+    color: {ACCENT_BRIGHT.name()};
+    font-size: 12px;
+}}
+
+QLineEdit {{
+    background: transparent;
+    color: {TEXT.name()};
+    border: none;
+    padding: 10px 4px;
+    font-size: 13.5px;
     selection-background-color: rgba(123,92,255,90);
 }}
-QLineEdit:focus {{ border: 1px solid rgba(123,92,255,170); background: #ffffff; }}
+QLineEdit:focus {{ border: none; }}
+
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
-QScrollBar:vertical {{ background: transparent; width: 7px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: rgba(24,18,40,46); border-radius: 3px; min-height: 30px; }}
-QScrollBar::handle:vertical:hover {{ background: rgba(24,18,40,84); }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 4px 2px; }}
+QScrollBar::handle:vertical {{
+    background: rgba(24,18,40,38);
+    border-radius: 4px;
+    min-height: 40px;
+}}
+QScrollBar::handle:vertical:hover {{ background: rgba(24,18,40,80); }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QToolTip {{ color: {TEXT.name()}; background: #ffffff; border: 1px solid rgba(24,18,40,40); padding: 4px; border-radius: 6px; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+QToolTip {{
+    color: {TEXT.name()};
+    background: #ffffff;
+    border: 1px solid rgba(24,18,40,38);
+    padding: 5px 8px;
+    border-radius: 8px;
+}}
 """
 
 
@@ -297,12 +389,20 @@ BUBBLE_MAX = 592
 
 
 class GlassBubble(QFrame):
-    """One chat message in a translucent bubble.
+    """One chat message.
+
+    Nora's replies are white cards with a soft shadow-free hairline; the user's
+    own words are the brand gradient.  Both get a small tail on the side they
+    belong to, so the reading direction is obvious at a glance without needing
+    avatars on every row.
 
     The sender name is painted rather than added as a second ``QLabel`` so the
     bubble contains exactly one child label (the message body) — that keeps
     ``findChild(QLabel)`` and the accessibility tree unambiguous.
     """
+
+    #: Room reserved above the text for the painted sender name.
+    NAME_BAND = 20
 
     def __init__(self, text: str, sender: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -313,7 +413,7 @@ class GlassBubble(QFrame):
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Minimum)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 21, 14, 10)
+        layout.setContentsMargins(16, 12 + self.NAME_BAND, 16, 12)
         layout.setSpacing(0)
         label = QLabel(str(text))
         label.setWordWrap(True)
@@ -321,6 +421,8 @@ class GlassBubble(QFrame):
         label.setTextFormat(Qt.PlainText)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         ink = "#ffffff" if self.sender == "user" else TEXT.name()
+        # No line-height: Qt's stylesheet engine does not implement it, and a
+        # declaration it drops can take neighbouring ones with it.
         label.setStyleSheet(f"color: {ink}; background: transparent; font-size: 13px;")
         label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         layout.addWidget(label)
@@ -329,39 +431,70 @@ class GlassBubble(QFrame):
         # QLabel's wrapped size hint collapses to a narrow column; give the
         # bubble a sensible preferred width derived from the actual text.
         metrics = label.fontMetrics()
-        ideal = metrics.boundingRect(str(text)).width() + 30
-        self.setMinimumWidth(max(96, min(BUBBLE_LABEL_MAX, ideal)))
+        ideal = metrics.boundingRect(str(text)).width() + 34
+        self.setMinimumWidth(max(110, min(BUBBLE_MAX, ideal)))
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.6, 0.6, -0.6, -0.6)
-        path = QPainterPath()
-        radius = 16.0
-        path.addRoundedRect(rect, radius, radius)
+
+        # A squared-off corner on the side the tail grows from is what makes a
+        # bubble read as speech rather than as a floating card.
+        radius = RADIUS_BUBBLE
+        tail = 7.0
+        path = self._bubble_path(rect, radius, tail)
+
         if self.sender == "user":
-            # The user's own words are the brand gradient: white ink on it.
             grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            grad.setColorAt(0.0, QColor("#7b5cff"))
+            grad.setColorAt(0.0, QColor("#7d5eff"))
             grad.setColorAt(1.0, QColor("#ff4d94"))
-            painter.setPen(QPen(QColor(255, 255, 255, 70), 1.0))
-            name_color = QColor(255, 255, 255, 235)
+            painter.setPen(QPen(QColor(255, 255, 255, 66), 1.0))
+            name_color = QColor(255, 255, 255, 230)
         else:
-            # Nora's replies are quiet white cards with an ink hairline.
-            grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            grad.setColorAt(0.0, QColor(255, 255, 255, 250))
-            grad.setColorAt(1.0, QColor(249, 246, 255, 246))
-            painter.setPen(QPen(QColor(24, 18, 40, 26), 1.0))
-            name_color = QColor("#7b5cff")
+            grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+            grad.setColorAt(0.0, QColor(255, 255, 255, 252))
+            grad.setColorAt(1.0, QColor(250, 247, 255, 248))
+            painter.setPen(QPen(QColor(24, 18, 40, 24), 1.0))
+            name_color = QColor(ACCENT)
         painter.setBrush(QBrush(grad))
         painter.drawPath(path)
+
         painter.setPen(name_color)
         painter.setFont(QFont("Segoe UI", 8, QFont.DemiBold))
         painter.drawText(
-            QRectF(14, 5, rect.width() - 28, 14),
+            QRectF(16, 6, rect.width() - 32, self.NAME_BAND),
             Qt.AlignLeft | Qt.AlignVCenter,
             self.sender_name,
         )
+
+    def _bubble_path(self, rect: QRectF, radius: float, tail: float) -> QPainterPath:
+        """A rounded rect with one corner pulled towards the speaker's side."""
+        path = QPainterPath()
+        big = radius
+        small = 6.0
+        if self.sender == "user":
+            corners = (big, big, small, big)  # top-left, top-right, bottom-right, bottom-left
+        else:
+            corners = (big, big, big, small)
+        tl, tr, br, bl = (
+            corners[0],
+            corners[1],
+            corners[2] + (tail if self.sender == "user" else 0.0),
+            corners[3] + (tail if self.sender != "user" else 0.0),
+        )
+        x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+        path.moveTo(x + tl, y)
+        path.lineTo(x + w - tr, y)
+        path.quadTo(x + w, y, x + w, y + tr)
+        path.lineTo(x + w, y + h - br)
+        path.quadTo(x + w, y + h, x + w - br, y + h)
+        path.lineTo(x + bl, y + h)
+        path.quadTo(x, y + h, x, y + h - bl)
+        path.lineTo(x, y + tl)
+        path.quadTo(x, y, x + tl, y)
+        path.closeSubpath()
+        return path
 
 
 class TypingIndicator(QWidget):

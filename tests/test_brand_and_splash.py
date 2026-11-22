@@ -702,3 +702,103 @@ def test_window_silhouette_matches_the_launch_card(nora_app) -> None:
         assert abs(a - b) <= 3, f"corner profile differs at row {row}: {a} vs {b}"
     splash.hide()
     splash.deleteLater()
+
+
+# ------------------------------------------------------------ 1.20.0 redesign
+def test_hero_shows_on_an_empty_chat_and_leaves_on_the_first_message(nora_app) -> None:
+    """A blank page is not a welcome: the empty state is a real screen."""
+    nora_app.show_chat()
+    nora_app.chat_window.resize(900, 660)
+    _pump(200)
+    assert nora_app.hero.isVisible()
+    assert not nora_app.scroll.isVisible(), "the empty list must not eat the hero"
+
+    # the hero must actually get enough room for its own content
+    assert nora_app.hero.height() >= nora_app.hero.layout().minimumSize().height()
+
+    nora_app.add_message("Merhaba", "user")
+    _pump(120)
+    assert not nora_app.hero.isVisible()
+    assert nora_app.scroll.isVisible()
+
+    nora_app._clear_messages()
+    _pump(120)
+    assert nora_app.hero.isVisible(), "clearing the history brings the welcome back"
+
+
+def test_hero_mark_is_not_clipped(nora_app) -> None:
+    """The mark is fixed-size: a shrunken label cropped the tile's lower half."""
+    from PyQt5.QtWidgets import QLabel
+
+    nora_app.show_chat()
+    nora_app.chat_window.resize(900, 660)
+    _pump(200)
+    marks = [
+        label
+        for label in nora_app.hero.findChildren(QLabel)
+        if label.pixmap() is not None and not label.pixmap().isNull()
+    ]
+    assert len(marks) == 1
+    mark = marks[0]
+    assert mark.size() == mark.pixmap().size(), "the mark label must match its pixmap"
+    # and the title really sits below it, not on top of it
+    title = nora_app.hero.findChild(QLabel, "heroTitle")
+    assert title is not None
+    assert title.y() >= mark.y() + mark.height()
+
+
+def test_composer_is_one_card_with_the_shortcuts_inside(nora_app) -> None:
+    nora_app.show_chat()
+    _pump(150)
+    composer = nora_app.composer
+    assert composer.objectName() == "composerCard"
+    # the field, the send button and every shortcut live inside the card
+    assert composer.isAncestorOf(nora_app.input)
+    assert composer.isAncestorOf(nora_app.send_button)
+    for chip in nora_app.quick_buttons:
+        assert composer.isAncestorOf(chip)
+        assert chip.objectName() == "chip"
+
+
+def test_sender_labels_are_human(nora_app) -> None:
+    nora_app.show_chat()
+    _pump(120)
+    nora_app.add_message("selam", "user")
+    nora_app.add_message("merhaba", "bot")
+    _pump(120)
+    from nora.nora_ui import ChatBubble
+
+    bubbles = [row.findChild(ChatBubble) for row in nora_app._message_rows]
+    assert [b.sender_name for b in bubbles] == ["Sen", "Nora"]
+    assert bubbles[0].label.text() == "selam"
+    assert bubbles[1].label.text() == "merhaba"
+
+
+def test_css_helper_keeps_alpha() -> None:
+    """``QColor.name()`` drops alpha — that turned hairlines into near-black."""
+    from nora.nora_glass import css
+
+    whisper = QColor(24, 18, 40, 34)
+    assert css(whisper).startswith("rgba(24,18,40,")
+    assert css(whisper).endswith("0.133)")
+    solid = QColor("#ffffff")
+    assert css(solid) == "#ffffff"
+
+
+def test_translucent_hairlines_are_not_black() -> None:
+    """A 1 px border at 8 % alpha must stay a whisper, not a black frame."""
+    from nora.nora_glass import STYLE, css
+
+    assert "#181428;" not in STYLE.replace(" ", "")
+    for line in STYLE.splitlines():
+        if "border: 1px solid" in line:
+            value = line.split("solid", 1)[1].strip().rstrip(";")
+            assert value.startswith("rgba(") or value.startswith("#"), line
+            if value.startswith("rgba("):
+                raw = value.rsplit(",", 1)[1].rstrip(")")
+                alpha = float(raw)
+                # Qt accepts both 0-255 and 0.0-1.0 here; normalise.
+                if alpha > 1.0:
+                    alpha /= 255.0
+                assert alpha < 0.5, f"a hairline with alpha {alpha} is too strong: {line}"
+    assert css(QColor(24, 18, 40, 20)).endswith("0.078)")

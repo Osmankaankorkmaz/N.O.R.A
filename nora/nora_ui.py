@@ -554,6 +554,86 @@ class NoraApp(QWidget):
             pass
         return font
 
+    def _build_hero(self) -> QWidget:
+        """The first-run page: the mark, her name, and a way in."""
+        hero = QWidget()
+        hero.setObjectName("hero")
+        outer = QVBoxLayout(hero)
+        outer.setContentsMargins(30, 8, 30, 8)
+        outer.setSpacing(0)
+        outer.addStretch(2)
+
+        from .nora_brand import logo_pixmap
+
+        mark = QLabel()
+        mark.setAlignment(Qt.AlignCenter)
+        mark.setPixmap(logo_pixmap(84, spark=True))
+        # The pixmap is square and the label must not squash it: a QLabel keeps
+        # its size hint from the pixmap, so no fixed height here.
+        # A fixed size, not a minimum: inside a layout with stretches Qt will
+        # otherwise shrink the label below its pixmap and clip the mark.
+        mark.setFixedSize(84, 84)
+        mark.setScaledContents(False)
+        outer.addWidget(mark, 0, Qt.AlignHCenter)
+        # A stretch-free spacer *widget* (not addSpacing): with Qt.AlignHCenter
+        # on the mark, layout spacers are distributed differently and the 30 px
+        # title used to ride up over the mark's lower half.
+        spacer = QWidget()
+        spacer.setFixedHeight(18)
+        outer.addWidget(spacer)
+
+        title = QLabel("Merhaba, ben Nora.")  # noqa: RUF001 - Turkish text
+        title.setObjectName("heroTitle")
+        title.setAlignment(Qt.AlignCenter)
+        outer.addWidget(title)
+
+        body = QLabel(
+            "Masaüstünde yaşayan Türkçe asistanın.\n"
+            "Ekranına bakabilir, notlarını tutabilir, gününü planlayabilirim."
+        )
+        body.setObjectName("heroBody")
+        body.setAlignment(Qt.AlignCenter)
+        body.setWordWrap(True)
+        outer.addSpacing(8)
+        outer.addWidget(body)
+        outer.addSpacing(26)
+
+        chips = QHBoxLayout()
+        chips.setSpacing(8)
+        chips.addStretch(1)
+        self.hero_chips: list[QPushButton] = []
+        for text, slot in (
+            ("Ekranımı özetle", self._analyze_screen),
+            ("Bugün ne var?", self._quick_weather),
+            ("Sistem bilgisi", self._show_system_info),
+        ):
+            chip = QPushButton(text)
+            chip.setObjectName("chip")
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.clicked.connect(slot)
+            chips.addWidget(chip)
+            self.hero_chips.append(chip)
+        chips.addStretch(1)
+        outer.addLayout(chips)
+        outer.addStretch(3)
+        return hero
+
+    def _update_hero(self) -> None:
+        """Show exactly one of the two: the welcome page, or the conversation.
+
+        Both are stretch items, so keeping the (empty) message list visible
+        would split the window between them and squeeze the hero until its
+        mark was clipped.
+        """
+        hero = getattr(self, "hero", None)
+        if hero is None:
+            return
+        empty = not self._message_rows
+        hero.setVisible(empty)
+        scroll = getattr(self, "scroll", None)
+        if scroll is not None:
+            scroll.setVisible(not empty)
+
     def _build_chat(self) -> None:
         """Frosted-glass chat panel (ChatGPT-desktop-like), unified NoraApp shell.
 
@@ -603,17 +683,17 @@ class NoraApp(QWidget):
         # A quiet title row, not a toolbar.  The system title bar is gone, so
         # this row is also what the user drags the window by.
         header = QWidget()
-        header.setFixedHeight(58)
+        header.setFixedHeight(66)
         header.setObjectName("chatHeader")
         self.chat_header = header
         header_outer = QHBoxLayout(header)
-        header_outer.setContentsMargins(20, 0, 20, 0)
-        header_outer.setSpacing(11)
+        header_outer.setContentsMargins(22, 0, 18, 0)
+        header_outer.setSpacing(12)
 
         # The mark is the only avatar in the header: it *is* Nora, and pressing
         # it lets her step out of the app, so "she comes from the logo" is
         # literally on screen instead of a second decorative badge.
-        self.logo_button = PetLogoButton(size=44)
+        self.logo_button = PetLogoButton(size=46)
         self.logo_button.clicked.connect(self.toggle_pet)
         self.logo_button.setToolTip("Nora'yı masaüstüne çıkar / içeri al")
         header.setToolTip("Pencereyi sürüklemek için tut · araçlar için sağ tık")
@@ -683,11 +763,18 @@ class NoraApp(QWidget):
         content = QWidget()
         content.setStyleSheet("background: transparent;")
         self.message_layout = QVBoxLayout(content)
-        self.message_layout.setContentsMargins(2, 8, 2, 8)
-        self.message_layout.setSpacing(9)
+        self.message_layout.setContentsMargins(6, 10, 6, 10)
+        self.message_layout.setSpacing(14)
         self.message_layout.addStretch(1)
         self.scroll.setWidget(content)
         layout.addWidget(self.scroll, 1)
+
+        # ---- empty state ------------------------------------------------
+        # A blank white page is not a welcome.  Until the first message there
+        # is a hero: the mark, her name, and three things to try.
+        self.hero = self._build_hero()
+        layout.addWidget(self.hero, 1)
+        self._update_hero()
 
         self.typing_indicator = TypingIndicator()
         self.typing_indicator.hide()
@@ -699,51 +786,72 @@ class NoraApp(QWidget):
         layout.addWidget(self.status_label)
 
         # ---- composer ---------------------------------------------------
+        # One floating card holds everything: the field, the send button and the
+        # shortcuts.  Separate rows of grey boxes looked like a settings panel;
+        # a single card reads as "this is where you talk to her".
+        self.composer = QWidget()
+        self.composer.setObjectName("composerCard")
+        composer_outer = QVBoxLayout(self.composer)
+        composer_outer.setContentsMargins(14, 10, 10, 10)
+        composer_outer.setSpacing(8)
+
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Nora'ya bir şey yaz…  (Enter ile gönder)")
+        self.input.setPlaceholderText("Nora'ya bir şey yaz…")
         self.input.setMaxLength(4000)
-        self.input.setMinimumHeight(38)
+        self.input.setMinimumHeight(34)
         self.input.returnPressed.connect(self._send_from_input)
         input_row.addWidget(self.input, 1)
-        self.cancel_button = QPushButton("⏹")
-        self.cancel_button.setFixedSize(40, 40)
+
+        self.cancel_button = QPushButton("Durdur")
+        self.cancel_button.setObjectName("cancelButton")
+        self.cancel_button.setFixedHeight(40)
+        self.cancel_button.setMinimumWidth(72)
+        self.cancel_button.setCursor(Qt.PointingHandCursor)
         self.cancel_button.setToolTip(
-            "İsteği iptal et. Yerel üretim tokenlar arasında durur; bulut isteği ağda sürebilir ama yanıtı kullanılmaz."
+            "İsteği iptal et. Yerel üretim tokenlar arasında durur; "
+            "bulut isteği ağda sürebilir ama yanıtı kullanılmaz."
         )
-        self.cancel_button.setFont(self._emoji_font(11))
         self.cancel_button.clicked.connect(self._cancel_current_request)
         self.cancel_button.hide()
         input_row.addWidget(self.cancel_button)
-        self.send_button = QPushButton("➤")
+
+        self.send_button = QPushButton("↑")
         self.send_button.setObjectName("sendButton")
-        self.send_button.setFixedSize(52, 40)
+        self.send_button.setFixedSize(42, 42)
+        self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.setToolTip("Gönder (Enter)")
+        self.send_button.setFont(self._emoji_font(13))
         self.send_button.clicked.connect(self._send_from_input)
         input_row.addWidget(self.send_button)
-        layout.addLayout(input_row)
+        composer_outer.addLayout(input_row)
 
+        # Shortcuts live inside the card, as quiet pills.
         quick_row = QHBoxLayout()
         quick_row.setSpacing(6)
         self.quick_buttons: list[QPushButton] = []
         for text, slot in (
-            ("🔍 Ara", self._quick_search),
-            ("⏰ Saat", self._quick_time),
-            ("📝 Notlar", self._show_notes),
-            ("🌤️ Hava", self._quick_weather),
+            ("Ara", self._quick_search),
+            ("Saat", self._quick_time),
+            ("Notlar", self._show_notes),
+            ("Hava", self._quick_weather),
             (
-                "🎮 Oyun",
+                "Oyun",
                 lambda: self._execute_command({"command": "game", "action": "start"}),
             ),
         ):
             button = QPushButton(text)
-            button.setFont(self._emoji_font(9))
-            button.setStyleSheet("font-size: 11px; padding: 4px 6px;")
+            button.setObjectName("chip")
+            button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(slot)
             quick_row.addWidget(button)
             self.quick_buttons.append(button)
-        layout.addLayout(quick_row)
+        quick_row.addStretch(1)
+        composer_outer.addLayout(quick_row)
+
+        layout.addWidget(self.composer)
+
         self.chat_window.installEventFilter(self)
         # The white page is a plain child, not a layout item: keep it filling
         # the frame when the window is resized or maximised.
@@ -1759,6 +1867,7 @@ class NoraApp(QWidget):
             old = self._message_rows.pop(0)
             self.message_layout.removeWidget(old)
             old.deleteLater()
+        self._update_hero()
         QTimer.singleShot(0, self._scroll_to_bottom)
         if sender == "bot" and speak:
             self._say(original)
@@ -1843,6 +1952,8 @@ class NoraApp(QWidget):
             self.message_layout.removeWidget(row)
             row.deleteLater()
         self._message_rows.clear()
+        # Clearing the history brings the welcome page back.
+        self._update_hero()
 
     def show_chat(self) -> None:
         if self._closing:
