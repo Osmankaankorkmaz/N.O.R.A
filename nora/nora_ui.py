@@ -20,6 +20,7 @@ from PyQt5.QtCore import (
     QEvent,
     QPoint,
     QRectF,
+    QSize,
     Qt,
     QThread,
     QTimer,
@@ -27,7 +28,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import (
     QColor,
-    QFont,
+    QGuiApplication,
     QIcon,
     QImage,
     QPainter,
@@ -71,6 +72,7 @@ from .nora_glass import (
     NavButton,
     GlassBubble,
     TypingIndicator,
+    brand_icon_pixmap,
     glass_style,
 )
 from .nora_hotkeys import DEFAULT_PTT_KEY, PushToTalkHotkey
@@ -541,21 +543,13 @@ class NoraApp(QWidget):
 
     # ------------------------------------------------------------------ build UI
     @staticmethod
-    def _emoji_font(point_size: int = 10) -> QFont:
-        font = QFont("Segoe UI", point_size)
+    def _dpr() -> float:
+        """The screen's device pixel ratio, for sharp hand-drawn icons."""
+        screen = QGuiApplication.primaryScreen()
         try:
-            font.setFamilies(
-                [
-                    "Segoe UI Emoji",
-                    "Noto Color Emoji",
-                    "Apple Color Emoji",
-                    "Segoe UI Symbol",
-                    "Segoe UI",
-                ]
-            )
-        except AttributeError:
-            pass
-        return font
+            return float(screen.devicePixelRatio()) if screen is not None else 1.0
+        except AttributeError:  # very old Qt
+            return 1.0
 
     def _build_hero(self) -> QWidget:
         """The first-run page: the mark, her name, and a way in.
@@ -941,12 +935,16 @@ class NoraApp(QWidget):
         self.cancel_button.hide()
         input_row.addWidget(self.cancel_button)
 
-        self.send_button = QPushButton("↑")
-        self.send_button.setObjectName("sendButton")
+        # A flat glyph, not a filled pink disc: the disc was the loudest thing
+        # in the composer and it competed with the message bubbles.  The icon
+        # carries the brand gradient instead and the button keeps its footprint.
+        self.send_button = QPushButton()
+        self.send_button.setObjectName("sendGlyph")
         self.send_button.setFixedSize(42, 42)
         self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.setToolTip("Gönder (Enter)")
-        self.send_button.setFont(self._emoji_font(13))
+        self.send_button.setIcon(QIcon(brand_icon_pixmap("send", 26, dpr=self._dpr())))
+        self.send_button.setIconSize(QSize(26, 26))
         self.send_button.clicked.connect(self._send_from_input)
         input_row.addWidget(self.send_button)
         composer_outer.addLayout(input_row)

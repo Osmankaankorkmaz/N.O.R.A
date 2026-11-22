@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from PyQt5.QtCore import QTimer, QEventLoop
+from PyQt5.QtCore import Qt, QTimer, QEventLoop
 from PyQt5.QtGui import QColor, QImage
 from PyQt5.QtWidgets import QApplication
 
@@ -468,51 +468,55 @@ def test_header_carries_only_the_window_controls(nora_app) -> None:
 
 
 def test_window_controls_are_brand_gradient(app) -> None:
-    """Mor–pembe gradyan, not a flat grey OS button."""
+    """The controls are glyphs in the mor–pembe ink, not grey OS buttons.
+
+    1.19.0 drew each control as a filled gradient disc; 1.22.0 emptied the disc
+    and moved the gradient into the stroke, so the row stops competing with the
+    page.  What must not regress: the ink is the brand family — violet at the
+    minimise end, pink for close — and nothing is filled.
+    """
     from nora.nora_glass import GradientWindowButton
 
     for glyph, danger in (("minimize", False), ("maximize", False), ("close", True)):
         button = GradientWindowButton(glyph, size=30, danger=danger)
-        image = QImage(30, 30, QImage.Format_ARGB32)
-        image.fill(0)
-        button.render(image)
+        button.show()
+        _pump(50)
+        # grab(), not render(): render() lays an opaque background first.
+        image = button.grab().toImage()
 
-        # inside the circle the pixels are vivid brand colour, not grey.  Sample
-        # above the glyph (y=15 is where the white stroke is drawn).
-        centre = image.pixelColor(15, 7)
-        assert centre.saturation() > 90, (
-            f"{glyph} is not a brand colour: {centre.name()}"
-        )
+        inked = [
+            image.pixelColor(x, y)
+            for x in range(30)
+            for y in range(30)
+            if image.pixelColor(x, y).alpha() > 90
+        ]
+        assert inked, f"{glyph} drew nothing"
 
-        # sample left and right halves: the gradient must actually shift hue
-        left = image.pixelColor(7, 7)
-        right = image.pixelColor(22, 22)
-        assert left.hue() != right.hue() or left.name() != right.name(), (
-            f"{glyph} is a flat fill, not a gradient"
-        )
-        # The family reads violet → pink.  Close is deliberately the pink end
-        # pushed one step further, so it stays in the family without pretending
-        # to be the same action as minimise.
-        hues = {left.hue(), right.hue()}
-        assert any(h >= 300 or h <= 20 for h in hues), f"{glyph} has no pink"
-        if danger:
-            assert all(h >= 300 or h <= 20 for h in hues), (
-                f"close should stay in the pink end, got {sorted(hues)}"
+        # every stroke pixel is brand colour of the right temperature
+        for colour in inked:
+            assert colour.saturation() > 60, (
+                f"{glyph} has a grey stroke: {colour.name()}"
             )
-        else:
-            assert any(240 <= h <= 285 for h in hues), f"{glyph} has no violet"
+            hue = colour.hue()
+            if danger:
+                assert hue >= 300 or hue <= 20, (
+                    f"close should stay in the pink end, got {colour.name()}"
+                )
+            else:
+                assert 230 <= hue <= 330, (
+                    f"{glyph} should stay violet→pink, got {colour.name()}"
+                )
 
-        # the corners stay transparent: a round button, not a square
-        assert image.pixelColor(1, 1).alpha() == 0
-
-        # the glyph itself is drawn in white
-        whites = sum(
+        # a glyph, not a disc: the corners and the middle are empty
+        assert image.pixelColor(1, 1).alpha() < 40
+        assert image.pixelColor(28, 28).alpha() < 40
+        filled = sum(
             1
             for x in range(30)
             for y in range(30)
-            if image.pixelColor(x, y).name() == "#ffffff"
+            if image.pixelColor(x, y).alpha() > 90
         )
-        assert whites > 8, f"{glyph} has no white glyph"
+        assert filled < 90, f"{glyph} still paints a filled shape ({filled} px)"
 
 
 def test_window_controls_do_what_they_say(nora_app) -> None:
@@ -864,61 +868,108 @@ def test_exactly_one_nav_destination_is_active(nora_app) -> None:
     assert active == ["profile"]
 
 
-def test_nav_button_active_state_is_the_brand_gradient(app) -> None:
-    """Active = the gradient pill, inactive = ink outline, hover = a whisper."""
-    from PyQt5.QtGui import QPainter
+def test_nav_glyph_ink_is_the_brand_gradient_with_no_panel(app) -> None:
+    """The rail carries the brand in the *ink*, not in a filled button.
 
+    Filled gradient pills turned the rail into five buttons shouting at the
+    page, so the design moved the brand into the glyph: no background, active
+    icon in the aurora gradient, idle icon in ink.
+    """
     from nora.nora_glass import NavButton
 
-    button = NavButton("chat", size=42)
-    button.setActive(True)
-    button.show()
+    active = NavButton("chat", size=42)
+    active.setActive(True)
+    active.show()
     _pump(60)
+    image = active.grab().toImage()
 
-    # grab(), not render(): render() paints the widget's opaque background
-    # first, which hides the transparency the pill relies on.
-    image = button.grab().toImage()
-    # the pill body is vivid brand colour, not grey.  Sample below the glyph's
-    # stroke: at y=12 the chat glyph's white line sits on top of the fill.
-    centre = image.pixelColor(21, 21)
-    assert centre.saturation() > 90, f"active pill is not brand colour: {centre.name()}"
-    corner = image.pixelColor(8, 8)
-    assert corner.saturation() > 60 or corner.alpha() < 250
-    # and it is transparent outside the pill
-    assert image.pixelColor(1, 1).alpha() == 0
-    assert image.pixelColor(40, 40).alpha() == 0
+    # Something vivid is drawn (the gradient stroke) ...
+    vivid = [
+        image.pixelColor(x, y)
+        for x in range(42)
+        for y in range(42)
+        if image.pixelColor(x, y).saturation() > 90
+        and image.pixelColor(x, y).value() > 90
+    ]
+    assert len(vivid) > 25, "the active glyph lost its brand colour"
 
-    inactive = NavButton("chat", size=42)
-    inactive.show()
-    _pump(60)
-    image2 = inactive.grab().toImage()
-    # nothing is filled, only the glyph is stroked
-    filled = sum(
-        1 for x in range(42) for y in range(42) if image2.pixelColor(x, y).alpha() > 200
+    # ... but it is *strokes*, not a filled disc.  A filled 42 px pill would
+    # cover ~1000 px; a glyph is a couple of hundred at most.
+    inked = sum(
+        1 for x in range(42) for y in range(42) if image.pixelColor(x, y).alpha() > 60
     )
-    assert filled < 120, "an inactive destination must not paint a filled pill"
-    del QPainter
+    assert inked < 260, f"the destination still paints a filled panel ({inked} px)"
+
+    # The edges stay clear: no background, hence no black box on Windows either.
+    for x, y in ((0, 0), (41, 0), (0, 41), (41, 41)):
+        assert image.pixelColor(x, y).alpha() < 40
+
+    # Idle is almost invisible next to active: ink, not colour.
+    idle = NavButton("chat", size=42)
+    idle.show()
+    _pump(60)
+    idle_image = idle.grab().toImage()
+    idle_vivid = sum(
+        1
+        for x in range(42)
+        for y in range(42)
+        if idle_image.pixelColor(x, y).saturation() > 90
+        and idle_image.pixelColor(x, y).alpha() > 60
+    )
+    assert idle_vivid < 10, "an idle destination must not wear the brand gradient"
 
 
-def test_sidebar_glyphs_are_all_distinct(app) -> None:
-    """Five destinations must not share a shape, or the rail is unreadable."""
-    from nora.nora_glass import NavButton
+def test_self_painting_widgets_request_a_translucent_buffer(app) -> None:
+    """No widget may paint an opaque buffer on a translucent parent.
 
-    signatures = set()
-    for glyph in NavButton.GLYPHS:
-        button = NavButton(glyph, size=42)
-        button.setActive(True)
-        button.show()
-        _pump(40)
-        image = button.grab().toImage()
-        # signature = where the white glyph strokes are, inside the pill
-        signature = tuple(
-            1 if image.pixelColor(x, y).name() == "#ffffff" else 0
-            for x in range(4, 38, 2)
-            for y in range(4, 38, 2)
+    Without WA_TranslucentBackground the buffer Qt hands to paintEvent has no
+    alpha channel, and every pixel the glyph does not cover comes out **black**.
+    That is exactly what the rail and the window controls looked like on
+    Windows, so this is asserted for every hand-painted control.
+    """
+    from nora.nora_glass import GradientWindowButton, NavButton
+
+    painted = [NavButton(glyph) for glyph in NavButton.GLYPHS]
+    painted += [GradientWindowButton(glyph) for glyph in GradientWindowButton.GLYPHS]
+    for widget in painted:
+        assert widget.testAttribute(Qt.WA_TranslucentBackground), (
+            f"{type(widget).__name__}({getattr(widget, 'glyph', '')}) would paint "
+            "an opaque black buffer"
         )
-        signatures.add(signature)
-    assert len(signatures) == len(NavButton.GLYPHS)
+        assert not widget.autoFillBackground()
+
+
+def test_window_controls_are_gradient_glyphs_without_a_panel(app) -> None:
+    """Window controls are icons in the brand ink, not filled circles."""
+    from nora.nora_glass import GradientWindowButton
+
+    button = GradientWindowButton("minimize", size=30)
+    button.show()
+    _pump(50)
+    image = button.grab().toImage()
+
+    vivid = [
+        image.pixelColor(x, y)
+        for x in range(30)
+        for y in range(30)
+        if image.pixelColor(x, y).alpha() > 90
+        and image.pixelColor(x, y).saturation() > 70
+    ]
+    assert vivid, "the window control lost its brand ink"
+    # a glyph, not a filled disc
+    inked = sum(
+        1 for x in range(30) for y in range(30) if image.pixelColor(x, y).alpha() > 90
+    )
+    assert inked < 90, f"the control still paints a filled circle ({inked} px)"
+    # and the glyph is not pure white-on-gradient as it used to be
+    white = sum(
+        1
+        for x in range(30)
+        for y in range(30)
+        if image.pixelColor(x, y).name() == "#ffffff"
+        and image.pixelColor(x, y).alpha() > 200
+    )
+    assert white == 0, "a white glyph only made sense on top of a gradient disc"
 
 
 def test_destinations_share_one_bordered_group(nora_app) -> None:
@@ -1006,3 +1057,44 @@ def test_hero_is_one_card_holding_mark_title_and_ways_in(nora_app) -> None:
         assert card.isAncestorOf(chip)
     # a card, not a full-width band
     assert card.maximumWidth() <= 640
+
+
+def test_sidebar_glyphs_are_all_distinct(app) -> None:
+    """Five destinations must not share a shape, or the rail is unreadable."""
+    from nora.nora_glass import NavButton
+
+    signatures = set()
+    for glyph in NavButton.GLYPHS:
+        button = NavButton(glyph, size=42)
+        button.setActive(True)
+        button.show()
+        _pump(40)
+        image = button.grab().toImage()
+        # Signature = where ink landed.  Alpha, not RGB: the glyphs are drawn in
+        # a gradient now, so colour varies across a single stroke.
+        signature = tuple(
+            1 if image.pixelColor(x, y).alpha() > 70 else 0
+            for x in range(4, 39, 2)
+            for y in range(4, 39, 2)
+        )
+        signatures.add(signature)
+    assert len(signatures) == len(NavButton.GLYPHS)
+
+
+def test_send_button_is_a_gradient_glyph_not_a_disc(nora_app) -> None:
+    """The send action is an icon; a filled pink disc dominated the composer."""
+    nora_app.show_chat()
+    _pump(200)
+    button = nora_app.send_button
+    assert button.objectName() == "sendGlyph"
+    assert not button.icon().isNull(), "the send glyph is missing"
+    # The icon must carry colour, not be a font glyph in the text colour.
+    image = button.icon().pixmap(26, 26).toImage()
+    vivid = sum(
+        1
+        for x in range(image.width())
+        for y in range(image.height())
+        if image.pixelColor(x, y).alpha() > 60
+        and image.pixelColor(x, y).saturation() > 70
+    )
+    assert vivid > 15, "the send icon is not painted in brand ink"

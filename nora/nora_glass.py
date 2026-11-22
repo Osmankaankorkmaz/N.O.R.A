@@ -39,6 +39,7 @@ from PyQt5.QtGui import (
     QColor,
     QFont,
     QGuiApplication,
+    QImage,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -96,6 +97,48 @@ def css(color: QColor) -> str:
     return (
         f"rgba({color.red()},{color.green()},{color.blue()},{color.alpha() / 255:.3f})"
     )
+
+
+def gradient_brush(box: QRectF, *, vertical: bool = False) -> QBrush:
+    """The brand ink: violet → orchid → pink across ``box``.
+
+    One gradient for every glyph in the app, so an icon, the send button and
+    the active rail pill all read as the same material.
+    """
+    if vertical:
+        grad = QLinearGradient(box.topLeft(), box.bottomLeft())
+    else:
+        grad = QLinearGradient(box.topLeft(), box.bottomRight())
+    grad.setColorAt(0.0, QColor(ACCENT))
+    grad.setColorAt(0.55, QColor(ACCENT_MID))
+    grad.setColorAt(1.0, QColor(ACCENT_BRIGHT))
+    return QBrush(grad)
+
+
+def brand_icon_pixmap(kind: str, size: int, *, dpr: float = 1.0) -> QPixmap:
+    """A hand-drawn brand-glyph icon: gradient ink, no background.
+
+    Used where a widget cannot paint itself (the send button, which is a plain
+    ``QPushButton``).  Drawn at ``dpr`` scale so it stays sharp on scaled
+    displays.
+    """
+    from .nora_glyphs import draw_glyph
+
+    px = max(1, int(round(size * dpr)))
+    image = QImage(px, px, QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    box = QRectF(0, 0, px, px).adjusted(px * 0.18, px * 0.18, -px * 0.18, -px * 0.18)
+    ink = gradient_brush(box)
+    painter.setPen(QPen(ink, max(1.4, px * 0.055)))
+    # The plane reads as a solid object; the outline glyphs must not be filled.
+    painter.setBrush(ink if kind == "send" else Qt.NoBrush)
+    draw_glyph(painter, kind, box)
+    painter.end()
+    pixmap = QPixmap.fromImage(image)
+    pixmap.setDevicePixelRatio(dpr)
+    return pixmap
 
 
 #: Kept for callers that still name the glass tint.
@@ -165,16 +208,16 @@ QPushButton:hover {{ background: rgba(123,92,255,20); border-color: rgba(123,92,
 QPushButton:pressed {{ background: rgba(123,92,255,44); }}
 QPushButton:disabled {{ color: {TEXT_FAINT.name()}; background: rgba(24,18,40,5); border-color: rgba(24,18,40,12); }}
 
-QPushButton#sendButton {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #7b5cff, stop:1 #ff4d94);
-    border: none; border-radius: 21px; color: white; font-size: 15px;
+/* The send action is a gradient glyph, not a filled disc: the disc was the
+   loudest object in the composer and competed with the bubbles. */
+QPushButton#sendGlyph {{
+    background: transparent;
+    border: none;
+    border-radius: 21px;
 }}
-QPushButton#sendButton:hover {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #8f74ff, stop:1 #ff6ba6);
-}}
-QPushButton#sendButton:pressed {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #6a4bef, stop:1 #ef3d85);
-}}
+QPushButton#sendGlyph:hover {{ background: rgba(123,92,255,26); }}
+QPushButton#sendGlyph:pressed {{ background: rgba(123,92,255,52); }}
+QPushButton#sendGlyph:disabled {{ background: transparent; }}
 
 QPushButton#chip {{
     background: {SURFACE_SOLID.name()};
@@ -846,13 +889,15 @@ def _shadow_effect(widget: QWidget) -> QGraphicsDropShadowEffect | None:
 
 
 class GradientWindowButton(QPushButton):
-    """A round window control in the brand gradient.
+    """A frameless window control: a gradient glyph, no panel behind it.
 
     The window is frameless, so these are the only minimise / maximise / close
-    controls it has — and because the OS chrome is gone, they are also free to
-    look like the product instead of like Windows.  The glyph is painted by hand
-    (a line, a square, a cross) rather than taken from an emoji font: emoji are
-    multicoloured and would fight the gradient.
+    controls it has.  They are drawn, not typed: an emoji would be multicoloured
+    and a text glyph would be a font run at the wrong weight.
+
+    The button paints **no background at all** — the glyph carries the brand and
+    the row stays quiet on the white page.  Hover adds a soft tinted disc so the
+    hit target is still obvious; close tilts one step further into pink.
     """
 
     GLYPHS = ("minimize", "maximize", "restore", "close")
@@ -874,9 +919,8 @@ class GradientWindowButton(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setFlat(True)
-        # QPushButton paints its own background before paintEvent runs, which
-        # would put a pale square behind the circle.  Nothing but our gradient
-        # may reach these pixels.
+        # Without these Qt paints an opaque buffer under the button and every
+        # pixel the glyph does not cover turns black (seen on Windows).
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setAutoFillBackground(False)
@@ -896,69 +940,64 @@ class GradientWindowButton(QPushButton):
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        # Start from a clean, fully transparent buffer.
-        painter.setCompositionMode(QPainter.CompositionMode_Source)
-        painter.fillRect(self.rect(), Qt.transparent)
-        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        box = QRectF(self.rect()).adjusted(0.75, 0.75, -0.75, -0.75)
+        box = QRectF(self.rect()).adjusted(1, 1, -1, -1)
 
-        # Brand gradient, lit from the top-left.  Hover lifts it, press sinks it.
-        grad = QLinearGradient(box.topLeft(), box.bottomRight())
-        if self.danger:
-            # Close still reads as part of the family: the same bloom, pushed
-            # one step further towards pink.
-            grad.setColorAt(0.0, QColor("#ff5f9e"))
-            grad.setColorAt(1.0, QColor("#ff2d78"))
-        else:
-            grad.setColorAt(0.0, QColor("#8b6dff"))
-            grad.setColorAt(0.55, QColor("#b45cf5"))
-            grad.setColorAt(1.0, QColor("#ff4d94"))
         if self._hover:
-            grad.setColorAt(0.0, QColor("#9b81ff"))
-            grad.setColorAt(1.0, QColor("#ff6ba6"))
-
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(grad))
-        painter.drawEllipse(box)
-
-        # A thin white rim keeps the circle alive on a white card.
-        painter.setPen(QPen(QColor(255, 255, 255, 150 if self._hover else 110), 1.0))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(box)
-
-        # The glyph, in white, optically centred.
-        painter.setPen(
-            QPen(
-                QColor(255, 255, 255, 245), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin
+            # A tinted disc only on hover: the resting state is pure glyph.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(
+                QColor(255, 77, 148, 40) if self.danger else QColor(123, 92, 255, 30)
             )
-        )
+            painter.drawEllipse(box)
+
+        # The ink: the brand gradient, or the pink end of it for close.
+        if self.danger:
+            ink = QBrush(QColor("#ff2d78"))
+        else:
+            ink = gradient_brush(box)
+        width = 1.7 if self.glyph != "close" else 1.9
+        painter.setPen(QPen(ink, width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+
         cx, cy = box.center().x(), box.center().y()
-        arm = box.width() * 0.17
+        arm = box.width() * 0.19
         if self.glyph == "minimize":
             painter.drawLine(QPointF(cx - arm, cy), QPointF(cx + arm, cy))
         elif self.glyph == "maximize":
-            painter.drawRect(QRectF(cx - arm, cy - arm, arm * 2, arm * 2))
-        elif self.glyph == "restore":
-            painter.drawRect(
-                QRectF(cx - arm + 1.5, cy - arm - 1.5, arm * 2 - 1, arm * 2 - 1)
+            painter.drawRoundedRect(
+                QRectF(cx - arm, cy - arm, arm * 2, arm * 2), 2.0, 2.0
             )
-            painter.drawRect(
-                QRectF(cx - arm - 1.5, cy - arm + 1.5, arm * 2 - 1, arm * 2 - 1)
+        elif self.glyph == "restore":
+            painter.drawRoundedRect(
+                QRectF(cx - arm + 1.6, cy - arm - 1.6, arm * 2 - 1, arm * 2 - 1),
+                1.8,
+                1.8,
+            )
+            painter.drawRoundedRect(
+                QRectF(cx - arm - 1.6, cy - arm + 1.6, arm * 2 - 1, arm * 2 - 1),
+                1.8,
+                1.8,
             )
         else:  # close
             painter.drawLine(QPointF(cx - arm, cy - arm), QPointF(cx + arm, cy + arm))
             painter.drawLine(QPointF(cx - arm, cy + arm), QPointF(cx + arm, cy - arm))
+        painter.end()
 
 
 class NavButton(QAbstractButton):
-    """A rail destination: a hand-drawn glyph that fills with the brand.
+    """A rail destination: a hand-drawn glyph painted in the brand gradient.
 
-    Drawn rather than shipped as images or emoji: it stays crisp at any DPI,
-    needs no assets, and the active state can be the gradient the rest of the
-    app already speaks in.
+    The panel is deliberately *empty*.  Filled gradient pills behind five icons
+    turned the rail into a row of buttons competing with the page; the glyph
+    itself carries the brand instead, and the active destination is marked by
+    ink strength plus a short gradient bar on the rail's edge.  Nothing here
+    paints a background, so the rail's glass shows through.
     """
 
     GLYPHS = ("chat", "notes", "tools", "profile", "settings")
+
+    #: Active glyphs are saturated; idle ones fall back to this ink.
+    IDLE_INK = QColor(TEXT_DIM)
 
     def __init__(
         self, glyph: str, parent: QWidget | None = None, *, size: int = 42
@@ -970,8 +1009,12 @@ class NavButton(QAbstractButton):
         self.setFixedSize(size, size)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
+        # Both attributes are required for a self-painting widget on a
+        # translucent parent: without them Qt hands paintEvent a buffer with no
+        # alpha channel and anything left unpainted comes out opaque black.
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
         self.setCheckable(False)
         self._hover = False
         self._active = False
@@ -996,83 +1039,31 @@ class NavButton(QAbstractButton):
         super().leaveEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        from .nora_glyphs import draw_glyph
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setCompositionMode(QPainter.CompositionMode_Source)
-        painter.fillRect(self.rect(), Qt.transparent)
-        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
-        box = QRectF(self.rect()).adjusted(3, 3, -3, -3)
+        box = QRectF(self.rect()).adjusted(9, 9, -9, -9)
 
-        # The active pill *is* the gradient; hover is a whisper of it.
         if self._active or self._hover:
+            # A whisper of the brand *behind* the ink, not a filled button:
+            # enough to say "here", not enough to shout.
             pill = QPainterPath()
-            pill.addRoundedRect(box, 13, 13)
-            if self._active:
-                grad = QLinearGradient(box.topLeft(), box.bottomRight())
-                grad.setColorAt(0.0, QColor("#7b5cff"))
-                grad.setColorAt(1.0, QColor("#ff4d94"))
-                painter.fillPath(pill, QBrush(grad))
-            else:
-                painter.fillPath(pill, QColor(123, 92, 255, 22))
+            pill.addRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), 14, 14)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(123, 92, 255, 26 if self._active else 14))
+            painter.drawPath(pill)
 
-        ink = QColor("#ffffff") if self._active else QColor(TEXT_DIM)
-        painter.setPen(QPen(ink, 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        if self._active:
+            painter.setPen(QPen(gradient_brush(self.rect(), vertical=True), 1.9))
+        elif self._hover:
+            painter.setPen(QPen(QColor(ACCENT), 1.9))
+        else:
+            painter.setPen(QPen(self.IDLE_INK, 1.7))
         painter.setBrush(Qt.NoBrush)
-        self._draw_glyph(painter, box)
-
-    def _draw_glyph(self, painter: QPainter, box: QRectF) -> None:
-        c = box.center()
-        w = box.width()
-        r = w * 0.24
-        if self.glyph == "chat":
-            bubble = QRectF(c.x() - r * 1.15, c.y() - r, r * 2.3, r * 1.7)
-            path = QPainterPath()
-            path.addRoundedRect(bubble, r * 0.5, r * 0.5)
-            path.moveTo(bubble.left() + r * 0.55, bubble.bottom())
-            path.lineTo(bubble.left() + r * 0.45, bubble.bottom() + r * 0.62)
-            path.lineTo(bubble.left() + r * 1.1, bubble.bottom())
-            path.closeSubpath()
-            painter.drawPath(path)
-        elif self.glyph == "notes":
-            page = QRectF(c.x() - r * 0.85, c.y() - r * 1.05, r * 1.7, r * 2.1)
-            painter.drawRoundedRect(page, r * 0.28, r * 0.28)
-            for offset in (-0.35, 0.05, 0.45):
-                y = c.y() + r * offset
-                painter.drawLine(
-                    QPointF(page.left() + r * 0.35, y),
-                    QPointF(page.right() - r * 0.35, y),
-                )
-        elif self.glyph == "tools":
-            # a slider: two tracks, two knobs — the "settings-ish" tool glyph
-            for index, (dy, knob) in enumerate(((-0.42, 0.35), (0.42, -0.3))):
-                y = c.y() + r * dy
-                painter.drawLine(
-                    QPointF(c.x() - r * 1.1, y), QPointF(c.x() + r * 1.1, y)
-                )
-                painter.drawEllipse(QPointF(c.x() + r * knob, y), r * 0.26, r * 0.26)
-                del index
-        elif self.glyph == "profile":
-            painter.drawEllipse(QPointF(c.x(), c.y() - r * 0.5), r * 0.42, r * 0.42)
-            path = QPainterPath()
-            path.moveTo(c.x() - r * 0.85, c.y() + r * 1.05)
-            path.quadTo(c.x(), c.y() + r * 0.15, c.x() + r * 0.85, c.y() + r * 1.05)
-            painter.drawPath(path)
-        else:  # settings: a gear drawn as a ring plus six teeth
-            painter.drawEllipse(c, r * 0.62, r * 0.62)
-            import math
-
-            for step in range(6):
-                angle = math.radians(step * 60)
-                inner = QPointF(
-                    c.x() + math.cos(angle) * r * 0.78,
-                    c.y() + math.sin(angle) * r * 0.78,
-                )
-                outer = QPointF(
-                    c.x() + math.cos(angle) * r * 1.12,
-                    c.y() + math.sin(angle) * r * 1.12,
-                )
-                painter.drawLine(inner, outer)
+        draw_glyph(painter, self.glyph, box)
+        painter.end()
 
 
 def glass_style() -> str:
