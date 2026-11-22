@@ -40,7 +40,7 @@ def _render(size: int, *, background: QColor | None = None) -> QImage:
     image.fill(background if background is not None else Qt.transparent)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    draw_mark(painter, size, ring=size >= 24, spark=size >= 64)
+    draw_mark(painter, size, spark=size >= 64)
     painter.end()
     return image
 
@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     painter = QPainter(tile)
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.translate(112, 112)
-    draw_mark(painter, 800, ring=True, spark=True)
+    draw_mark(painter, 800, spark=True)
     painter.end()
     tile_path = OUT / "nora-tile.png"
     tile.save(str(tile_path), "PNG")

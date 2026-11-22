@@ -80,18 +80,18 @@ class MoodChip(QPushButton):
         self.setStyleSheet(
             """
             QPushButton#moodChip {
-                background: rgba(255,255,255,26);
-                border: 1px solid rgba(255,255,255,40);
+                background: rgba(255,255,255,225);
+                border: 1px solid rgba(24,18,40,30);
                 border-radius: 12px;
                 padding: 6px 12px 6px 34px;
-                color: #f3ecf8;
+                color: #1b1725;
                 font-size: 12px;
                 text-align: left;
             }
-            QPushButton#moodChip:hover { background: rgba(255,255,255,48); }
+            QPushButton#moodChip:hover { background: #ffffff; border-color: rgba(123,92,255,110); }
             QPushButton#moodChip:checked {
-                background: rgba(242,167,208,90);
-                border: 1px solid rgba(255,210,235,180);
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #7b5cff, stop:1 #ff4d94);
+                border: 1px solid rgba(123,92,255,150);
                 color: #ffffff;
             }
             """
@@ -129,12 +129,12 @@ class MemoryRow(QFrame):
         self.setStyleSheet(
             """
             QFrame#memoryRow {
-                background: rgba(255,255,255,18);
-                border: 1px solid rgba(255,255,255,28);
+                background: rgba(255,255,255,235);
+                border: 1px solid rgba(24,18,40,26);
                 border-radius: 10px;
             }
-            QFrame#memoryRow QLabel { color: #efe7f6; font-size: 12px; }
-            QFrame#memoryRow QLabel#when { color: #b9aac6; font-size: 10px; }
+            QFrame#memoryRow QLabel { color: #1b1725; font-size: 12px; }
+            QFrame#memoryRow QLabel#when { color: #8b8399; font-size: 10px; }
             """
         )
         row = QHBoxLayout(self)
@@ -159,8 +159,8 @@ class MemoryRow(QFrame):
         remove.setStyleSheet(
             """
             QPushButton {
-                background: rgba(255,255,255,20);
-                border: none; border-radius: 12px; color: #e8dcef;
+                background: rgba(24,18,40,16);
+                border: none; border-radius: 12px; color: #1b1725;
             }
             QPushButton:hover { background: rgba(255,120,150,110); }
             """
@@ -191,7 +191,7 @@ class PersonalPanel(QWidget):
             from .nora_brand import logo_pixmap
             from PyQt5.QtGui import QIcon
 
-            self.setWindowIcon(QIcon(logo_pixmap(256, ring=False, spark=False)))
+            self.setWindowIcon(QIcon(logo_pixmap(256)))
         except Exception:  # pragma: no cover - an icon must never block a window
             pass
         self.setMinimumSize(460, 520)
@@ -216,9 +216,9 @@ class PersonalPanel(QWidget):
         titles = QVBoxLayout()
         titles.setSpacing(0)
         name = QLabel("Nora")
-        name.setStyleSheet("color:#fdf7ff; font-size:19px; font-weight:600;")
+        name.setStyleSheet("color:#1b1725; font-size:19px; font-weight:600;")
         self.mood_line = QLabel("şu an: mutlu")
-        self.mood_line.setStyleSheet("color:#cbb8d8; font-size:11px;")
+        self.mood_line.setStyleSheet("color:#6a6380; font-size:11px;")
         titles.addWidget(name)
         titles.addWidget(self.mood_line)
         header.addLayout(titles, 1)
@@ -237,17 +237,17 @@ class PersonalPanel(QWidget):
             button.setStyleSheet(
                 """
                 QPushButton#sectionTab {
-                    background: rgba(255,255,255,16);
-                    border: 1px solid rgba(255,255,255,30);
+                    background: rgba(255,255,255,220);
+                    border: 1px solid rgba(24,18,40,26);
                     border-radius: 10px;
-                    color: #e9dff2;
+                    color: #1b1725;
                     font-size: 12px;
                     padding: 4px 14px;
                 }
-                QPushButton#sectionTab:hover { background: rgba(255,255,255,40); }
+                QPushButton#sectionTab:hover { background: rgba(123,92,255,26); }
                 QPushButton#sectionTab:checked {
-                    background: rgba(242,167,208,80);
-                    border-color: rgba(255,205,232,170);
+                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #7b5cff, stop:1 #ff4d94);
+                    border-color: rgba(123,92,255,120);
                     color: #ffffff;
                 }
                 """
@@ -267,7 +267,7 @@ class PersonalPanel(QWidget):
         footer = QLabel(
             "Değişiklikler anında uygulanır · buradaki her şey yalnızca bu cihazda saklanır"
         )
-        footer.setStyleSheet("color:#a99bb8; font-size:10px;")
+        footer.setStyleSheet("color:#8b8399; font-size:10px;")
         footer.setWordWrap(True)
         layout.addWidget(footer)
 
@@ -282,7 +282,7 @@ class PersonalPanel(QWidget):
         layout.setSpacing(10)
 
         hint = QLabel("Nasıl hissetmesini istersin?")
-        hint.setStyleSheet("color:#e7dcf1; font-size:12px;")
+        hint.setStyleSheet("color:#1b1725; font-size:12px;")
         layout.addWidget(hint)
 
         grid = QGridLayout()
@@ -302,7 +302,7 @@ class PersonalPanel(QWidget):
             "Buradan sabitlersen, sen değiştirene kadar o ruh hâlinde kalır."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color:#bdaecb; font-size:11px; line-height:150%;")
+        note.setStyleSheet("color:#6a6380; font-size:11px; line-height:150%;")
         layout.addWidget(note)
         layout.addStretch(1)
         return page
@@ -314,7 +314,7 @@ class PersonalPanel(QWidget):
         layout.setSpacing(8)
 
         self.memory_count = QLabel("Henüz bir şey hatırlamıyor.")
-        self.memory_count.setStyleSheet("color:#e7dcf1; font-size:12px;")
+        self.memory_count.setStyleSheet("color:#1b1725; font-size:12px;")
         layout.addWidget(self.memory_count)
 
         scroll = QScrollArea()
@@ -366,7 +366,7 @@ class PersonalPanel(QWidget):
         layout.addWidget(self._field_label("Konuşma tarzı"))
         self.style_note = QLabel()
         self.style_note.setWordWrap(True)
-        self.style_note.setStyleSheet("color:#bdaecb; font-size:11px;")
+        self.style_note.setStyleSheet("color:#6a6380; font-size:11px;")
         layout.addWidget(self.style_note)
 
         layout.addSpacing(4)
@@ -399,24 +399,24 @@ class PersonalPanel(QWidget):
     @staticmethod
     def _field_label(text: str) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet("color:#d6c8e3; font-size:11px; font-weight:600;")
+        label.setStyleSheet("color:#4a4460; font-size:11px; font-weight:600;")
         return label
 
     @staticmethod
     def _chip_style() -> str:
         return """
             QPushButton {
-                background: rgba(255,255,255,16);
-                border: 1px solid rgba(255,255,255,30);
+                background: rgba(24,18,40,12);
+                border: 1px solid rgba(24,18,40,26);
                 border-radius: 10px;
-                color: #e9dff2;
+                color: #1b1725;
                 font-size: 12px;
                 padding: 4px 12px;
             }
-            QPushButton:hover { background: rgba(255,255,255,40); }
+            QPushButton:hover { background: rgba(123,92,255,26); }
             QPushButton:checked {
-                background: rgba(242,167,208,80);
-                border-color: rgba(255,205,232,170);
+                background: rgba(123,92,255,40);
+                border-color: rgba(123,92,255,150);
                 color: #ffffff;
             }
         """
@@ -425,14 +425,14 @@ class PersonalPanel(QWidget):
     def _input_style() -> str:
         return """
             QLineEdit {
-                background: rgba(255,255,255,22);
-                border: 1px solid rgba(255,255,255,38);
+                background: rgba(24,18,40,18);
+                border: 1px solid rgba(123,92,255,26);
                 border-radius: 10px;
                 padding: 7px 10px;
-                color: #fdf7ff;
+                color: #1b1725;
                 font-size: 12px;
             }
-            QLineEdit:focus { border-color: rgba(255,205,232,190); }
+            QLineEdit:focus { border-color: rgba(123,92,255,150); }
         """
 
     # ------------------------------------------------------------- behaviour
@@ -523,8 +523,8 @@ class PortraitBadge(QWidget):
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 16, 16)
         painter.setClipPath(path)
-        painter.fillPath(path, QColor(255, 255, 255, 26))
-        painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
+        painter.fillPath(path, QColor(255, 255, 255, 240))
+        painter.setPen(QPen(QColor(24, 18, 40, 30), 1))
         painter.drawPath(path)
         painter.setRenderHint(QPainter.Antialiasing, False)
         painter.save()

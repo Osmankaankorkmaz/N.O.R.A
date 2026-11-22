@@ -94,7 +94,7 @@ def _brand_icon() -> QIcon:
 
     icon = QIcon()
     for size in (16, 24, 32, 48, 64, 128, 256, 512):
-        icon.addPixmap(logo_pixmap(size, ring=size >= 32, spark=size >= 64))
+        icon.addPixmap(logo_pixmap(size, spark=size >= 64))
     return icon
 
 
@@ -653,7 +653,7 @@ class NoraApp(QWidget):
 
         icon = QIcon()
         for size in (16, 24, 32, 48, 64, 128, 256):
-            icon.addPixmap(logo_pixmap(size, ring=size >= 24, spark=size >= 64))
+            icon.addPixmap(logo_pixmap(size, spark=size >= 64))
         return icon
 
     def _legacy_tray_icon(self) -> QIcon:
@@ -1088,10 +1088,12 @@ class NoraApp(QWidget):
 
     @staticmethod
     def _menu_style() -> str:
-        return """QMenu { background: #2a193c; color: white; border: 1px solid #ff6b9d; padding: 5px; }
-                  QMenu::item { padding: 6px 22px; border-radius: 5px; }
-                  QMenu::item:selected { background: #ff6b9d; }
-                  QMenu::separator { height: 1px; background: #6a3d7e; margin: 4px 8px; }"""
+        # White menus, ink type, the brand gradient only on the selected row.
+        return """QMenu { background: #ffffff; color: #1b1725; border: 1px solid rgba(24,18,40,34); padding: 6px; }
+                  QMenu::item { padding: 6px 22px; border-radius: 6px; }
+                  QMenu::item:selected { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #7b5cff, stop:1 #ff4d94); color: white; }
+                  QMenu::item:disabled { color: rgba(27,23,37,110); }
+                  QMenu::separator { height: 1px; background: rgba(24,18,40,28); margin: 4px 8px; }"""
 
     def _connect_signals(self) -> None:
         # Single click = tickle (she giggles); double click = personal panel.
@@ -1172,6 +1174,7 @@ class NoraApp(QWidget):
         self.splash = SplashScreen()
         self.splash.finished.connect(self._splash_done)
         self._splash_step = 0
+        self._splash_started = time.monotonic()
         self.splash.set_step(0)
         self.splash.start()
         # A real timer owned by this app, not QTimer.singleShot: a pending
@@ -1184,13 +1187,24 @@ class NoraApp(QWidget):
 
     def _advance_splash(self) -> None:
         """One timer tick = one honest step of the real start-up work."""
-        from .nora_splash import STEPS
+        from .nora_splash import HOLD_SECONDS, STEPS
 
         splash = getattr(self, "splash", None)
         if splash is None:
             return
-        if self._splash_step >= len(STEPS):
+        if self._splash_step > len(STEPS):
             splash.finish()
+            return
+        if self._splash_step == len(STEPS):
+            # Hold the card for the rest of its five seconds, then hand over.
+            # Waiting is honest: the work is done, the entrance is not.
+            splash.set_step(len(STEPS) - 1)
+            splash.set_status("Hazır")
+            splash.set_progress(1.0)
+            elapsed = time.monotonic() - self._splash_started
+            remaining = max(0.0, HOLD_SECONDS - elapsed)
+            self._splash_step += 1
+            self._splash_timer.start(int(remaining * 1000) if remaining else 60)
             return
         try:
             if self._splash_step == 0:
@@ -1205,7 +1219,8 @@ class NoraApp(QWidget):
         except Exception as exc:  # never swallow: the card says what broke
             logger.exception("Açılış adımı başarısız: %s", exc)
             splash.fail(f"Açılış tamamlanamadı: {exc}")
-            self._splash_timer.start(1400)
+            self._splash_step = len(STEPS) + 1
+            self._splash_timer.start(1800)
             return
         self._splash_step += 1
         self._splash_timer.start(190)
@@ -1838,7 +1853,9 @@ class NoraApp(QWidget):
         box.button(QMessageBox.Yes).setText("Evet")
         box.button(QMessageBox.No).setText("Hayır")
         box.setStyleSheet(
-            "QMessageBox { background: #2a193c; } QLabel { color: white; } QPushButton { color: white; background: #7c4dff; padding: 6px 14px; border-radius: 6px; }"
+            "QMessageBox { background: #ffffff; } QLabel { color: #1b1725; } "
+            "QPushButton { color: white; padding: 6px 16px; border-radius: 8px; "
+            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #7b5cff, stop:1 #ff4d94); }"
         )
         return box.exec_() == QMessageBox.Yes
 

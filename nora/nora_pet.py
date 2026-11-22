@@ -126,14 +126,15 @@ class SpeechBubble(QWidget):
         tail.lineTo(cx + 8, body.bottom() - 1)
         tail.closeSubpath()
         path.addPath(tail)
+        # White speech card, ink type, brand-tinted hairline.  Fits the white UI.
         if self._speaker == "user":
-            painter.setPen(QPen(QColor("#7c4dff"), 1.6))
-            painter.setBrush(QColor("#f3ecff"))
+            painter.setPen(QPen(QColor("#7b5cff"), 1.4))
+            painter.setBrush(QColor(255, 255, 255, 250))
         else:
-            painter.setPen(QPen(QColor("#ff6b9d"), 1.5))
-            painter.setBrush(QColor("#fffafc"))
+            painter.setPen(QPen(QColor("#ff4d94"), 1.3))
+            painter.setBrush(QColor(255, 255, 255, 252))
         painter.drawPath(path.simplified())
-        painter.setPen(QColor("#3a204c"))
+        painter.setPen(QColor("#1b1725"))
         font = QFont("Segoe UI", 9)
         painter.setFont(font)
         painter.drawText(

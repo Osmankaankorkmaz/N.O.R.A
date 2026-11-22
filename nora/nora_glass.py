@@ -58,14 +58,15 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-# Palette: cool violet-tinted glass with a warm accent, mirroring the avatar.
-GLASS_TINT = QColor(28, 22, 38, 168)
-GLASS_TINT_LIGHT = QColor(46, 36, 60, 150)
-HAIRLINE = QColor(255, 255, 255, 46)
-ACCENT = QColor("#c78bb8")
-ACCENT_BRIGHT = QColor("#f2a7d0")
-TEXT = QColor("#f4ecf7")
-TEXT_DIM = QColor("#c4b2cf")
+# Palette: white frosted glass with the brand's violet→pink as the only colour.
+# Everything dark here is ink, never pure black.
+GLASS_TINT = QColor(255, 255, 255, 216)
+GLASS_TINT_LIGHT = QColor(252, 250, 255, 232)
+HAIRLINE = QColor(24, 18, 40, 24)
+ACCENT = QColor("#7b5cff")
+ACCENT_BRIGHT = QColor("#ff4d94")
+TEXT = QColor("#1b1725")
+TEXT_DIM = QColor("#6a6380")
 
 STYLE = f"""
 QWidget#glassRoot {{ background: transparent; }}
@@ -73,42 +74,42 @@ QFrame#glassCard {{
     background: transparent;
 }}
 QLabel {{ color: {TEXT.name()}; background: transparent; }}
-QLabel#title {{ color: #ffffff; font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }}
+QLabel#title {{ color: {TEXT.name()}; font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }}
 QLabel#subtitle {{ color: {TEXT_DIM.name()}; font-size: 11px; }}
 QLabel#status {{ color: {TEXT_DIM.name()}; font-size: 11px; }}
 QPushButton {{
-    background: rgba(255,255,255,18);
-    color: #f3e8f6;
-    border: 1px solid rgba(255,255,255,34);
+    background: rgba(24,18,40,10);
+    color: {TEXT.name()};
+    border: 1px solid rgba(24,18,40,26);
     border-radius: 11px;
     padding: 5px 9px;
     font-size: 12px;
 }}
-QPushButton:hover {{ background: rgba(255,255,255,38); border-color: rgba(255,255,255,74); }}
-QPushButton:pressed {{ background: rgba(199,139,184,120); }}
-QPushButton:disabled {{ color: rgba(220,205,225,110); background: rgba(255,255,255,10); }}
+QPushButton:hover {{ background: rgba(123,92,255,26); border-color: rgba(123,92,255,120); }}
+QPushButton:pressed {{ background: rgba(123,92,255,52); }}
+QPushButton:disabled {{ color: rgba(27,23,37,90); background: rgba(24,18,40,6); }}
 QPushButton#sendButton {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #c78bb8, stop:1 #8a6fc4);
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #7b5cff, stop:1 #ff4d94);
     border: none; border-radius: 14px; color: white; font-size: 15px;
 }}
-QPushButton#sendButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #e2a3cd, stop:1 #a086e0); }}
+QPushButton#sendButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #8f74ff, stop:1 #ff6ba6); }}
 QLineEdit {{
-    background: rgba(255,255,255,22);
-    color: #ffffff;
-    border: 1px solid rgba(255,255,255,40);
+    background: rgba(255,255,255,235);
+    color: {TEXT.name()};
+    border: 1px solid rgba(24,18,40,30);
     border-radius: 16px;
     padding: 9px 13px;
     font-size: 13px;
-    selection-background-color: rgba(199,139,184,140);
+    selection-background-color: rgba(123,92,255,90);
 }}
-QLineEdit:focus {{ border: 1px solid rgba(242,167,208,190); background: rgba(255,255,255,30); }}
+QLineEdit:focus {{ border: 1px solid rgba(123,92,255,170); background: #ffffff; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QScrollBar:vertical {{ background: transparent; width: 7px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: rgba(255,255,255,54); border-radius: 3px; min-height: 30px; }}
-QScrollBar::handle:vertical:hover {{ background: rgba(255,255,255,90); }}
+QScrollBar::handle:vertical {{ background: rgba(24,18,40,46); border-radius: 3px; min-height: 30px; }}
+QScrollBar::handle:vertical:hover {{ background: rgba(24,18,40,84); }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QToolTip {{ color: white; background: #2c2238; border: 1px solid rgba(255,255,255,60); padding: 4px; border-radius: 6px; }}
+QToolTip {{ color: {TEXT.name()}; background: #ffffff; border: 1px solid rgba(24,18,40,40); padding: 4px; border-radius: 6px; }}
 """
 
 
@@ -242,30 +243,33 @@ class FrostedPanel(QWidget):
             painter.drawPixmap(self.rect(), self._backdrop)
             painter.setOpacity(1.0)
 
+        # White glass: opaque enough to read type on, soft enough to feel like
+        # a card floating over the desktop.
         tint = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        tint.setColorAt(0.0, QColor(58, 46, 74, 150))
-        tint.setColorAt(0.55, QColor(34, 27, 46, 168))
-        tint.setColorAt(1.0, QColor(24, 19, 33, 182))
+        tint.setColorAt(0.0, QColor(255, 255, 255, 248))
+        tint.setColorAt(0.55, QColor(252, 250, 255, 244))
+        tint.setColorAt(1.0, QColor(247, 244, 253, 240))
         painter.fillPath(path, QBrush(tint))
 
-        # top-left specular sheen
+        # a barely-there brand bloom in the top-left corner
         sheen = QRadialGradient(
-            QPointF(rect.left() + rect.width() * 0.24, rect.top()),
-            rect.width() * 0.9,
+            QPointF(rect.left() + rect.width() * 0.18, rect.top()),
+            rect.width() * 0.85,
         )
-        sheen.setColorAt(0.0, QColor(255, 255, 255, 52))
+        sheen.setColorAt(0.0, QColor(123, 92, 255, 26))
+        sheen.setColorAt(0.55, QColor(255, 77, 148, 10))
         sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
         painter.fillPath(path, QBrush(sheen))
 
         painter.setClipping(False)
         painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(HAIRLINE, 1.2))
+        painter.setPen(QPen(QColor(24, 18, 40, 30), 1.2))
         painter.drawPath(path)
-        # brighter hairline along the top edge
+        # crisp white highlight along the top edge, the classic glass cue
         top = QPainterPath()
         top.moveTo(rect.left() + self.radius * 0.4, rect.top() + 1)
         top.lineTo(rect.right() - self.radius * 0.4, rect.top() + 1)
-        painter.setPen(QPen(QColor(255, 255, 255, 88), 1.4))
+        painter.setPen(QPen(QColor(255, 255, 255, 220), 1.4))
         painter.drawPath(top)
 
 
@@ -285,7 +289,9 @@ class GlassBubble(QFrame):
 
     def __init__(self, text: str, sender: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.sender = "user" if sender == "user" else "bot"
+        # Normalise *before* any subclass logic runs: NoraApp's ChatBubble reads
+        # self.sender while the base is still initialising.
+        self.sender = "user" if str(sender).lower() == "user" else "bot"
         self.sender_name = "Sen" if self.sender == "user" else "Nora"
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Minimum)
@@ -297,7 +303,8 @@ class GlassBubble(QFrame):
         label.setMaximumWidth(BUBBLE_LABEL_MAX)
         label.setTextFormat(Qt.PlainText)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        label.setStyleSheet("color: #f6effa; background: transparent; font-size: 13px;")
+        ink = "#ffffff" if self.sender == "user" else TEXT.name()
+        label.setStyleSheet(f"color: {ink}; background: transparent; font-size: 13px;")
         label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         layout.addWidget(label)
         self.label = label
@@ -316,17 +323,19 @@ class GlassBubble(QFrame):
         radius = 16.0
         path.addRoundedRect(rect, radius, radius)
         if self.sender == "user":
+            # The user's own words are the brand gradient: white ink on it.
             grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            grad.setColorAt(0.0, QColor(199, 139, 184, 205))
-            grad.setColorAt(1.0, QColor(138, 111, 196, 195))
-            painter.setPen(QPen(QColor(255, 255, 255, 66), 1.0))
-            name_color = QColor(255, 242, 250, 220)
+            grad.setColorAt(0.0, QColor("#7b5cff"))
+            grad.setColorAt(1.0, QColor("#ff4d94"))
+            painter.setPen(QPen(QColor(255, 255, 255, 70), 1.0))
+            name_color = QColor(255, 255, 255, 235)
         else:
+            # Nora's replies are quiet white cards with an ink hairline.
             grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            grad.setColorAt(0.0, QColor(58, 46, 74, 196))
-            grad.setColorAt(1.0, QColor(38, 30, 52, 188))
-            painter.setPen(QPen(QColor(255, 255, 255, 40), 1.0))
-            name_color = QColor(245, 184, 214, 225)
+            grad.setColorAt(0.0, QColor(255, 255, 255, 250))
+            grad.setColorAt(1.0, QColor(249, 246, 255, 246))
+            painter.setPen(QPen(QColor(24, 18, 40, 26), 1.0))
+            name_color = QColor("#7b5cff")
         painter.setBrush(QBrush(grad))
         painter.drawPath(path)
         painter.setPen(name_color)
@@ -368,7 +377,7 @@ class TypingIndicator(QWidget):
             alpha = int(90 + 110 * max(0.0, wave))
             radius = 3.4 + max(0.0, wave) * 1.2
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(240, 200, 230, alpha))
+            painter.setBrush(QColor(123, 92, 255, alpha))
             painter.drawEllipse(
                 QPointF(16 + index * 16, 14 - max(0.0, wave) * 2), radius, radius
             )
@@ -396,7 +405,7 @@ class GlassChatWindow(QWidget):
         shadow = _shadow_effect(self.panel)
         shadow.setBlurRadius(42)
         shadow.setOffset(0, 10)
-        shadow.setColor(QColor(8, 4, 14, 170))
+        shadow.setColor(QColor(60, 40, 110, 70))
         if shadow is not None:
             self.panel.setGraphicsEffect(shadow)
         outer.addWidget(self.panel)
@@ -639,8 +648,8 @@ class AvatarDot(QWidget):
             painter.drawPixmap(self.rect(), self._pixmap)
         else:
             grad = QLinearGradient(circle.topLeft(), circle.bottomRight())
-            grad.setColorAt(0.0, QColor("#c78bb8"))
-            grad.setColorAt(1.0, QColor("#7c4dff"))
+            grad.setColorAt(0.0, QColor("#7b5cff"))
+            grad.setColorAt(1.0, QColor("#ff4d94"))
             painter.fillPath(path, QBrush(grad))
         painter.setClipping(False)
         painter.setBrush(Qt.NoBrush)
@@ -719,45 +728,32 @@ class PetLogoButton(QWidget):
 
     # --------------------------------------------------------------- drawing
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        from .nora_brand import draw_mark
+        from .nora_brand import draw_mark, tile_path
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        box = min(rect.width(), rect.height())
+        box = min(self.width(), self.height())
 
-        # A brand tile, not a character badge.  The mark is pure white, so it
-        # needs a dark plate to sit on: on a white fill it vanished into the
-        # glass.  Hover lifts the plate, "she is outside" tints it pink.
-        fill = QColor(24, 18, 34, 220 if not self._hover else 240)
+        # The tile *is* the mark: the aurora squircle with the white N on it.
+        # It brightens on hover, and gets a pink halo while Nora is outside.
+        painter.save()
         if self._released:
-            fill = QColor(78, 38, 62, 235)
-        painter.setBrush(fill)
-        border = QColor(255, 255, 255, 64 if self._hover else 34)
-        if self._released:
-            border = QColor(255, 190, 225, 170)
-        painter.setPen(QPen(border, 1.1))
-        radius = box * 0.30
-        painter.drawRoundedRect(rect, radius, radius)
-
-        if self._released:
-            glow = QColor(255, 190, 225, int(70 * (1.0 - self._pulse)))
-            painter.setPen(QPen(glow, 2.0))
-            grow = 2.5 * self._pulse
-            painter.drawRoundedRect(
-                rect.adjusted(-grow, -grow, grow, grow), radius + grow, radius + grow
+            halo = QRadialGradient(
+                QPointF(self.width() / 2.0, self.height() / 2.0), box * 0.75
             )
-
-        mark = box * 0.60
-        painter.translate(
-            rect.center().x() - mark / 2.0,
-            rect.center().y() - mark / 2.0,
-        )
-        draw_mark(
-            painter,
-            int(round(mark)),
-            ring=False,
-            spark=False,
-            color=QColor(255, 255, 255, 255 if self._hover else 236),
-        )
+            glow = QColor(255, 77, 148, int(90 * (1.0 - self._pulse)))
+            halo.setColorAt(0.5, QColor(255, 77, 148, 0))
+            halo.setColorAt(1.0, glow)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(halo))
+            painter.drawEllipse(
+                QRectF(-box * 0.12, -box * 0.12, box * 1.24, box * 1.24)
+            )
+        draw_mark(painter, int(round(box)), glow=False)
+        if self._hover:
+            # a soft white wash over the tile, so the whole badge reacts
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 34))
+            painter.drawPath(tile_path(QRectF(0, 0, box, box)))
+        painter.restore()
         painter.end()

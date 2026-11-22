@@ -444,7 +444,7 @@ def test_tray_icon_is_the_brand_mark_not_the_character(qapp, tmp_path):
         if after.pixelColor(x, y).alpha() > 200
         and after.pixelColor(x, y).lightness() > 240
     )
-    reference = logo_image(64, ring=True, spark=True)
+    reference = logo_image(64, spark=True)
     assert whites > 0
     assert reference.size() == after.size()
     # the old character icon path must not be what we ship

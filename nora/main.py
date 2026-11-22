@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
 
     brand = QIcon()
     for size in (16, 24, 32, 48, 64, 128, 256, 512):
-        brand.addPixmap(logo_pixmap(size, ring=size >= 32, spark=size >= 64))
+        brand.addPixmap(logo_pixmap(size, spark=size >= 64))
     app.setWindowIcon(brand)
     options = NoraOptions(
         wake_word=False if args.no_wake_word else None,

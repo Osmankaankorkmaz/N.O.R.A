@@ -53,7 +53,8 @@ def _pump(ms: int) -> None:
 
 
 # ------------------------------------------------------------------ the mark
-def test_mark_is_white_and_mostly_empty_at_the_edges(app) -> None:
+def test_mark_is_the_brand_tile_with_a_white_letter(app) -> None:
+    """Aurora tile + white N — no black anywhere, and no bleeding off canvas."""
     image = _mark(128)
     opaque = [
         (x, y)
@@ -63,44 +64,76 @@ def test_mark_is_white_and_mostly_empty_at_the_edges(app) -> None:
     ]
     assert opaque, "the mark drew nothing"
     colours = {image.pixelColor(x, y).name() for x, y in opaque}
-    assert colours == {"#ffffff"}, f"the mark must be pure white, got {colours}"
-    # transparent margin all round: no icon that bleeds off its own canvas
+
+    # the letter is pure white and really present
+    assert "#ffffff" in colours
+    # the tile is the brand gradient: violet through to pink
+    def hue_near(name: str, hue: float, tol: float = 22.0) -> bool:
+        h = QColor(name).hue()
+        return abs(((h - hue + 180) % 360) - 180) <= tol
+
+    vivid = [
+        name
+        for name in colours
+        if QColor(name).saturation() > 90 and QColor(name).lightness() < 240
+    ]
+    assert len(vivid) > 20, "the tile has no gradient"
+    assert any(hue_near(n, 252) for n in vivid), "no violet stop"
+    assert any(hue_near(n, 330) for n in vivid), "no pink stop"
+
+    # nothing is black: every drawn pixel is either white or a vivid brand tone
+    for name in colours:
+        colour = QColor(name)
+        assert colour.lightness() > 60, f"black pixel in the logo: {name}"
+
+    # transparent margin: the squircle must not bleed off its own canvas
     xs = [x for x, _ in opaque]
     ys = [y for _, y in opaque]
-    assert min(xs) >= 6 and min(ys) >= 6
-    assert max(xs) <= 121 and max(ys) <= 121
+    assert min(xs) >= 2 and min(ys) >= 2
+    assert max(xs) <= 125 and max(ys) <= 125
 
 
 def test_mark_has_a_letter_shaped_hole(app) -> None:
-    """An N must have a counter: pure white blobs are not a logo.
+    """The white N must have a counter: a white blob is not a logo.
 
-    The counter is the empty wedge between the left stem and the diagonal, so it
-    is measured where it actually exists — not at the exact centre, which the
-    diagonal legitimately crosses.
+    The counter is the empty wedge between the left stem and the diagonal.  It
+    is measured there — the exact centre of the tile is legitimately crossed by
+    the diagonal, so a centre probe would be wrong.
     """
     image = _mark(128)
 
-    def runs(y: int) -> int:
-        """How many white runs one scanline crosses — inside the letter only.
+    def spans(y: int) -> list[tuple[int, int]]:
+        out: list[tuple[int, int]] = []
+        start = None
+        for x in range(128):
+            white = image.pixelColor(x, y).name() == "#ffffff"
+            if white and start is None:
+                start = x
+            elif not white and start is not None:
+                out.append((start, x - 1))
+                start = None
+        if start is not None:
+            out.append((start, 127))
+        return out
 
-        Scanned from 20..108 so the decorative ring is excluded; the ring is a
-        separate, switchable element and would otherwise be counted as a stroke.
-        """
-        white = [image.pixelColor(x, y).alpha() > 128 for x in range(20, 108)]
-        return sum(1 for i in range(1, len(white)) if white[i] and not white[i - 1])
+    # An N is the only letter whose middle scanline shows three separate white
+    # strokes — left stem, diagonal, right stem.  A blob never does.
+    rows = [len(spans(y)) for y in range(30, 100)]
+    assert max(rows) == 3, f"the glyph is not an N: run counts {sorted(set(rows))}"
 
-    # An N crossed horizontally shows three strokes: left stem, diagonal, right
-    # stem.  Two runs means the counter is filled in and the glyph is a slab.
-    assert runs(50) == 3, f"expected stem/diagonal/stem, got {runs(50)} run(s)"
-    # and it really is a counter, not a notch: the wedge must be several
-    # percent of the canvas wide at that height
-    empty = sum(1 for x in range(20, 108) if image.pixelColor(x, 50).alpha() <= 128)
-    assert empty > 12, "the counter is too thin to read as an N"
+    # The open counters must be wide enough to read as an N, not a notch.
+    # Widest empty span between the outermost strokes, over the whole letter.
+    widest = 0
+    for y in range(30, 100):
+        sp = spans(y)
+        for (_, a), (b, _) in zip(sp, sp[1:]):
+            widest = max(widest, b - a - 1)
+    assert widest > 12, f"the counter is too thin to read as an N ({widest} px)"
 
 
 def test_mark_scales_down_to_a_tray_icon(app) -> None:
     for size in (16, 24, 32, 48, 64):
-        image = _mark(size, ring=size >= 24, spark=size >= 64)
+        image = _mark(size, spark=size >= 64)
         assert image.size().width() == size
         assert image.size().height() == size
         opaque = sum(
@@ -112,13 +145,17 @@ def test_mark_scales_down_to_a_tray_icon(app) -> None:
         assert opaque > 0, f"nothing drawn at {size}px"
 
 
-def test_spark_is_opt_in_and_inside_the_ring(app) -> None:
+def test_spark_is_opt_in(app) -> None:
     plain = _mark(128, spark=False)
     with_spark = _mark(128, spark=True)
     assert plain != with_spark
-    # and the ring itself is a separate switch
-    no_ring = _mark(128, ring=False, spark=False)
-    assert no_ring != plain
+
+
+def test_bare_glyph_variant_is_transparent(app) -> None:
+    """``tile=False`` is the wordmark form: gradient N, no tile behind it."""
+    image = _mark(128, tile=False)
+    corner = image.pixelColor(2, 2)
+    assert corner.alpha() == 0, "the bare glyph must not paint a tile"
 
 
 def test_logo_pixmap_roundtrip(app) -> None:
@@ -192,6 +229,26 @@ def test_splash_failure_is_visible(app) -> None:
     splash.hide()
 
 
+def test_splash_card_is_white_not_black(app) -> None:
+    from nora.nora_splash import SplashScreen
+
+    splash = SplashScreen()
+    splash._set_intro(1.0)
+    image = QImage(splash.width(), splash.height(), QImage.Format_ARGB32)
+    image.fill(0)
+    splash.render(image)
+    # sample the card body, away from the mark and the text
+    body = image.pixelColor(int(image.width() * 0.12), int(image.height() * 0.62))
+    assert body.lightness() > 235, f"splash card is not white: {body.name()}"
+    splash.hide()
+
+
+def test_splash_holds_for_five_seconds(app) -> None:
+    from nora.nora_splash import HOLD_SECONDS
+
+    assert HOLD_SECONDS == 5.0
+
+
 def test_splash_paints_something(app) -> None:
     from nora.nora_splash import SplashScreen
 
@@ -216,9 +273,10 @@ def test_launch_shows_the_splash_then_the_app(nora_app) -> None:
     assert nora_app.splash is not None
     assert nora_app.splash.isVisible()
     assert not nora_app.chat_window.isVisible()
-    # Four steps at ~190 ms each, plus the finish timer.  Pump generously:
-    # a slow CI box must not turn a timing margin into a false failure.
-    for _ in range(24):
+    # Three real steps at ~190 ms each, then the card is *held* until the full
+    # five seconds are up.  Pump generously: a slow CI box must not turn a
+    # timing margin into a false failure.
+    for _ in range(36):
         _pump(200)
     assert getattr(nora_app, "splash", None) is None
     assert nora_app.chat_window.isVisible()
@@ -241,9 +299,16 @@ def test_logo_shows_the_mark_not_the_character(nora_app) -> None:
         1
         for x in range(image.width())
         for y in range(image.height())
-        if image.pixelColor(x, y).lightness() > 200
+        if image.pixelColor(x, y).name() == "#ffffff"
     )
-    assert whites > 60, "the header badge is missing the white N"
+    vivid = sum(
+        1
+        for x in range(image.width())
+        for y in range(image.height())
+        if image.pixelColor(x, y).saturation() > 90
+    )
+    assert whites > 40, "the header badge is missing the white N"
+    assert vivid > 200, "the header badge is missing the brand tile"
 
 
 def test_character_emerges_from_the_logo(nora_app) -> None:
