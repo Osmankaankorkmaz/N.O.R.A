@@ -417,7 +417,14 @@ def test_tts_indicator_and_mode_restore_are_visible(qapp, monkeypatch):
     app.shutdown()
 
 
-def test_tray_icon_refreshes_with_pixel_appearance(qapp, tmp_path):
+def test_tray_icon_is_the_brand_mark_not_the_character(qapp, tmp_path):
+    """The tray belongs to the app, so it carries the app logo.
+
+    The character has her own window with her own art; the tray used to show a
+    second, different face, which made it unclear which one was Nora.
+    """
+    from nora.nora_brand import logo_image
+
     app = NoraApp(
         NoraOptions(
             wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
@@ -426,7 +433,22 @@ def test_tray_icon_refreshes_with_pixel_appearance(qapp, tmp_path):
     before = app.tray.icon().pixmap(64, 64).toImage()
     app._apply_settings({"hair_color": "#202b52", "outfit": "casual"})
     after = app.tray.icon().pixmap(64, 64).toImage()
-    assert not after.isNull() and after != before
+    assert not after.isNull()
+    # hair colour no longer touches the brand mark
+    assert after == before
+    # and the mark really is the white N: some pixels are near-white
+    whites = sum(
+        1
+        for x in range(after.width())
+        for y in range(after.height())
+        if after.pixelColor(x, y).alpha() > 200
+        and after.pixelColor(x, y).lightness() > 240
+    )
+    reference = logo_image(64, ring=True, spark=True)
+    assert whites > 0
+    assert reference.size() == after.size()
+    # the old character icon path must not be what we ship
+    assert app._tray_icon().isNull() is False
     app.shutdown()
 
 

@@ -664,11 +664,12 @@ def glass_style() -> str:
 
 
 class PetLogoButton(QWidget):
-    """The 8-bit Nora logo that lives in the chat header.
+    """Nora's brand logo (the white **N**) in the chat header.
 
-    Clicking it lets the character step out of the app and onto the desktop;
-    clicking again tucks her back in.  The badge draws the same pixel art as the
-    desktop pet, so the "she comes from the logo" idea reads on screen.
+    The mark *is* the character's door: pressing it plays the "she climbs out
+    of the logo" animation and drops her onto the desktop; pressing it again
+    pulls her back in.  Drawn from :mod:`nora.nora_brand`, never from a file, so
+    it stays crisp at any size and can be repainted on a light or dark card.
     """
 
     clicked = pyqtSignal()
@@ -718,65 +719,45 @@ class PetLogoButton(QWidget):
 
     # --------------------------------------------------------------- drawing
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        from .nora_pixel_art import PixelCharacter
+        from .nora_brand import draw_mark
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        box = min(rect.width(), rect.height())
 
-        # glass disc, warmer while hovered or when she is outside
-        fill = QColor(255, 255, 255, 34 if not self._hover else 52)
+        # A brand tile, not a character badge.  The mark is pure white, so it
+        # needs a dark plate to sit on: on a white fill it vanished into the
+        # glass.  Hover lifts the plate, "she is outside" tints it pink.
+        fill = QColor(24, 18, 34, 220 if not self._hover else 240)
         if self._released:
-            fill = QColor(242, 167, 208, 90)
+            fill = QColor(78, 38, 62, 235)
         painter.setBrush(fill)
-        border = QColor(255, 255, 255, 90 if self._hover else 56)
+        border = QColor(255, 255, 255, 64 if self._hover else 34)
         if self._released:
-            border = QColor(255, 205, 232, 190)
-        painter.setPen(QPen(border, 1.4))
-        painter.drawEllipse(rect)
+            border = QColor(255, 190, 225, 170)
+        painter.setPen(QPen(border, 1.1))
+        radius = box * 0.30
+        painter.drawRoundedRect(rect, radius, radius)
 
-        # a slow halo when she is out on the desktop
         if self._released:
-            glow = QColor(255, 190, 225, int(60 * (1.0 - self._pulse)))
+            glow = QColor(255, 190, 225, int(70 * (1.0 - self._pulse)))
             painter.setPen(QPen(glow, 2.0))
-            grow = 3.0 * self._pulse
-            painter.drawEllipse(rect.adjusted(-grow, -grow, grow, grow))
+            grow = 2.5 * self._pulse
+            painter.drawRoundedRect(
+                rect.adjusted(-grow, -grow, grow, grow), radius + grow, radius + grow
+            )
 
-        # the 8-bit head, clipped to the disc
-        painter.setRenderHint(QPainter.Antialiasing, False)
-        painter.save()
-        path = QPainterPath()
-        path.addEllipse(rect)
-        painter.setClipPath(path)
-        # Centre the *face* (logical x 11..29, y 2..21) inside the disc.
-        scale = 2 if self.width() >= 40 else 1
+        mark = box * 0.60
         painter.translate(
-            rect.width() / 2.0 - 20 * scale,
-            -6 * scale,
+            rect.center().x() - mark / 2.0,
+            rect.center().y() - mark / 2.0,
         )
-        PixelCharacter().draw_scaled(
+        draw_mark(
             painter,
-            scale=scale,
-            state="idle",
-            emotion="happy",
-            frame=0,
-            appearance={"outfit": "cream"},
-            animations=False,
-        )
-        painter.restore()
-
-        # small "in/out" arrow hint in the corner
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(QPen(QColor(255, 255, 255, 170), 1.2))
-        tip_x = rect.right() - 7.0
-        tip_y = rect.bottom() - 7.0
-        direction = -1.0 if self._released else 1.0
-        painter.drawLine(
-            QPointF(tip_x - 4.0, tip_y - 3.0 * direction),
-            QPointF(tip_x, tip_y + 1.0 * direction),
-        )
-        painter.drawLine(
-            QPointF(tip_x - 4.0, tip_y + 1.0 * direction),
-            QPointF(tip_x, tip_y + 1.0 * direction),
+            int(round(mark)),
+            ring=False,
+            spark=False,
+            color=QColor(255, 255, 255, 255 if self._hover else 236),
         )
         painter.end()

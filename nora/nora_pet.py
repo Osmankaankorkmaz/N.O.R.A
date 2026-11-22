@@ -225,6 +225,13 @@ class NoraPet(QWidget):
         self._press_pos = QPoint()
         self._dragging = False
         self._drag_complained = False
+        # "Climbing out of the logo" animation: 1.0 = fully out.  While it is
+        # below 1 the character is drawn scaled up from its feet, so it really
+        # looks like she grows out of the mark on the header.
+        self._emerge = 1.0
+        self._emerge_timer = QTimer(self)
+        self._emerge_timer.setInterval(16)
+        self._emerge_timer.timeout.connect(self._tick_emerge)
         self._bubble: SpeechBubble | None = None
         self._speech_queue: deque[tuple[str, int, str]] = deque(maxlen=5)
         self._bubble_timer = QTimer(self)
@@ -263,6 +270,25 @@ class NoraPet(QWidget):
         if screen is None:
             return QRectF(0, 0, 1280, 720).toRect(), QRectF(0, 0, 1280, 720).toRect()
         return screen.availableGeometry(), screen.geometry()
+
+    def play_emerge(self) -> None:
+        """Start the "she grows out of the logo" entrance."""
+        self._emerge = 0.0
+        self._emerge_timer.start()
+        self.update()
+
+    def _tick_emerge(self) -> None:
+        self._emerge = min(1.0, self._emerge + 0.075)
+        if self._emerge >= 1.0:
+            self._emerge_timer.stop()
+        self.update()
+
+    def default_position(self) -> tuple[int, int]:
+        """Where she rests on the current screen: bottom-right, on the floor."""
+        available, _ = self._screen_rects()
+        x = int(available.right() - self.WIDTH - 20)
+        y = int(self._current_floor())
+        return x, y
 
     def _current_floor(self) -> float:
         available, full = self._screen_rects()
@@ -781,8 +807,24 @@ class NoraPet(QWidget):
     # ------------------------------------------------------------------ drawing
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
+        if self._emerge < 1.0:
+            # Grow from the feet, not the centre: she rises out of the mark
+            # instead of a balloon inflating in place.
+            eased = 1.0 - (1.0 - self._emerge) ** 3
+            scale = 0.12 + 0.88 * eased
+            painter.save()
+            painter.translate(self.WIDTH / 2.0, float(self.HEIGHT))
+            painter.scale(scale, scale)
+            painter.translate(-self.WIDTH / 2.0, -float(self.HEIGHT))
+            painter.setOpacity(min(1.0, 0.25 + eased))
+            self._paint_character(painter)
+            painter.restore()
+            return
         # The renderer snaps every rectangle to a 3×3 grid.  Smoothing or
         # fractional transforms here would blur the deliberately retro art.
+        self._paint_character(painter)
+
+    def _paint_character(self, painter: QPainter) -> None:
         if self.character_style == "pixel":
             painter.setRenderHint(QPainter.Antialiasing, False)
             painter.setRenderHint(QPainter.SmoothPixmapTransform, False)

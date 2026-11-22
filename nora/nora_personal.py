@@ -187,6 +187,13 @@ class PersonalPanel(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowTitle("Nora · özel panel")
+        try:
+            from .nora_brand import logo_pixmap
+            from PyQt5.QtGui import QIcon
+
+            self.setWindowIcon(QIcon(logo_pixmap(256, ring=False, spark=False)))
+        except Exception:  # pragma: no cover - an icon must never block a window
+            pass
         self.setMinimumSize(460, 520)
         self.setStyleSheet(glass_style())
 

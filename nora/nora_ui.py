@@ -16,7 +16,14 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from PyQt5.QtCore import QEvent, QPoint, Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import (
+    QEvent,
+    QPoint,
+    Qt,
+    QThread,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt5.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -79,6 +86,16 @@ from .nora_tools import NoraTools
 from .nora_voice import NoraVoice
 
 logger = logging.getLogger(__name__)
+
+
+def _brand_icon() -> QIcon:
+    """The process-wide app icon: the white N on transparent (no character art)."""
+    from .nora_brand import logo_pixmap
+
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256, 512):
+        icon.addPixmap(logo_pixmap(size, ring=size >= 32, spark=size >= 64))
+    return icon
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -260,10 +277,15 @@ class NoraApp(QWidget):
         super().__init__(parent)
         self.options = options or NoraOptions()
         self.setWindowTitle("Nora")
+        self.setWindowIcon(_brand_icon())
         self.setWindowFlags(Qt.Tool)
         self.setFixedSize(0, 0)
         self.hide()
         self._closing = False
+        #: Whether this instance may terminate the whole QApplication.  False
+        #: until ``main()`` marks the one real app: a second instance (tests,
+        #: or a quick relaunch) must never quit the shared event loop.
+        self._owns_quit = False
         self._busy = False
         self._listening = False
         self._wake_followup = False
@@ -436,6 +458,7 @@ class NoraApp(QWidget):
         )
         self.chat_window.setAttribute(Qt.WA_TranslucentBackground)
         self.chat_window.setWindowTitle("Nora")
+        self.chat_window.setWindowIcon(_brand_icon())
         self.chat_window.setMinimumSize(820, 620)
         self.chat_window.setStyleSheet(glass_style())
 
@@ -620,6 +643,20 @@ class NoraApp(QWidget):
         self.glass_panel.refresh_backdrop()
 
     def _tray_icon(self) -> QIcon:
+        """The system tray icon: Nora's brand mark.
+
+        The tray is the *app*, so it carries the app's logo.  The character has
+        her own window with her own art; two different faces in the tray made it
+        unclear which one was Nora.
+        """
+        from .nora_brand import logo_pixmap
+
+        icon = QIcon()
+        for size in (16, 24, 32, 48, 64, 128, 256):
+            icon.addPixmap(logo_pixmap(size, ring=size >= 24, spark=size >= 64))
+        return icon
+
+    def _legacy_tray_icon(self) -> QIcon:
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -1085,7 +1122,12 @@ class NoraApp(QWidget):
         self.ptt_hotkey.error.connect(self._on_ptt_error)
         app = QApplication.instance()
         if app:
-            app.aboutToQuit.connect(self.shutdown)
+            app.aboutToQuit.connect(self._on_about_to_quit)
+
+    def _on_about_to_quit(self) -> None:
+        """The loop is already going away; clean up without asking it to quit."""
+        self._owns_quit = False
+        self.shutdown()
 
     #: The microphone is intentionally disabled.  The user talks to Nora by
     #: typing; Nora answers out loud.  Turning this on would need a microphone
@@ -1105,17 +1147,78 @@ class NoraApp(QWidget):
         )
         return True
 
-    def start(self) -> None:
+    def start(self, splash: bool = False) -> None:
         """Open like a normal desktop app: the chat window first.
 
-        Nora is *inside* the app until the user clicks the little 8-bit logo in
-        the corner; only then does she step out onto the desktop.  That is the
-        behaviour the reference app has, and it keeps the desktop tidy on
-        launch.
+        Nora is *inside* the app until the user clicks the logo in the header;
+        only then does she climb out onto the desktop.  That is the behaviour
+        the reference app has, and it keeps the desktop tidy on launch.
+
+        ``splash=True`` hands the first paint to the branded launch card (see
+        :mod:`nora.nora_splash`); the real entry point uses it, tests do not
+        need the extra window.
         """
-        self.show_chat()
-        # The pet is created but stays hidden until ``release_pet`` runs.
         self._pet_released = False
+        if splash:
+            self._start_with_splash()
+            return
+        self.show_chat()
+
+    # ------------------------------------------------------------- splash flow
+    def _start_with_splash(self) -> None:
+        """Show the branded card, let Qt paint it, then finish the real warm-up."""
+        from .nora_splash import SplashScreen
+
+        self.splash = SplashScreen()
+        self.splash.finished.connect(self._splash_done)
+        self._splash_step = 0
+        self.splash.set_step(0)
+        self.splash.start()
+        # A real timer owned by this app, not QTimer.singleShot: a pending
+        # single-shot is destroyed when another app instance is torn down, which
+        # silently froze the splash in exactly that situation.
+        if not hasattr(self, "_splash_timer"):
+            self._splash_timer = QTimer(self)
+            self._splash_timer.timeout.connect(self._advance_splash)
+        self._splash_timer.start(0)
+
+    def _advance_splash(self) -> None:
+        """One timer tick = one honest step of the real start-up work."""
+        from .nora_splash import STEPS
+
+        splash = getattr(self, "splash", None)
+        if splash is None:
+            return
+        if self._splash_step >= len(STEPS):
+            splash.finish()
+            return
+        try:
+            if self._splash_step == 0:
+                # settings + data dir are already loaded in __init__; this step
+                # is the reminder scheduler actually starting.
+                self.reminders.start()
+            elif self._splash_step == 1:
+                self._refresh_personal_context()
+            elif self._splash_step == 2:
+                self._sync_voice_modes()
+            self.splash.set_step(self._splash_step)
+        except Exception as exc:  # never swallow: the card says what broke
+            logger.exception("Açılış adımı başarısız: %s", exc)
+            splash.fail(f"Açılış tamamlanamadı: {exc}")
+            self._splash_timer.start(1400)
+            return
+        self._splash_step += 1
+        self._splash_timer.start(190)
+
+    def _splash_done(self) -> None:
+        timer = getattr(self, "_splash_timer", None)
+        if timer is not None:
+            timer.stop()
+        splash = getattr(self, "splash", None)
+        self.splash = None
+        if splash is not None:
+            splash.deleteLater()
+        self.show_chat()
 
     def release_pet(self) -> None:
         """Let the character climb out of the logo and onto the desktop."""
@@ -1124,7 +1227,7 @@ class NoraApp(QWidget):
         self._pet_released = True
         self.pet.show()
         self.pet.raise_()
-        self.pet.show_speech("Dışarı çıktım! 🐾", 2200)
+        self._animate_out_of_logo()
         if self.logo_button is not None:
             self.logo_button.setToolTip("Nora masada — yine basarsa içeri girer")
             self.logo_button.set_released(True)
@@ -1138,6 +1241,40 @@ class NoraApp(QWidget):
         if self.logo_button is not None:
             self.logo_button.setToolTip("Nora'yı masaüstüne indir")
             self.logo_button.set_released(False)
+
+    def _animate_out_of_logo(self) -> None:
+        """Grow her out of the header logo, then let her fall to the desktop.
+
+        The **character** is the thing that grows: her window is fixed-size by
+        design, so the mark-to-girl expansion happens inside ``paintEvent``.
+        A short hop afterwards is a real jump, so she lands with physics rather
+        than teleporting onto the floor.
+        """
+        button = getattr(self, "logo_button", None)
+        pet = self.pet
+        if button is None or not button.isVisible():
+            pet.show_speech("Dışarı çıktım! 🐾", 2200)
+            return
+        try:
+            # Touch the geometry so a logo that is being destroyed cannot crash
+            # the animation half a second later.
+            button.mapToGlobal(QPoint(0, 0))
+        except RuntimeError:
+            pet.show_speech("Dışarı çıktım! 🐾", 2200)
+            return
+
+        # The pet window is fixed-size, so animating its geometry can never
+        # work; the character itself grows out of the mark while the window
+        # frames it.  The hop afterwards is the *real* physics jump.
+        target_x, target_y = pet.default_position()
+        pet.move(int(target_x), int(target_y + 26))
+        pet.play_emerge()
+        QTimer.singleShot(360, lambda: self._start_launch_hop(pet, target_x, target_y))
+
+    def _start_launch_hop(self, pet, x: int, y: int) -> None:
+        """The real (physics) little jump that puts her on the floor."""
+        pet.jump_to(int(x), int(y))
+        pet.show_speech("Dışarı çıktım! 🐾", 2200)
 
     def toggle_pet(self) -> None:
         if getattr(self, "_pet_released", False):
@@ -3979,6 +4116,11 @@ class NoraApp(QWidget):
         # The personal panel is a separate top-level window: leaving it open
         # would outlive the app (and keep painting her portrait after the
         # character itself is gone).
+        splash = getattr(self, "splash", None)
+        if splash is not None:
+            splash.hide()
+            splash.deleteLater()
+            self.splash = None
         panel = getattr(self, "personal_panel", None)
         if panel is not None:
             panel.hide()
@@ -4005,9 +4147,13 @@ class NoraApp(QWidget):
         self.chat_window.hide()
         self.tray.hide()
         self.hide()
+        # ``shutdown`` is also called by ``aboutToQuit`` and by tests.  Calling
+        # ``app.quit()`` unconditionally killed the *whole* QApplication — and
+        # with it every timer of every other Nora instance — which is how a
+        # freshly started splash could freeze when another app was torn down.
         if not self._workers:
             app = QApplication.instance()
-            if app:
+            if app is not None and self._owns_quit:
                 app.quit()
         else:
             logger.info("Arka plan işlemi bitince Nora kapanacak.")
