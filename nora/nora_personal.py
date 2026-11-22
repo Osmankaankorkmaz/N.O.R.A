@@ -197,6 +197,18 @@ class PersonalPanel(QWidget):
         self.setMinimumSize(460, 520)
         self.setStyleSheet(glass_style())
 
+        from .nora_brand import CARD_RADIUS
+
+        # Same corner language as the launch card and the chat window.
+        self.setStyleSheet(
+            self.styleSheet()
+            + f"""
+QFrame#glassCard {{
+    background: transparent;
+    border-radius: {int(CARD_RADIUS)}px;
+}}
+"""
+        )
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 14, 14, 14)
 

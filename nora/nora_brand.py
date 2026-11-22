@@ -60,6 +60,14 @@ LETTER_BOTTOM = 0.734
 TILE_INSET = 0.040
 TILE_RADIUS = 0.232
 
+#: The product's corner language.  The launch card is drawn with this radius,
+#: and every window that follows the card uses the same number — otherwise the
+#: app looks like a hard rectangle glued to a soft one.
+CARD_RADIUS = 30.0
+
+#: How much smaller a nested card should be, so two rounded edges never fight.
+CARD_RADIUS_INSET = 8.0
+
 
 def gradient(stops: tuple[tuple[float, QColor], ...] = GRADIENT_STOPS):
     """The brand gradient across ``rect``."""
@@ -282,6 +290,8 @@ def splash_gradient(painter: QPainter, rect: QRectF) -> None:
 
 __all__ = [
     "BRAND_ORCHID",
+    "CARD_RADIUS",
+    "CARD_RADIUS_INSET",
     "BRAND_PINK",
     "BRAND_VIOLET",
     "GRADIENT_STOPS",

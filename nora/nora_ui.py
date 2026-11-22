@@ -25,7 +25,17 @@ from PyQt5.QtCore import (
     QTimer,
     pyqtSignal,
 )
-from PyQt5.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
+from PyQt5.QtGui import (
+    QColor,
+    QFont,
+    QIcon,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRegion,
+)
 from PyQt5.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -59,7 +69,6 @@ from .nora_glass import (
     FrostedPanel,
     GlassBubble,
     TypingIndicator,
-    _shadow_effect,
     glass_style,
 )
 from .nora_hotkeys import DEFAULT_PTT_KEY, PushToTalkHotkey
@@ -265,6 +274,21 @@ class CornerGrip(QWidget):
         )
         self.raise_()
 
+
+def _rounded_window_mask(window: QWidget) -> None:
+    """Give a frameless window a genuinely rounded silhouette.
+
+    Painting rounded corners is not enough: a translucent top-level window has
+    its background composited behind every child, so the square corners survive
+    as a pale ghost.  A window mask is what actually shapes the surface.
+    """
+    from .nora_brand import CARD_RADIUS
+
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(window.rect()), CARD_RADIUS, CARD_RADIUS)
+    polygon = path.toFillPolygon().toPolygon()
+    window.setMask(QRegion(polygon))
+
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
         # Three short strokes, the usual OS affordance, in ink not black.
         painter = QPainter(self)
@@ -300,13 +324,35 @@ class WhitePage(QWidget):
     It paints with :func:`nora.nora_brand.splash_gradient`, so the hand-over
     from the loading card to the app has no colour jump at all — the card
     dissolves and the same white blooms underneath.
+
+    Qt fills a translucent top-level window's background *before* the widget
+    paints, so a page that only paints a rounded gradient still shows square,
+    opaque corners.  This widget therefore declares no system background and
+    does the rounding itself, in one pass: erase to fully transparent, then
+    fill the rounded rect.
     """
 
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        from .nora_brand import splash_gradient
+        from .nora_brand import CARD_RADIUS, splash_gradient
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        # Erase first: the composer may hand us a stale or filled buffer.
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+        # Then fill exactly the launch card's rounded rect: the page *is* the
+        # card grown to window size, not a rectangle behind a rounded panel.
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), CARD_RADIUS, CARD_RADIUS)
+        painter.setClipPath(path)
         splash_gradient(painter, QRectF(self.rect()))
 
 
@@ -538,12 +584,14 @@ class NoraApp(QWidget):
         self.resize_grip = CornerGrip(self.chat_window)
 
         root = QVBoxLayout(self.chat_window)
+        # No margin at all: the glass card is the window, edge to edge, so its
+        # rounded corners are the window's rounded corners.
         root.setContentsMargins(0, 0, 0, 0)
         self.glass_panel = FrostedPanel(self.chat_window)
         self.glass_panel.setObjectName("glassCard")
-        shadow = _shadow_effect(self.glass_panel)
-        if shadow is not None:
-            self.glass_panel.setGraphicsEffect(shadow)
+        # No drop shadow: the card *is* the window now, so a shadow would only
+        # smear the corners it is supposed to share with the launch card.  The
+        # desktop already separates the window from what is behind it.
         root.addWidget(self.glass_panel)
 
         layout = QVBoxLayout(self.glass_panel)
@@ -567,6 +615,7 @@ class NoraApp(QWidget):
         self.logo_button = PetLogoButton(size=44)
         self.logo_button.clicked.connect(self.toggle_pet)
         self.logo_button.setToolTip("Nora'yı masaüstüne çıkar / içeri al")
+        header.setToolTip("Pencereyi sürüklemek için tut · araçlar için sağ tık")
         header_outer.addWidget(self.logo_button)
 
         titles = QVBoxLayout()
@@ -673,7 +722,7 @@ class NoraApp(QWidget):
         self._glass_blur_timer.setInterval(200)
         self._glass_blur_timer.timeout.connect(self._refresh_glass_backdrop)
 
-    def _chat_more_menu(self) -> None:
+    def _chat_more_menu(self, at: QPoint | None = None) -> None:
         menu = QMenu(self.chat_window)
         menu.setStyleSheet(self._menu_style())
         menu.addAction("📸 Ekranı analiz et", self._analyze_screen)
@@ -684,11 +733,14 @@ class NoraApp(QWidget):
         )
         menu.addAction("🩺 Groq bağlantısı", self._check_groq)
         menu.addAction("🔑 Groq anahtarı gir", self._groq_setup_dialog)
+        if at is not None:
+            menu.exec_(at)
+            return
         button = getattr(self, "more_button", None)
         if button is None:
-            # The header carries no buttons any more; anchor the overflow on
-            # the window itself so the same tools stay one click away.
-            menu.exec_(self.chat_window.mapToGlobal(self.chat_window.rect().topRight()))
+            # No button to anchor to: open under the title row, right aligned.
+            origin = self.chat_window.mapToGlobal(self.chat_window.rect().topRight())
+            menu.exec_(origin)
             return
         menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
 
@@ -1837,6 +1889,8 @@ class NoraApp(QWidget):
                 grip = getattr(self, "resize_grip", None)
                 if grip is not None:
                     grip._place()
+                if event.type() == QEvent.Resize:
+                    _rounded_window_mask(window)
             if event.type() == QEvent.Close:
                 # Closing hides the panel; Nora keeps living in the tray.
                 event.ignore()
@@ -1877,6 +1931,14 @@ class NoraApp(QWidget):
             elif event.type() == QEvent.MouseButtonRelease:
                 self._chat_drag_origin = None
                 self.chat_header.setCursor(Qt.OpenHandCursor)
+            elif (
+                event.type() == QEvent.MouseButtonPress
+                and event.button() == Qt.RightButton
+            ):
+                # Frameless: the old "⋯" button is gone, so the same tools live
+                # on a right-click on the title row.
+                self._chat_more_menu(event.globalPos())
+                return True
         return super().eventFilter(obj, event)
 
     def _tray_activated(self, reason) -> None:

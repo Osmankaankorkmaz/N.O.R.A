@@ -42,6 +42,7 @@ from PyQt5.QtWidgets import QWidget
 
 from .nora_brand import (
     BRAND_ORCHID,
+    CARD_RADIUS,
     BRAND_PINK,
     BRAND_VIOLET,
     INK,
@@ -180,7 +181,7 @@ class SplashScreen(QWidget):
         card = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
 
         path = QPainterPath()
-        path.addRoundedRect(card, 30.0, 30.0)
+        path.addRoundedRect(card, CARD_RADIUS, CARD_RADIUS)
         painter.setClipPath(path)
         splash_gradient(painter, card)
 

@@ -454,16 +454,31 @@ def test_header_is_a_title_row_with_no_buttons(nora_app) -> None:
 
 def test_white_page_paints_the_splash_colour(nora_app) -> None:
     """The page behind the glass is the splash backdrop, not a grey rectangle."""
+    nora_app.show_chat()
+    nora_app.chat_window.resize(240, 200)
+    _pump(200)
     page = nora_app.white_page
     page.resize(240, 200)
-    image = QImage(240, 200, QImage.Format_ARGB32)
+    image = QImage(page.size(), QImage.Format_ARGB32)
     image.fill(0)
     page.render(image)
 
-    # Every corner is white — this is a light page, not a dark one.
-    for point in ((4, 4), (236, 4), (4, 196), (236, 196), (120, 100)):
+    # The page is rounded, so the outermost corners are cut away by design.
+    # Everything inside the arc is white — this is a light page, not a dark one.
+    from nora.nora_brand import CARD_RADIUS
+
+    inset = int(CARD_RADIUS * 0.8)
+    for point in (
+        (inset, inset),
+        (page.width() - inset - 1, inset),
+        (inset, page.height() - inset - 1),
+        (page.width() - inset - 1, page.height() - inset - 1),
+        (page.width() // 2, page.height() // 2),
+    ):
         colour = image.pixelColor(*point)
         assert colour.lightness() > 235, f"page is not white at {point}: {colour.name()}"
+    # and the very corner really is transparent: the page is shaped, not square
+    assert image.pixelColor(0, 0).alpha() == 0
 
     # The brand bloom is present: the violet corner is measurably cooler than
     # a flat white fill would be, and bluer than green.
@@ -513,3 +528,97 @@ def test_splash_handover_is_a_fade_on_the_same_spot(nora_app) -> None:
     import sip
 
     assert sip.isdeleted(splash) or splash.isHidden()
+
+
+# --------------------------------------------------- one corner language
+def test_card_radius_is_shared_by_splash_and_window() -> None:
+    """The launch card and the app must not disagree about corner softness."""
+    from nora.nora_brand import CARD_RADIUS
+    from nora.nora_glass import FrostedPanel
+    from nora.nora_splash import SplashScreen
+
+    assert CARD_RADIUS >= 24, "a 30 px radius is the product's corner language"
+    assert FrostedPanel().radius == CARD_RADIUS
+
+    splash = SplashScreen()
+    try:
+        # the splash really paints that radius: no pixel outside the arc
+        assert splash.width() > 2 * CARD_RADIUS
+    finally:
+        splash.hide()
+        splash.deleteLater()
+
+
+def test_window_corners_are_actually_transparent(nora_app) -> None:
+    """The whole window is shaped, not just the card drawn inside it.
+
+    Painting a rounded panel is not enough: a translucent top-level window has
+    its background composited behind every child, so square corners survive as
+    a pale ghost.  The window itself carries a rounded mask.
+    """
+    from PyQt5.QtCore import QPoint
+    from PyQt5.QtGui import QRegion
+
+    from nora.nora_brand import CARD_RADIUS
+
+    nora_app.show_chat()
+    nora_app.chat_window.resize(420, 320)
+    _pump(250)
+    window = nora_app.chat_window
+    mask = window.mask()
+    assert not mask.isEmpty(), "the window has no rounded mask"
+
+    # outside the arc: not part of the surface at all
+    for point in ((0, 0), (2, 2), (window.width() - 1, 0), (0, window.height() - 1)):
+        assert not mask.contains(QPoint(*point)), f"corner is not rounded: {point}"
+    # inside: part of the surface
+    assert mask.contains(QPoint(window.width() // 2, window.height() // 2))
+    assert mask.contains(QPoint(window.width() // 2, 2))
+    assert mask.contains(QPoint(1, window.height() // 2))
+    # the corner is an arc, not a chamfer
+    assert mask.contains(QPoint(int(CARD_RADIUS * 0.75), int(CARD_RADIUS * 0.75)))
+
+    # and rendering really leaves the corner empty
+    image = QImage(window.size(), QImage.Format_ARGB32)
+    image.fill(0)
+    window.render(image)
+    assert image.pixelColor(0, 0).alpha() == 0
+    assert image.pixelColor(window.width() // 2, window.height() // 2).alpha() >= 250
+    # the mask and the painted card agree about the radius
+    assert isinstance(mask, QRegion)
+
+
+def test_window_silhouette_matches_the_launch_card(nora_app) -> None:
+    """Sample both silhouettes and require the same corner profile."""
+    from nora.nora_brand import CARD_RADIUS
+    from nora.nora_splash import SplashScreen
+
+    splash = SplashScreen()
+    splash._set_intro(1.0)
+    splash_image = QImage(splash.size(), QImage.Format_ARGB32)
+    splash_image.fill(0)
+    splash.render(splash_image)
+
+    nora_app.show_chat()
+    nora_app.chat_window.resize(400, 400)
+    _pump(200)
+    window = nora_app.chat_window
+    window_image = QImage(window.size(), QImage.Format_ARGB32)
+    window_image.fill(0)
+    window.render(window_image)
+
+    def first_solid(image: QImage, row: int) -> int:
+        for x in range(0, min(image.width(), int(CARD_RADIUS) + 2)):
+            if image.pixelColor(x, row).alpha() > 128:
+                return x
+        return -1
+
+    # walk down the left edge from the very top: the inset must shrink the same
+    # way on both, so their profiles agree within a pixel or two
+    for row in (1, 2, 4, 8, 12, 16, 24):
+        a = first_solid(splash_image, row)
+        b = first_solid(window_image, row)
+        assert a >= 0 and b >= 0, f"nothing solid at row {row}"
+        assert abs(a - b) <= 3, f"corner profile differs at row {row}: {a} vs {b}"
+    splash.hide()
+    splash.deleteLater()

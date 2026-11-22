@@ -58,6 +58,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from .nora_brand import CARD_RADIUS
+
 # Palette: white frosted glass with the brand's violet→pink as the only colour.
 # Everything dark here is ink, never pure black.
 GLASS_TINT = QColor(255, 255, 255, 216)
@@ -174,8 +176,10 @@ def enable_windows_blur(widget: QWidget, *, dark: bool = True) -> bool:
 class FrostedPanel(QWidget):
     """Paints a translucent card, optionally over a blurred screen snapshot."""
 
-    def __init__(self, parent: QWidget | None = None, *, radius: int = 22) -> None:
+    def __init__(self, parent: QWidget | None = None, *, radius: float = CARD_RADIUS) -> None:
         super().__init__(parent)
+        #: One radius for the whole product: the launch card and the window that
+        #: replaces it must have visibly identical corners.
         self.radius = radius
         self._backdrop: QPixmap | None = None
         self._backdrop_enabled = True
@@ -235,9 +239,20 @@ class FrostedPanel(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        # Full-bleed rect, exactly like the launch card: the card paints its
+        # rounded rect from (0, 0) with the full radius, so anything inset here
+        # would make the window's corners visibly tighter than the card's.
+        rect = QRectF(self.rect())
         path = QPainterPath()
         path.addRoundedRect(rect, self.radius, self.radius)
+
+        # This widget is the window, so it cannot be "translucent over a page":
+        # WA_NoSystemBackground leaves the buffer it inherits, which the page has
+        # already filled square, and the corners would stay square.  Erase to
+        # transparent and paint the card as one opaque shape instead.
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         painter.setClipPath(path)
 
         if self._backdrop is not None and not self._backdrop.isNull():
@@ -248,9 +263,9 @@ class FrostedPanel(QWidget):
         # White glass: opaque enough to read type on, soft enough to feel like
         # a card floating over the desktop.
         tint = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        tint.setColorAt(0.0, QColor(255, 255, 255, 248))
-        tint.setColorAt(0.55, QColor(252, 250, 255, 244))
-        tint.setColorAt(1.0, QColor(247, 244, 253, 240))
+        tint.setColorAt(0.0, QColor(255, 255, 255, 255))
+        tint.setColorAt(0.55, QColor(252, 250, 255, 252))
+        tint.setColorAt(1.0, QColor(247, 244, 253, 249))
         painter.fillPath(path, QBrush(tint))
 
         # a barely-there brand bloom in the top-left corner
