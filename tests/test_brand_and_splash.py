@@ -411,3 +411,105 @@ def test_ico_contains_every_windows_size() -> None:
     assert (16, 16) in sizes
     assert (256, 256) in sizes
     assert (32, 32) in sizes
+
+
+# ------------------------------------------------------- frameless white shell
+def test_chat_window_has_no_system_title_bar(nora_app) -> None:
+    """The OS chrome (icon, minimise, maximise, close) must not be there."""
+    from PyQt5.QtCore import Qt
+
+    flags = nora_app.chat_window.windowFlags()
+    assert flags & Qt.FramelessWindowHint, "the window must be frameless"
+    for chrome in (
+        Qt.WindowTitleHint,
+        Qt.WindowMinMaxButtonsHint,
+        Qt.WindowCloseButtonHint,
+        Qt.WindowSystemMenuHint,
+    ):
+        assert not flags & chrome, f"system chrome still present: {int(chrome)}"
+
+
+def test_header_is_a_title_row_with_no_buttons(nora_app) -> None:
+    """Every control that used to sit beside the title is gone."""
+    from PyQt5.QtWidgets import QAbstractButton
+
+    header = nora_app.chat_header
+    buttons = [
+        child
+        for child in header.findChildren(QAbstractButton)
+        if child is not nora_app.logo_button
+    ]
+    assert buttons == [], f"header still carries buttons: {buttons}"
+    for gone in (
+        "mic_button",
+        "settings_button",
+        "more_button",
+        "minimize_button",
+        "close_button",
+        "mic_indicator",
+        "speaker_indicator",
+    ):
+        assert not hasattr(nora_app, gone), f"{gone} should be gone from the header"
+
+
+def test_white_page_paints_the_splash_colour(nora_app) -> None:
+    """The page behind the glass is the splash backdrop, not a grey rectangle."""
+    page = nora_app.white_page
+    page.resize(240, 200)
+    image = QImage(240, 200, QImage.Format_ARGB32)
+    image.fill(0)
+    page.render(image)
+
+    # Every corner is white — this is a light page, not a dark one.
+    for point in ((4, 4), (236, 4), (4, 196), (236, 196), (120, 100)):
+        colour = image.pixelColor(*point)
+        assert colour.lightness() > 235, f"page is not white at {point}: {colour.name()}"
+
+    # The brand bloom is present: the violet corner is measurably cooler than
+    # a flat white fill would be, and bluer than green.
+    bloom = image.pixelColor(70, 40)
+    assert bloom.blue() > bloom.green(), "the violet bloom is missing"
+    assert bloom.name() != "#ffffff", "the page is flat white, not the splash gradient"
+
+
+def test_frameless_window_keeps_drag_resize_and_escape(nora_app) -> None:
+    """A window without a title bar still has to be movable, resizable, closable."""
+    nora_app.show_chat()
+    _pump(120)
+    grip = nora_app.resize_grip
+    assert grip.isVisible()
+    # it follows the frame
+    nora_app.chat_window.resize(920, 700)
+    _pump(60)
+    assert grip.x() == 920 - grip.SIZE
+    assert grip.y() == 700 - grip.SIZE
+    from PyQt5.QtCore import Qt as _Qt
+
+    assert nora_app.chat_header.cursor().shape() == _Qt.OpenHandCursor
+
+    from PyQt5.QtCore import QEvent, Qt
+    from PyQt5.QtGui import QKeyEvent
+
+    nora_app.chat_window.show()
+    event = QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier)
+    nora_app.eventFilter(nora_app.chat_window, event)
+    assert not nora_app.chat_window.isVisible()
+
+
+def test_splash_handover_is_a_fade_on_the_same_spot(nora_app) -> None:
+    """The card dissolves over the window that opened underneath it."""
+    nora_app.start(splash=True)
+    splash = nora_app.splash
+    assert splash is not None
+    _pump(200)
+    # the card is up and the window is not, exactly as before
+    assert not nora_app.chat_window.isVisible()
+    for _ in range(34):
+        _pump(200)
+    # the chat window is up and the card faded away on the same spot
+    assert nora_app.chat_window.isVisible()
+    assert getattr(nora_app, "splash", None) is None
+    # the card is off screen and scheduled for deletion: it never lingers
+    import sip
+
+    assert sip.isdeleted(splash) or splash.isHidden()

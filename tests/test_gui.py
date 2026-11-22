@@ -400,20 +400,24 @@ def test_chat_and_tool_replies_are_spoken_without_length_cap(qapp, monkeypatch):
     app.shutdown()
 
 
-def test_tts_indicator_and_mode_restore_are_visible(qapp, monkeypatch):
+def test_tts_state_and_mode_restore_are_visible(qapp, monkeypatch):
+    """The header carries no indicator chips any more, so state is checked
+    where it now lives: the voice itself, the stored preference and the tray
+    tooltip that reports it."""
     app = NoraApp(NoraOptions(wake_word=False, tts=True, proactive=False, offline=True))
     monkeypatch.setattr(app.voice, "speak", lambda *a, **k: True)
-    assert app.speaker_indicator.text() == "🔊"
+    app._update_tts_indicator()
+    assert "Sesli yanıt açık" in app.tray.toolTip()
     app._toggle_tts(False)
-    assert app.speaker_indicator.text() == "🔇"
+    assert "kapalı" in app.tray.toolTip()
     assert app.store.preference("tts") is False
     app._toggle_tts(True)
     app._activate_mode("focus")
     assert app.voice.tts_enabled is False
-    assert app.speaker_indicator.text() == "🔇"
+    assert "kapalı" in app.tray.toolTip()
     app._activate_mode("normal")
     assert app.voice.tts_enabled is True
-    assert app.speaker_indicator.text() == "🔊"
+    assert "Sesli yanıt açık" in app.tray.toolTip()
     app.shutdown()
 
 

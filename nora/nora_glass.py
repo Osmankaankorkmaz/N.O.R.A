@@ -70,9 +70,11 @@ TEXT_DIM = QColor("#6a6380")
 
 STYLE = f"""
 QWidget#glassRoot {{ background: transparent; }}
+QWidget#whitePage {{ background: #ffffff; }}
 QFrame#glassCard {{
     background: transparent;
 }}
+QWidget#chatHeader {{ background: transparent; }}
 QLabel {{ color: {TEXT.name()}; background: transparent; }}
 QLabel#title {{ color: {TEXT.name()}; font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }}
 QLabel#subtitle {{ color: {TEXT_DIM.name()}; font-size: 11px; }}

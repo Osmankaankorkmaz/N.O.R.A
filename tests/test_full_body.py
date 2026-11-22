@@ -360,7 +360,6 @@ def test_chat_window_is_a_normal_large_centred_app(qapp, tmp_path):
     # mask instead of doing a naive bitwise AND.
     assert (flags & Qt.WindowType_Mask) == Qt.Window
     assert not (flags & Qt.WindowStaysOnTopHint)
-    assert not (flags & Qt.FramelessWindowHint)
     app.show_chat()
     qapp.processEvents()
     assert window.width() >= 800 and window.height() >= 600

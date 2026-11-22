@@ -8,7 +8,7 @@ Design decisions
 ----------------
 * **White.** The card is white glass on the white desktop, with ink type.  The
   only colour is the brand gradient in the mark and the progress fill.
-* **Five seconds, honestly.** :data:`HOLD_SECONDS` is the minimum time the card
+* **Five to ten seconds, honestly.** :data:`HOLD_SECONDS` is the minimum time the card
   stays up so the entrance has room to breathe; the real work usually finishes
   sooner and the card waits for the animation rather than flashing away.
 * **A real entrance.** The tile draws itself, the N rises out of it, the
@@ -59,7 +59,12 @@ STEPS: tuple[str, ...] = (
 )
 
 #: How long the card stays on screen, at minimum, in seconds.
+#: The card stays up for at least five seconds and never longer than ten: real
+#: start-up work is usually done in under a second, so the card needs a floor
+#: (so it reads as a deliberate entrance) and a ceiling (so a slow first-run
+#: never leaves the user staring at it).
 HOLD_SECONDS = 5.0
+HOLD_MAX_SECONDS = 10.0
 
 #: Card geometry.
 CARD_SIZE = (580, 540)
@@ -300,4 +305,4 @@ class SplashScreen(QWidget):
         return grad
 
 
-__all__ = ["HOLD_SECONDS", "STEPS", "SplashScreen"]
+__all__ = ["HOLD_MAX_SECONDS", "HOLD_SECONDS", "STEPS", "SplashScreen"]
