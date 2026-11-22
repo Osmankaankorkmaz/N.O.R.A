@@ -68,6 +68,7 @@ from .nora_glass import (
     PetLogoButton,
     FrostedPanel,
     GradientWindowButton,
+    NavButton,
     GlassBubble,
     TypingIndicator,
     glass_style,
@@ -419,6 +420,8 @@ class NoraApp(QWidget):
         self._cancel_supported = False
         self._workers: set[QThread] = set()
         self._message_rows: list[QWidget] = []
+        #: Which rail destination is lit; the rail itself is built later.
+        self._active_nav = "chat"
         self._chat_user_moved = False
         self._chat_drag_offset: QPoint | None = None
         self._notified_errors: set[str] = set()
@@ -555,37 +558,46 @@ class NoraApp(QWidget):
         return font
 
     def _build_hero(self) -> QWidget:
-        """The first-run page: the mark, her name, and a way in."""
+        """The first-run page: the mark, her name, and a way in.
+
+        Composed as one card rather than loose text on the page: the mark sits
+        on a soft brand glow, the name and the line about her are centred under
+        it, and the three ways in are the last row of the card.  A single
+        surface gives the empty state a shape — loose text in a large window
+        just floats.
+        """
         hero = QWidget()
         hero.setObjectName("hero")
         outer = QVBoxLayout(hero)
-        outer.setContentsMargins(30, 8, 30, 8)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        outer.addStretch(2)
+        outer.addStretch(1)
+
+        card = QWidget()
+        card.setObjectName("heroCard")
+        card.setMaximumWidth(560)
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(40, 34, 40, 30)
+        inner.setSpacing(0)
 
         from .nora_brand import logo_pixmap
 
         mark = QLabel()
         mark.setAlignment(Qt.AlignCenter)
-        mark.setPixmap(logo_pixmap(84, spark=True))
+        mark.setPixmap(logo_pixmap(76, spark=True))
         # The pixmap is square and the label must not squash it: a QLabel keeps
         # its size hint from the pixmap, so no fixed height here.
         # A fixed size, not a minimum: inside a layout with stretches Qt will
         # otherwise shrink the label below its pixmap and clip the mark.
-        mark.setFixedSize(84, 84)
+        mark.setFixedSize(76, 76)
         mark.setScaledContents(False)
-        outer.addWidget(mark, 0, Qt.AlignHCenter)
-        # A stretch-free spacer *widget* (not addSpacing): with Qt.AlignHCenter
-        # on the mark, layout spacers are distributed differently and the 30 px
-        # title used to ride up over the mark's lower half.
-        spacer = QWidget()
-        spacer.setFixedHeight(18)
-        outer.addWidget(spacer)
+        inner.addWidget(mark, 0, Qt.AlignHCenter)
+        inner.addSpacing(20)
 
         title = QLabel("Merhaba, ben Nora.")  # noqa: RUF001 - Turkish text
         title.setObjectName("heroTitle")
         title.setAlignment(Qt.AlignCenter)
-        outer.addWidget(title)
+        inner.addWidget(title)
 
         body = QLabel(
             "Masaüstünde yaşayan Türkçe asistanın.\n"
@@ -594,9 +606,9 @@ class NoraApp(QWidget):
         body.setObjectName("heroBody")
         body.setAlignment(Qt.AlignCenter)
         body.setWordWrap(True)
-        outer.addSpacing(8)
-        outer.addWidget(body)
-        outer.addSpacing(26)
+        inner.addSpacing(9)
+        inner.addWidget(body)
+        inner.addSpacing(22)
 
         chips = QHBoxLayout()
         chips.setSpacing(8)
@@ -614,8 +626,10 @@ class NoraApp(QWidget):
             chips.addWidget(chip)
             self.hero_chips.append(chip)
         chips.addStretch(1)
-        outer.addLayout(chips)
-        outer.addStretch(3)
+        inner.addLayout(chips)
+
+        outer.addWidget(card, 0, Qt.AlignHCenter)
+        outer.addStretch(1)
         return hero
 
     def _update_hero(self) -> None:
@@ -633,6 +647,100 @@ class NoraApp(QWidget):
         scroll = getattr(self, "scroll", None)
         if scroll is not None:
             scroll.setVisible(not empty)
+
+    def _build_sidebar(self) -> QWidget:
+        """The rail: her mark, four destinations, settings at the bottom.
+
+        This is where the identity lives now.  The mark is bigger, it is the
+        first thing the eye lands on, and pressing it still pulls Nora out of
+        the logo and onto the desktop.
+        """
+        rail = QWidget()
+        rail.setObjectName("sidebar")
+        rail.setFixedWidth(96)
+        column = QVBoxLayout(rail)
+        column.setContentsMargins(0, 16, 0, 14)
+        column.setSpacing(0)
+
+        self.logo_button = PetLogoButton(size=46)
+        self.logo_button.clicked.connect(self.toggle_pet)
+        self.logo_button.setToolTip("Nora'yı masaüstüne çıkar / içeri al")
+        column.addWidget(self.logo_button, 0, Qt.AlignHCenter)
+
+        column.addSpacing(26)
+
+        # The four destinations live on one surface, with a hairline border and
+        # a caption: loose icons in a tall empty rail read as unfinished, a
+        # bordered group reads as a menu.
+        group = QWidget()
+        group.setObjectName("navGroup")
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(8, 10, 8, 10)
+        group_layout.setSpacing(4)
+
+        self.nav_buttons: dict[str, QPushButton] = {}
+        for key, glyph, tip, slot in (
+            ("chat", "chat", "Sohbet", self._show_chat_page),
+            ("notes", "notes", "Notlar", self._show_notes),
+            ("tools", "tools", "Araçlar", self._open_tools),
+            ("profile", "profile", "Kişisel panel", self._show_personal),
+        ):
+            button = NavButton(glyph, group)
+            button.setToolTip(tip)
+            button.setAccessibleName(tip)
+            button.clicked.connect(slot)
+            group_layout.addWidget(button, 0, Qt.AlignHCenter)
+            self.nav_buttons[key] = button
+        self._set_active_nav("chat")
+        column.addWidget(group)
+
+        column.addStretch(1)
+
+        self.settings_button = NavButton("settings", rail)
+        self.settings_button.setToolTip("Ayarlar")
+        self.settings_button.setAccessibleName("Ayarlar")
+        self.settings_button.clicked.connect(self._show_settings)
+        column.addWidget(self.settings_button, 0, Qt.AlignHCenter)
+        return rail
+
+    # ------------------------------------------------------------------ nav
+    #: Header title and subtitle for each destination in the rail.  One place,
+    #: so the rail and the page title can never disagree.
+    NAV_PAGES: dict[str, tuple[str, str]] = {
+        "chat": ("Sohbet", "Nora ile konuş"),
+        "notes": ("Notlar", "Aklında tutmamı istediklerin"),
+        "tools": ("Araçlar", "Ekran, kamera, sistem, modeller"),
+        "profile": ("Kişisel panel", "Seni tanıdığım kadarı"),
+    }
+
+    def _set_active_nav(self, key: str) -> None:
+        self._active_nav = key
+        for name, button in getattr(self, "nav_buttons", {}).items():
+            button.setActive(name == key)
+        title, subtitle = self.NAV_PAGES.get(key, self.NAV_PAGES["chat"])
+        if getattr(self, "chat_title", None) is not None:
+            self.chat_title.setText(title)
+        if getattr(self, "chat_subtitle", None) is not None:
+            self.chat_subtitle.setText(subtitle)
+
+    def _show_chat_page(self) -> None:
+        self._set_active_nav("chat")
+
+    def _open_tools(self) -> None:
+        """The tool menu the rail promises, opened next to its own button.
+
+        The menu is a popup, not a page: when it closes the rail goes back to
+        whatever page is actually on screen instead of leaving "tools" lit.
+        """
+        previous = self._active_nav
+        self._set_active_nav("tools")
+        button = self.nav_buttons["tools"]
+        self._chat_more_menu(button.mapToGlobal(button.rect().bottomRight()))
+        self._set_active_nav(previous)
+
+    def _show_personal(self) -> None:
+        self._set_active_nav("profile")
+        self.show_personal_panel()
 
     def _build_chat(self) -> None:
         """Frosted-glass chat panel (ChatGPT-desktop-like), unified NoraApp shell.
@@ -675,9 +783,29 @@ class NoraApp(QWidget):
         # desktop already separates the window from what is behind it.
         root.addWidget(self.glass_panel)
 
-        layout = QVBoxLayout(self.glass_panel)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(9)
+        # ---- shell -------------------------------------------------------
+        # Two columns, like every modern chat app: a quiet rail for identity and
+        # navigation, and a wide stage for the conversation itself.
+        shell = QHBoxLayout(self.glass_panel)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+
+        self.sidebar = self._build_sidebar()
+        shell.addWidget(self.sidebar)
+
+        stage = QWidget()
+        stage.setObjectName("stage")
+        shell.addWidget(stage, 1)
+        layout = QVBoxLayout(stage)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        content_wrap = QWidget()
+        content_wrap.setObjectName("stageBody")
+        layout.addWidget(content_wrap, 1)
+        layout = QVBoxLayout(content_wrap)
+        layout.setContentsMargins(28, 8, 28, 0)
+        layout.setSpacing(10)
 
         # ---- header -----------------------------------------------------
         # A quiet title row, not a toolbar.  The system title bar is gone, so
@@ -690,25 +818,25 @@ class NoraApp(QWidget):
         header_outer.setContentsMargins(22, 0, 18, 0)
         header_outer.setSpacing(12)
 
-        # The mark is the only avatar in the header: it *is* Nora, and pressing
-        # it lets her step out of the app, so "she comes from the logo" is
-        # literally on screen instead of a second decorative badge.
-        self.logo_button = PetLogoButton(size=46)
-        self.logo_button.clicked.connect(self.toggle_pet)
-        self.logo_button.setToolTip("Nora'yı masaüstüne çıkar / içeri al")
+        # The mark lives in the rail now (see _build_sidebar); the header is a
+        # page title and the window controls, nothing else.
         header.setToolTip("Pencereyi sürüklemek için tut · araçlar için sağ tık")
-        header_outer.addWidget(self.logo_button)
-
-        titles = QVBoxLayout()
+        # A widget, not a bare nested layout: a layout handed the full 66 px
+        # header height has to distribute the leftover between its labels, so
+        # the title and the subtitle drift apart.  A widget's size hint is the
+        # sum of its labels, and AlignVCenter puts that block on the centreline.
+        title_box = QWidget()
+        titles = QVBoxLayout(title_box)
         titles.setContentsMargins(0, 0, 0, 0)
-        titles.setSpacing(0)
-        title = QLabel("Nora")
+        titles.setSpacing(1)
+        title = QLabel("Sohbet")
         title.setObjectName("title")
-        titles.addWidget(title)
-        self.chat_subtitle = QLabel("companion")
+        self.chat_title = title
+        titles.addWidget(title, 0, Qt.AlignLeft)
+        self.chat_subtitle = QLabel("Nora ile konuş")
         self.chat_subtitle.setObjectName("subtitle")
-        titles.addWidget(self.chat_subtitle)
-        header_outer.addLayout(titles)
+        titles.addWidget(self.chat_subtitle, 0, Qt.AlignLeft)
+        header_outer.addWidget(title_box, 0, Qt.AlignVCenter)
         header_outer.addStretch(1)
 
         # ---- window controls, top right ---------------------------------
@@ -850,7 +978,14 @@ class NoraApp(QWidget):
         quick_row.addStretch(1)
         composer_outer.addLayout(quick_row)
 
-        layout.addWidget(self.composer)
+        composer_row = QHBoxLayout()
+        composer_row.setContentsMargins(0, 0, 0, 0)
+        composer_row.addWidget(self.composer)
+        layout.addSpacing(6)
+        layout.addLayout(composer_row)
+        # The stage has no bottom margin of its own, so the card needs its own
+        # breathing room here or its rounded corners are cut by the window edge.
+        layout.addSpacing(16)
 
         self.chat_window.installEventFilter(self)
         # The white page is a plain child, not a layout item: keep it filling
@@ -4461,6 +4596,9 @@ class NoraApp(QWidget):
     def _show_notes(self) -> None:
         self.show_chat()
         self.add_message(self.tools.list_notes(), "bot")
+        # After the message, not before: adding content is the page switch, and
+        # a nav set first would be overwritten by whatever that switch decided.
+        self._set_active_nav("notes")
         self.proactive.user_interacted()
 
     def _show_system_info(self) -> None:

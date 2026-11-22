@@ -47,6 +47,7 @@ from PyQt5.QtGui import (
     QRadialGradient,
 )
 from PyQt5.QtWidgets import (
+    QAbstractButton,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -79,8 +80,8 @@ PAGE_TOP = QColor("#fbfaff")
 PAGE_BOTTOM = QColor("#f6f4fd")
 SURFACE = QColor(255, 255, 255, 236)
 SURFACE_SOLID = QColor("#ffffff")
-HAIRLINE = QColor(24, 18, 40, 20)
-HAIRLINE_STRONG = QColor(24, 18, 40, 34)
+HAIRLINE = QColor(24, 18, 40, 16)
+HAIRLINE_STRONG = QColor(24, 18, 40, 26)
 
 def css(color: QColor) -> str:
     """A QColor as CSS, *including* its alpha.
@@ -119,6 +120,25 @@ QWidget#glassRoot {{ background: transparent; }}
 QWidget#whitePage {{ background: #ffffff; }}
 QFrame#glassCard {{ background: transparent; }}
 QWidget#chatHeader {{ background: transparent; }}
+QWidget#stage {{ background: transparent; }}
+QWidget#stageBody {{ background: transparent; }}
+QWidget#sidebar {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255,255,255,214), stop:1 rgba(250,247,255,168));
+    border-right: 1px solid rgba(24,18,40,22);
+}}
+QWidget#navGroup {{
+    background: rgba(255,255,255,230);
+    border: 1px solid rgba(24,18,40,24);
+    border-radius: 26px;
+}}
+QWidget#heroCard {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(255,255,255,244), stop:1 rgba(252,248,255,238));
+    border: 1px solid {css(HAIRLINE)};
+    border-radius: 28px;
+}}
+QLabel#navCaption {{ color: {TEXT_FAINT.name()}; font-size: 9px; letter-spacing: 0.6px; }}
 QWidget#composerCard {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 rgba(255,255,255,246), stop:1 rgba(250,248,255,240));
@@ -921,6 +941,131 @@ class GradientWindowButton(QPushButton):
             painter.drawLine(
                 QPointF(cx - arm, cy + arm), QPointF(cx + arm, cy - arm)
             )
+
+
+class NavButton(QAbstractButton):
+    """A rail destination: a hand-drawn glyph that fills with the brand.
+
+    Drawn rather than shipped as images or emoji: it stays crisp at any DPI,
+    needs no assets, and the active state can be the gradient the rest of the
+    app already speaks in.
+    """
+
+    GLYPHS = ("chat", "notes", "tools", "profile", "settings")
+
+    def __init__(self, glyph: str, parent: QWidget | None = None, *, size: int = 42) -> None:
+        super().__init__(parent)
+        if glyph not in self.GLYPHS:
+            raise ValueError(f"bilinmeyen gezinme simgesi: {glyph}")
+        self.glyph = glyph
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setCheckable(False)
+        self._hover = False
+        self._active = False
+
+    def setActive(self, active: bool) -> None:  # noqa: N802 - Qt style naming
+        if self._active == bool(active):
+            return
+        self._active = bool(active)
+        self.update()
+
+    def isActive(self) -> bool:  # noqa: N802 - Qt style naming
+        return self._active
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+        box = QRectF(self.rect()).adjusted(3, 3, -3, -3)
+
+        # The active pill *is* the gradient; hover is a whisper of it.
+        if self._active or self._hover:
+            pill = QPainterPath()
+            pill.addRoundedRect(box, 13, 13)
+            if self._active:
+                grad = QLinearGradient(box.topLeft(), box.bottomRight())
+                grad.setColorAt(0.0, QColor("#7b5cff"))
+                grad.setColorAt(1.0, QColor("#ff4d94"))
+                painter.fillPath(pill, QBrush(grad))
+            else:
+                painter.fillPath(pill, QColor(123, 92, 255, 22))
+
+        ink = QColor("#ffffff") if self._active else QColor(TEXT_DIM)
+        painter.setPen(
+            QPen(ink, 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        )
+        painter.setBrush(Qt.NoBrush)
+        self._draw_glyph(painter, box)
+
+    def _draw_glyph(self, painter: QPainter, box: QRectF) -> None:
+        c = box.center()
+        w = box.width()
+        r = w * 0.24
+        if self.glyph == "chat":
+            bubble = QRectF(c.x() - r * 1.15, c.y() - r, r * 2.3, r * 1.7)
+            path = QPainterPath()
+            path.addRoundedRect(bubble, r * 0.5, r * 0.5)
+            path.moveTo(bubble.left() + r * 0.55, bubble.bottom())
+            path.lineTo(bubble.left() + r * 0.45, bubble.bottom() + r * 0.62)
+            path.lineTo(bubble.left() + r * 1.1, bubble.bottom())
+            path.closeSubpath()
+            painter.drawPath(path)
+        elif self.glyph == "notes":
+            page = QRectF(c.x() - r * 0.85, c.y() - r * 1.05, r * 1.7, r * 2.1)
+            painter.drawRoundedRect(page, r * 0.28, r * 0.28)
+            for offset in (-0.35, 0.05, 0.45):
+                y = c.y() + r * offset
+                painter.drawLine(
+                    QPointF(page.left() + r * 0.35, y),
+                    QPointF(page.right() - r * 0.35, y),
+                )
+        elif self.glyph == "tools":
+            # a slider: two tracks, two knobs — the "settings-ish" tool glyph
+            for index, (dy, knob) in enumerate(((-0.42, 0.35), (0.42, -0.3))):
+                y = c.y() + r * dy
+                painter.drawLine(
+                    QPointF(c.x() - r * 1.1, y), QPointF(c.x() + r * 1.1, y)
+                )
+                painter.drawEllipse(QPointF(c.x() + r * knob, y), r * 0.26, r * 0.26)
+                del index
+        elif self.glyph == "profile":
+            painter.drawEllipse(QPointF(c.x(), c.y() - r * 0.5), r * 0.42, r * 0.42)
+            path = QPainterPath()
+            path.moveTo(c.x() - r * 0.85, c.y() + r * 1.05)
+            path.quadTo(c.x(), c.y() + r * 0.15, c.x() + r * 0.85, c.y() + r * 1.05)
+            painter.drawPath(path)
+        else:  # settings: a gear drawn as a ring plus six teeth
+            painter.drawEllipse(c, r * 0.62, r * 0.62)
+            import math
+
+            for step in range(6):
+                angle = math.radians(step * 60)
+                inner = QPointF(
+                    c.x() + math.cos(angle) * r * 0.78,
+                    c.y() + math.sin(angle) * r * 0.78,
+                )
+                outer = QPointF(
+                    c.x() + math.cos(angle) * r * 1.12,
+                    c.y() + math.sin(angle) * r * 1.12,
+                )
+                painter.drawLine(inner, outer)
 
 
 def glass_style() -> str:

@@ -458,9 +458,12 @@ def test_header_carries_only_the_window_controls(nora_app) -> None:
     for button in buttons:
         assert button.mapTo(header, button.rect().center()).x() > half
 
-    # the retired toolbar buttons are still retired
-    for gone in ("mic_button", "settings_button", "more_button"):
+    # the retired *toolbar* buttons are still retired from the header; the
+    # rail owns the settings button now, so it is checked separately below
+    for gone in ("mic_button", "more_button"):
         assert not hasattr(nora_app, gone), f"{gone} should be gone from the header"
+    assert not header.isAncestorOf(nora_app.settings_button)
+    assert nora_app.sidebar.isAncestorOf(nora_app.settings_button)
 
 
 def test_window_controls_are_brand_gradient(app) -> None:
@@ -802,3 +805,190 @@ def test_translucent_hairlines_are_not_black() -> None:
                     alpha /= 255.0
                 assert alpha < 0.5, f"a hairline with alpha {alpha} is too strong: {line}"
     assert css(QColor(24, 18, 40, 20)).endswith("0.078)")
+
+
+# ------------------------------------------------------------- 1.21.0 rail
+def test_sidebar_holds_identity_navigation_and_settings(nora_app) -> None:
+    """The rail is where the identity lives now: mark first, then destinations."""
+    from nora.nora_glass import NavButton
+
+    nora_app.show_chat()
+    nora_app.chat_window.resize(980, 700)
+    _pump(200)
+    rail = nora_app.sidebar
+    assert rail.isVisible()
+    assert 70 <= rail.width() <= 100, "a rail, not a panel"
+
+    # the mark is in the rail, at the top, and bigger than a header badge
+    assert rail.isAncestorOf(nora_app.logo_button)
+    assert nora_app.logo_button.width() >= 46
+    assert nora_app.logo_button.mapTo(rail, nora_app.logo_button.rect().topLeft()).y() < 40
+
+    # four destinations plus settings, all NavButtons
+    assert set(nora_app.nav_buttons) == {"chat", "notes", "tools", "profile"}
+    for button in nora_app.nav_buttons.values():
+        assert isinstance(button, NavButton)
+        assert rail.isAncestorOf(button)
+    assert isinstance(nora_app.settings_button, NavButton)
+    assert rail.isAncestorOf(nora_app.settings_button)
+
+    # settings sits at the bottom of the rail, not next to the destinations
+    bottom = nora_app.settings_button.mapTo(rail, nora_app.settings_button.rect().topLeft()).y()
+    chat_y = nora_app.nav_buttons["chat"].mapTo(
+        rail, nora_app.nav_buttons["chat"].rect().topLeft()
+    ).y()
+    assert bottom > chat_y + 200
+
+
+def test_exactly_one_nav_destination_is_active(nora_app) -> None:
+    nora_app.show_chat()
+    _pump(150)
+    active = [key for key, button in nora_app.nav_buttons.items() if button.isActive()]
+    assert active == ["chat"]
+
+    nora_app._set_active_nav("profile")
+    active = [key for key, button in nora_app.nav_buttons.items() if button.isActive()]
+    assert active == ["profile"]
+
+
+def test_nav_button_active_state_is_the_brand_gradient(app) -> None:
+    """Active = the gradient pill, inactive = ink outline, hover = a whisper."""
+    from PyQt5.QtGui import QPainter
+
+    from nora.nora_glass import NavButton
+
+    button = NavButton("chat", size=42)
+    button.setActive(True)
+    button.show()
+    _pump(60)
+
+    # grab(), not render(): render() paints the widget's opaque background
+    # first, which hides the transparency the pill relies on.
+    image = button.grab().toImage()
+    # the pill body is vivid brand colour, not grey.  Sample below the glyph's
+    # stroke: at y=12 the chat glyph's white line sits on top of the fill.
+    centre = image.pixelColor(21, 21)
+    assert centre.saturation() > 90, f"active pill is not brand colour: {centre.name()}"
+    corner = image.pixelColor(8, 8)
+    assert corner.saturation() > 60 or corner.alpha() < 250
+    # and it is transparent outside the pill
+    assert image.pixelColor(1, 1).alpha() == 0
+    assert image.pixelColor(40, 40).alpha() == 0
+
+    inactive = NavButton("chat", size=42)
+    inactive.show()
+    _pump(60)
+    image2 = inactive.grab().toImage()
+    # nothing is filled, only the glyph is stroked
+    filled = sum(
+        1
+        for x in range(42)
+        for y in range(42)
+        if image2.pixelColor(x, y).alpha() > 200
+    )
+    assert filled < 120, "an inactive destination must not paint a filled pill"
+    del QPainter
+
+
+def test_sidebar_glyphs_are_all_distinct(app) -> None:
+    """Five destinations must not share a shape, or the rail is unreadable."""
+    from nora.nora_glass import NavButton
+
+    signatures = set()
+    for glyph in NavButton.GLYPHS:
+        button = NavButton(glyph, size=42)
+        button.setActive(True)
+        button.show()
+        _pump(40)
+        image = button.grab().toImage()
+        # signature = where the white glyph strokes are, inside the pill
+        signature = tuple(
+            1 if image.pixelColor(x, y).name() == "#ffffff" else 0
+            for x in range(4, 38, 2)
+            for y in range(4, 38, 2)
+        )
+        signatures.add(signature)
+    assert len(signatures) == len(NavButton.GLYPHS)
+
+
+def test_destinations_share_one_bordered_group(nora_app) -> None:
+    """Loose icons in a tall rail read as unfinished; one group reads as a menu."""
+    nora_app.show_chat()
+    _pump(150)
+    groups = [
+        child
+        for child in nora_app.sidebar.findChildren(type(nora_app.sidebar))
+        if child.objectName() == "navGroup"
+    ]
+    assert len(groups) == 1, "exactly one nav surface"
+    group = groups[0]
+    for button in nora_app.nav_buttons.values():
+        assert group.isAncestorOf(button), "every destination sits in the group"
+    # the setting is *outside* the group: it is not a destination, it is a tool
+    assert not group.isAncestorOf(nora_app.settings_button)
+    # and the group is wider than a bare 42 px button, so it frames them
+    assert group.width() > nora_app.nav_buttons["chat"].width() + 8
+
+
+def test_header_title_follows_the_active_destination(nora_app) -> None:
+    """One source of truth: the rail decides, the header echoes."""
+    nora_app.show_chat()
+    _pump(150)
+    assert nora_app.chat_title.text() == nora_app.NAV_PAGES["chat"][0]
+    assert nora_app.chat_subtitle.text() == nora_app.NAV_PAGES["chat"][1]
+
+    nora_app._set_active_nav("notes")
+    assert nora_app.chat_title.text() == "Notlar"
+    assert nora_app.chat_subtitle.text() == nora_app.NAV_PAGES["notes"][1]
+
+    nora_app._set_active_nav("chat")
+    assert nora_app.chat_title.text() == "Sohbet"
+
+
+def test_tools_menu_does_not_leave_the_rail_lit(nora_app) -> None:
+    """Tools is a popup, not a page: closing it restores the real page."""
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QApplication
+
+    nora_app.show_chat()
+    _pump(150)
+    nora_app._set_active_nav("chat")
+
+    def close_menus() -> None:
+        for widget in QApplication.topLevelWidgets():
+            if widget.inherits("QMenu"):
+                widget.close()
+
+    QTimer.singleShot(80, close_menus)
+    nora_app._open_tools()
+    _pump(200)
+    assert nora_app._active_nav == "chat"
+    assert nora_app.chat_title.text() == "Sohbet"
+
+
+def test_hero_is_one_card_holding_mark_title_and_ways_in(nora_app) -> None:
+    """The empty state must have a shape, not float in the window."""
+    from PyQt5.QtWidgets import QLabel
+
+    nora_app.show_chat()
+    _pump(200)
+    cards = [
+        child
+        for child in nora_app.hero.findChildren(type(nora_app.hero))
+        if child.objectName() == "heroCard"
+    ]
+    assert len(cards) == 1
+    card = cards[0]
+    # the mark, the greeting and the three chips all live inside the card
+    marks = [
+        label
+        for label in card.findChildren(QLabel)
+        if label.pixmap() is not None and not label.pixmap().isNull()
+    ]
+    assert marks, "the mark belongs in the card"
+    titles = [label for label in card.findChildren(QLabel) if label.objectName() == "heroTitle"]
+    assert len(titles) == 1
+    for chip in nora_app.hero_chips:
+        assert card.isAncestorOf(chip)
+    # a card, not a full-width band
+    assert card.maximumWidth() <= 640
