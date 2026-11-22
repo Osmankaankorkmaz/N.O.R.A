@@ -186,7 +186,9 @@ class SplashScreen(QWidget):
         splash_gradient(painter, card)
 
         # a whisper of the product's glass: light from above, shadow below
-        top_light = QLinearGradient(card.topLeft(), QPointF(card.left(), card.top() + 150))
+        top_light = QLinearGradient(
+            card.topLeft(), QPointF(card.left(), card.top() + 150)
+        )
         top_light.setColorAt(0.0, QColor(255, 255, 255, 255))
         top_light.setColorAt(1.0, QColor(255, 255, 255, 0))
         painter.fillRect(card, top_light)
@@ -219,7 +221,6 @@ class SplashScreen(QWidget):
             # glow off: the card is already white, a halo would be invisible
             draw_mark(painter, int(round(mark_size)), spark=False, glow=False)
             painter.restore()
-
 
         # ---- wordmark --------------------------------------------------
         if self._word > 0.0:
@@ -262,13 +263,13 @@ class SplashScreen(QWidget):
             travel = bar.width() * (0.9 - 0.18)
             x = bar.left() + travel * self._pulse
             painter.setBrush(QColor(123, 92, 255, 150))
-            painter.drawRoundedRect(
-                QRectF(x, bar.top(), width, bar.height()), 1.5, 1.5
-            )
+            painter.drawRoundedRect(QRectF(x, bar.top(), width, bar.height()), 1.5, 1.5)
         else:
             painter.setBrush(fill)
             painter.drawRoundedRect(
-                QRectF(bar.left(), bar.top(), bar.width() * self._progress, bar.height()),
+                QRectF(
+                    bar.left(), bar.top(), bar.width() * self._progress, bar.height()
+                ),
                 1.5,
                 1.5,
             )

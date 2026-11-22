@@ -83,6 +83,7 @@ SURFACE_SOLID = QColor("#ffffff")
 HAIRLINE = QColor(24, 18, 40, 16)
 HAIRLINE_STRONG = QColor(24, 18, 40, 26)
 
+
 def css(color: QColor) -> str:
     """A QColor as CSS, *including* its alpha.
 
@@ -93,8 +94,7 @@ def css(color: QColor) -> str:
     if color.alpha() == 255:
         return color.name()
     return (
-        f"rgba({color.red()},{color.green()},{color.blue()},"
-        f"{color.alpha() / 255:.3f})"
+        f"rgba({color.red()},{color.green()},{color.blue()},{color.alpha() / 255:.3f})"
     )
 
 
@@ -288,7 +288,9 @@ def enable_windows_blur(widget: QWidget, *, dark: bool = True) -> bool:
 class FrostedPanel(QWidget):
     """Paints a translucent card, optionally over a blurred screen snapshot."""
 
-    def __init__(self, parent: QWidget | None = None, *, radius: float = CARD_RADIUS) -> None:
+    def __init__(
+        self, parent: QWidget | None = None, *, radius: float = CARD_RADIUS
+    ) -> None:
         super().__init__(parent)
         #: One radius for the whole product: the launch card and the window that
         #: replaces it must have visibly identical corners.
@@ -494,7 +496,12 @@ class GlassBubble(QFrame):
         big = radius
         small = 6.0
         if self.sender == "user":
-            corners = (big, big, small, big)  # top-left, top-right, bottom-right, bottom-left
+            corners = (
+                big,
+                big,
+                small,
+                big,
+            )  # top-left, top-right, bottom-right, bottom-left
         else:
             corners = (big, big, big, small)
         tl, tr, br, bl = (
@@ -921,26 +928,26 @@ class GradientWindowButton(QPushButton):
 
         # The glyph, in white, optically centred.
         painter.setPen(
-            QPen(QColor(255, 255, 255, 245), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            QPen(
+                QColor(255, 255, 255, 245), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin
+            )
         )
         cx, cy = box.center().x(), box.center().y()
         arm = box.width() * 0.17
         if self.glyph == "minimize":
-            painter.drawLine(
-                QPointF(cx - arm, cy), QPointF(cx + arm, cy)
-            )
+            painter.drawLine(QPointF(cx - arm, cy), QPointF(cx + arm, cy))
         elif self.glyph == "maximize":
             painter.drawRect(QRectF(cx - arm, cy - arm, arm * 2, arm * 2))
         elif self.glyph == "restore":
-            painter.drawRect(QRectF(cx - arm + 1.5, cy - arm - 1.5, arm * 2 - 1, arm * 2 - 1))
-            painter.drawRect(QRectF(cx - arm - 1.5, cy - arm + 1.5, arm * 2 - 1, arm * 2 - 1))
+            painter.drawRect(
+                QRectF(cx - arm + 1.5, cy - arm - 1.5, arm * 2 - 1, arm * 2 - 1)
+            )
+            painter.drawRect(
+                QRectF(cx - arm - 1.5, cy - arm + 1.5, arm * 2 - 1, arm * 2 - 1)
+            )
         else:  # close
-            painter.drawLine(
-                QPointF(cx - arm, cy - arm), QPointF(cx + arm, cy + arm)
-            )
-            painter.drawLine(
-                QPointF(cx - arm, cy + arm), QPointF(cx + arm, cy - arm)
-            )
+            painter.drawLine(QPointF(cx - arm, cy - arm), QPointF(cx + arm, cy + arm))
+            painter.drawLine(QPointF(cx - arm, cy + arm), QPointF(cx + arm, cy - arm))
 
 
 class NavButton(QAbstractButton):
@@ -953,7 +960,9 @@ class NavButton(QAbstractButton):
 
     GLYPHS = ("chat", "notes", "tools", "profile", "settings")
 
-    def __init__(self, glyph: str, parent: QWidget | None = None, *, size: int = 42) -> None:
+    def __init__(
+        self, glyph: str, parent: QWidget | None = None, *, size: int = 42
+    ) -> None:
         super().__init__(parent)
         if glyph not in self.GLYPHS:
             raise ValueError(f"bilinmeyen gezinme simgesi: {glyph}")
@@ -1008,9 +1017,7 @@ class NavButton(QAbstractButton):
                 painter.fillPath(pill, QColor(123, 92, 255, 22))
 
         ink = QColor("#ffffff") if self._active else QColor(TEXT_DIM)
-        painter.setPen(
-            QPen(ink, 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-        )
+        painter.setPen(QPen(ink, 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         painter.setBrush(Qt.NoBrush)
         self._draw_glyph(painter, box)
 

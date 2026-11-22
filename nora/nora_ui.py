@@ -846,9 +846,7 @@ class NoraApp(QWidget):
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(8)
-        self.minimize_button = GradientWindowButton(
-            "minimize", header, size=30
-        )
+        self.minimize_button = GradientWindowButton("minimize", header, size=30)
         self.minimize_button.setToolTip("Küçült")
         self.minimize_button.setAccessibleName("Küçült")
         self.minimize_button.clicked.connect(self.chat_window.showMinimized)
@@ -858,9 +856,7 @@ class NoraApp(QWidget):
         self.maximize_button.setAccessibleName("Büyüt")
         self.maximize_button.clicked.connect(self.toggle_maximize)
 
-        self.close_button = GradientWindowButton(
-            "close", header, size=30, danger=True
-        )
+        self.close_button = GradientWindowButton("close", header, size=30, danger=True)
         self.close_button.setToolTip("Gizle (Nora çalışmaya devam eder)")
         self.close_button.setAccessibleName("Gizle")
         self.close_button.clicked.connect(self.chat_window.hide)
@@ -1793,7 +1789,9 @@ class NoraApp(QWidget):
         self._pause_wake_for_audio()
         self._set_busy(True, "Bas-konuş 🎙️ konuş, bırakınca cevaplayayım…")
         if self._mic_widget() is not None:
-            self._mic_widget().setStyleSheet("background: #e53950; border-color: #ff8fa3;")
+            self._mic_widget().setStyleSheet(
+                "background: #e53950; border-color: #ff8fa3;"
+            )
         self.pet.set_listening(True)
         self.pet.show_speech("Bas-konuş 🎙️", 2000)
         request_id = self._next_request()
@@ -2312,8 +2310,11 @@ class NoraApp(QWidget):
         tray = getattr(self, "tray", None)
         if tray is None:
             return
-        parts = [part for part in (getattr(self, "_mic_tip", ""),
-                                   getattr(self, "_tts_tip", "")) if part]
+        parts = [
+            part
+            for part in (getattr(self, "_mic_tip", ""), getattr(self, "_tts_tip", ""))
+            if part
+        ]
         icon = "🎙️ " if self.voice.wake_word_active else ""
         tray.setToolTip(f"Nora 💕 · {icon}" + " · ".join(parts) if parts else "Nora 💕")
 
@@ -4255,7 +4256,9 @@ class NoraApp(QWidget):
         self._pause_wake_for_audio()
         self._set_busy(True, "Mikrofon açılıyor…")
         if self._mic_widget() is not None:
-            self._mic_widget().setStyleSheet("background: #e53950; border-color: #ff8fa3;")
+            self._mic_widget().setStyleSheet(
+                "background: #e53950; border-color: #ff8fa3;"
+            )
         self.pet.set_listening(True)
         request_id = self._next_request()
         self._stt_test_request = request_id if recognition_test else 0

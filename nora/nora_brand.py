@@ -81,9 +81,7 @@ def gradient(stops: tuple[tuple[float, QColor], ...] = GRADIENT_STOPS):
 def tile_path(rect: QRectF, inset: float = TILE_INSET) -> QPainterPath:
     """The squircle the mark sits on."""
     size = min(rect.width(), rect.height())
-    box = rect.adjusted(
-        size * inset, size * inset, -size * inset, -size * inset
-    )
+    box = rect.adjusted(size * inset, size * inset, -size * inset, -size * inset)
     radius = size * TILE_RADIUS
     path = QPainterPath()
     path.addRoundedRect(box, radius, radius)

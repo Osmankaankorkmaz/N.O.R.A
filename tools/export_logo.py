@@ -74,7 +74,6 @@ def main(argv: list[str] | None = None) -> int:
     # Windows .ico: PIL writes the sizes we give it, so the 16 px entry is the
     # real 16 px drawing (not a shrunk 256).
     if importlib.util.find_spec("PIL") is not None:
-
         frames = [
             _qimage_to_pil(_render(size, background=QColor(0, 0, 0, 0))).copy()
             for size in ICO_SIZES

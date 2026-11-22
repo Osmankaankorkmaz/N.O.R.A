@@ -67,6 +67,7 @@ def test_mark_is_the_brand_tile_with_a_white_letter(app) -> None:
 
     # the letter is pure white and really present
     assert "#ffffff" in colours
+
     # the tile is the brand gradient: violet through to pink
     def hue_near(name: str, hue: float, tol: float = 22.0) -> bool:
         h = QColor(name).hue()
@@ -479,7 +480,9 @@ def test_window_controls_are_brand_gradient(app) -> None:
         # inside the circle the pixels are vivid brand colour, not grey.  Sample
         # above the glyph (y=15 is where the white stroke is drawn).
         centre = image.pixelColor(15, 7)
-        assert centre.saturation() > 90, f"{glyph} is not a brand colour: {centre.name()}"
+        assert centre.saturation() > 90, (
+            f"{glyph} is not a brand colour: {centre.name()}"
+        )
 
         # sample left and right halves: the gradient must actually shift hue
         left = image.pixelColor(7, 7)
@@ -559,7 +562,9 @@ def test_white_page_paints_the_splash_colour(nora_app) -> None:
         (page.width() // 2, page.height() // 2),
     ):
         colour = image.pixelColor(*point)
-        assert colour.lightness() > 235, f"page is not white at {point}: {colour.name()}"
+        assert colour.lightness() > 235, (
+            f"page is not white at {point}: {colour.name()}"
+        )
     # and the very corner really is transparent: the page is shaped, not square
     assert image.pixelColor(0, 0).alpha() == 0
 
@@ -803,7 +808,9 @@ def test_translucent_hairlines_are_not_black() -> None:
                 # Qt accepts both 0-255 and 0.0-1.0 here; normalise.
                 if alpha > 1.0:
                     alpha /= 255.0
-                assert alpha < 0.5, f"a hairline with alpha {alpha} is too strong: {line}"
+                assert alpha < 0.5, (
+                    f"a hairline with alpha {alpha} is too strong: {line}"
+                )
     assert css(QColor(24, 18, 40, 20)).endswith("0.078)")
 
 
@@ -822,7 +829,9 @@ def test_sidebar_holds_identity_navigation_and_settings(nora_app) -> None:
     # the mark is in the rail, at the top, and bigger than a header badge
     assert rail.isAncestorOf(nora_app.logo_button)
     assert nora_app.logo_button.width() >= 46
-    assert nora_app.logo_button.mapTo(rail, nora_app.logo_button.rect().topLeft()).y() < 40
+    assert (
+        nora_app.logo_button.mapTo(rail, nora_app.logo_button.rect().topLeft()).y() < 40
+    )
 
     # four destinations plus settings, all NavButtons
     assert set(nora_app.nav_buttons) == {"chat", "notes", "tools", "profile"}
@@ -833,10 +842,14 @@ def test_sidebar_holds_identity_navigation_and_settings(nora_app) -> None:
     assert rail.isAncestorOf(nora_app.settings_button)
 
     # settings sits at the bottom of the rail, not next to the destinations
-    bottom = nora_app.settings_button.mapTo(rail, nora_app.settings_button.rect().topLeft()).y()
-    chat_y = nora_app.nav_buttons["chat"].mapTo(
-        rail, nora_app.nav_buttons["chat"].rect().topLeft()
+    bottom = nora_app.settings_button.mapTo(
+        rail, nora_app.settings_button.rect().topLeft()
     ).y()
+    chat_y = (
+        nora_app.nav_buttons["chat"]
+        .mapTo(rail, nora_app.nav_buttons["chat"].rect().topLeft())
+        .y()
+    )
     assert bottom > chat_y + 200
 
 
@@ -881,10 +894,7 @@ def test_nav_button_active_state_is_the_brand_gradient(app) -> None:
     image2 = inactive.grab().toImage()
     # nothing is filled, only the glyph is stroked
     filled = sum(
-        1
-        for x in range(42)
-        for y in range(42)
-        if image2.pixelColor(x, y).alpha() > 200
+        1 for x in range(42) for y in range(42) if image2.pixelColor(x, y).alpha() > 200
     )
     assert filled < 120, "an inactive destination must not paint a filled pill"
     del QPainter
@@ -986,7 +996,11 @@ def test_hero_is_one_card_holding_mark_title_and_ways_in(nora_app) -> None:
         if label.pixmap() is not None and not label.pixmap().isNull()
     ]
     assert marks, "the mark belongs in the card"
-    titles = [label for label in card.findChildren(QLabel) if label.objectName() == "heroTitle"]
+    titles = [
+        label
+        for label in card.findChildren(QLabel)
+        if label.objectName() == "heroTitle"
+    ]
     assert len(titles) == 1
     for chip in nora_app.hero_chips:
         assert card.isAncestorOf(chip)
