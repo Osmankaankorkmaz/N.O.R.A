@@ -685,6 +685,111 @@ def _shadow_effect(widget: QWidget) -> QGraphicsDropShadowEffect | None:
     return effect
 
 
+class GradientWindowButton(QPushButton):
+    """A round window control in the brand gradient.
+
+    The window is frameless, so these are the only minimise / maximise / close
+    controls it has — and because the OS chrome is gone, they are also free to
+    look like the product instead of like Windows.  The glyph is painted by hand
+    (a line, a square, a cross) rather than taken from an emoji font: emoji are
+    multicoloured and would fight the gradient.
+    """
+
+    GLYPHS = ("minimize", "maximize", "restore", "close")
+
+    def __init__(
+        self,
+        glyph: str,
+        parent: QWidget | None = None,
+        *,
+        size: int = 30,
+        danger: bool = False,
+    ) -> None:
+        super().__init__(parent)
+        if glyph not in self.GLYPHS:
+            raise ValueError(f"bilinmeyen düğme simgesi: {glyph}")
+        self.glyph = glyph
+        self.danger = danger
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setFlat(True)
+        # QPushButton paints its own background before paintEvent runs, which
+        # would put a pale square behind the circle.  Nothing but our gradient
+        # may reach these pixels.
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+        self._hover = False
+
+    # -- painting ---------------------------------------------------------
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        # Start from a clean, fully transparent buffer.
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        box = QRectF(self.rect()).adjusted(0.75, 0.75, -0.75, -0.75)
+
+        # Brand gradient, lit from the top-left.  Hover lifts it, press sinks it.
+        grad = QLinearGradient(box.topLeft(), box.bottomRight())
+        if self.danger:
+            # Close still reads as part of the family: the same bloom, pushed
+            # one step further towards pink.
+            grad.setColorAt(0.0, QColor("#ff5f9e"))
+            grad.setColorAt(1.0, QColor("#ff2d78"))
+        else:
+            grad.setColorAt(0.0, QColor("#8b6dff"))
+            grad.setColorAt(0.55, QColor("#b45cf5"))
+            grad.setColorAt(1.0, QColor("#ff4d94"))
+        if self._hover:
+            grad.setColorAt(0.0, QColor("#9b81ff"))
+            grad.setColorAt(1.0, QColor("#ff6ba6"))
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(grad))
+        painter.drawEllipse(box)
+
+        # A thin white rim keeps the circle alive on a white card.
+        painter.setPen(QPen(QColor(255, 255, 255, 150 if self._hover else 110), 1.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(box)
+
+        # The glyph, in white, optically centred.
+        painter.setPen(
+            QPen(QColor(255, 255, 255, 245), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        )
+        cx, cy = box.center().x(), box.center().y()
+        arm = box.width() * 0.17
+        if self.glyph == "minimize":
+            painter.drawLine(
+                QPointF(cx - arm, cy), QPointF(cx + arm, cy)
+            )
+        elif self.glyph == "maximize":
+            painter.drawRect(QRectF(cx - arm, cy - arm, arm * 2, arm * 2))
+        elif self.glyph == "restore":
+            painter.drawRect(QRectF(cx - arm + 1.5, cy - arm - 1.5, arm * 2 - 1, arm * 2 - 1))
+            painter.drawRect(QRectF(cx - arm - 1.5, cy - arm + 1.5, arm * 2 - 1, arm * 2 - 1))
+        else:  # close
+            painter.drawLine(
+                QPointF(cx - arm, cy - arm), QPointF(cx + arm, cy + arm)
+            )
+            painter.drawLine(
+                QPointF(cx - arm, cy + arm), QPointF(cx + arm, cy - arm)
+            )
+
+
 def glass_style() -> str:
     return STYLE
 

@@ -67,6 +67,7 @@ from .nora_sprite import SpriteCharacter
 from .nora_glass import (
     PetLogoButton,
     FrostedPanel,
+    GradientWindowButton,
     GlassBubble,
     TypingIndicator,
     glass_style,
@@ -629,6 +630,36 @@ class NoraApp(QWidget):
         titles.addWidget(self.chat_subtitle)
         header_outer.addLayout(titles)
         header_outer.addStretch(1)
+
+        # ---- window controls, top right ---------------------------------
+        # The OS title bar is gone, so these are the only window controls.
+        # They wear the brand gradient: with no system chrome to match, the
+        # product can style them like itself.
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
+        self.minimize_button = GradientWindowButton(
+            "minimize", header, size=30
+        )
+        self.minimize_button.setToolTip("Küçült")
+        self.minimize_button.setAccessibleName("Küçült")
+        self.minimize_button.clicked.connect(self.chat_window.showMinimized)
+
+        self.maximize_button = GradientWindowButton("maximize", header, size=30)
+        self.maximize_button.setToolTip("Büyüt")
+        self.maximize_button.setAccessibleName("Büyüt")
+        self.maximize_button.clicked.connect(self.toggle_maximize)
+
+        self.close_button = GradientWindowButton(
+            "close", header, size=30, danger=True
+        )
+        self.close_button.setToolTip("Gizle (Nora çalışmaya devam eder)")
+        self.close_button.setAccessibleName("Gizle")
+        self.close_button.clicked.connect(self.chat_window.hide)
+
+        for button in (self.minimize_button, self.maximize_button, self.close_button):
+            controls.addWidget(button)
+        header_outer.addLayout(controls)
         layout.addWidget(header)
 
         # Mouse-drag on the header moves the frameless window.  Children keep
@@ -1826,6 +1857,23 @@ class NoraApp(QWidget):
         self.chat_window.show()
         self.chat_window.raise_()
         self.input.setFocus()
+
+    def toggle_maximize(self) -> None:
+        """Maximise the frameless window, or put it back where it was."""
+        window = self.chat_window
+        if window.isMaximized():
+            window.showNormal()
+            self.maximize_button.glyph = "maximize"
+            self.maximize_button.setToolTip("Büyüt")
+            self.maximize_button.setAccessibleName("Büyüt")
+        else:
+            window.showMaximized()
+            # Restoring is not "minimise": the glyph changes so the button says
+            # what it will do next, exactly like a real title bar.
+            self.maximize_button.glyph = "restore"
+            self.maximize_button.setToolTip("Eski boyuta döndür")
+            self.maximize_button.setAccessibleName("Eski boyuta döndür")
+        self.maximize_button.update()
 
     def toggle_chat(self) -> None:
         if self.chat_window.isVisible():

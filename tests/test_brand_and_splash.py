@@ -429,27 +429,107 @@ def test_chat_window_has_no_system_title_bar(nora_app) -> None:
         assert not flags & chrome, f"system chrome still present: {int(chrome)}"
 
 
-def test_header_is_a_title_row_with_no_buttons(nora_app) -> None:
-    """Every control that used to sit beside the title is gone."""
+def test_header_carries_only_the_window_controls(nora_app) -> None:
+    """Top right: minimise, maximise, close — and nothing else.
+
+    The cluttered toolbar (mic chips, settings, overflow, a second minimise and
+    a hide "x") is gone; what remains are the three controls a frameless window
+    actually needs.
+    """
     from PyQt5.QtWidgets import QAbstractButton
 
+    from nora.nora_glass import GradientWindowButton
+
+    nora_app.show_chat()
+    nora_app.chat_window.resize(900, 660)
+    _pump(200)
     header = nora_app.chat_header
     buttons = [
         child
         for child in header.findChildren(QAbstractButton)
         if child is not nora_app.logo_button
     ]
-    assert buttons == [], f"header still carries buttons: {buttons}"
-    for gone in (
-        "mic_button",
-        "settings_button",
-        "more_button",
-        "minimize_button",
-        "close_button",
-        "mic_indicator",
-        "speaker_indicator",
-    ):
+    assert len(buttons) == 3, f"expected three window controls, got {buttons}"
+    assert all(isinstance(b, GradientWindowButton) for b in buttons)
+    assert [b.glyph for b in buttons] == ["minimize", "maximize", "close"]
+
+    # they sit on the right: their left edge is past the header's midpoint
+    half = header.width() / 2
+    for button in buttons:
+        assert button.mapTo(header, button.rect().center()).x() > half
+
+    # the retired toolbar buttons are still retired
+    for gone in ("mic_button", "settings_button", "more_button"):
         assert not hasattr(nora_app, gone), f"{gone} should be gone from the header"
+
+
+def test_window_controls_are_brand_gradient(app) -> None:
+    """Mor–pembe gradyan, not a flat grey OS button."""
+    from nora.nora_glass import GradientWindowButton
+
+    for glyph, danger in (("minimize", False), ("maximize", False), ("close", True)):
+        button = GradientWindowButton(glyph, size=30, danger=danger)
+        image = QImage(30, 30, QImage.Format_ARGB32)
+        image.fill(0)
+        button.render(image)
+
+        # inside the circle the pixels are vivid brand colour, not grey.  Sample
+        # above the glyph (y=15 is where the white stroke is drawn).
+        centre = image.pixelColor(15, 7)
+        assert centre.saturation() > 90, f"{glyph} is not a brand colour: {centre.name()}"
+
+        # sample left and right halves: the gradient must actually shift hue
+        left = image.pixelColor(7, 7)
+        right = image.pixelColor(22, 22)
+        assert left.hue() != right.hue() or left.name() != right.name(), (
+            f"{glyph} is a flat fill, not a gradient"
+        )
+        # The family reads violet → pink.  Close is deliberately the pink end
+        # pushed one step further, so it stays in the family without pretending
+        # to be the same action as minimise.
+        hues = {left.hue(), right.hue()}
+        assert any(h >= 300 or h <= 20 for h in hues), f"{glyph} has no pink"
+        if danger:
+            assert all(h >= 300 or h <= 20 for h in hues), (
+                f"close should stay in the pink end, got {sorted(hues)}"
+            )
+        else:
+            assert any(240 <= h <= 285 for h in hues), f"{glyph} has no violet"
+
+        # the corners stay transparent: a round button, not a square
+        assert image.pixelColor(1, 1).alpha() == 0
+
+        # the glyph itself is drawn in white
+        whites = sum(
+            1
+            for x in range(30)
+            for y in range(30)
+            if image.pixelColor(x, y).name() == "#ffffff"
+        )
+        assert whites > 8, f"{glyph} has no white glyph"
+
+
+def test_window_controls_do_what_they_say(nora_app) -> None:
+    nora_app.show_chat()
+    _pump(150)
+
+    # maximise speaks the truth about what it does next
+    assert not nora_app.chat_window.isMaximized()
+    assert nora_app.maximize_button.glyph == "maximize"
+    nora_app.maximize_button.click()
+    _pump(150)
+    assert nora_app.chat_window.isMaximized()
+    assert nora_app.maximize_button.glyph == "restore"
+    nora_app.maximize_button.click()
+    _pump(150)
+    assert not nora_app.chat_window.isMaximized()
+    assert nora_app.maximize_button.glyph == "maximize"
+
+    # close hides, it does not quit: Nora keeps living in the tray
+    nora_app.close_button.click()
+    _pump(150)
+    assert not nora_app.chat_window.isVisible()
+    assert not nora_app._closing
 
 
 def test_white_page_paints_the_splash_colour(nora_app) -> None:
