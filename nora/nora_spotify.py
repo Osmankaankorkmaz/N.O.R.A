@@ -70,8 +70,13 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         }
         body = (
             "<!doctype html><meta charset='utf-8'><title>Nora · Spotify</title>"
-            "<body style='font-family:sans-serif;background:#24182f;color:#fff;padding:3rem'>"
-            "<h2>Spotify yanıtı alındı 💜</h2><p>Bu sekmeyi kapatabilirsin. Nora sonucu doğrulayacak.</p></body>"
+            "<body style='font-family:Segoe UI,system-ui,sans-serif;margin:0;"
+            "background:linear-gradient(145deg,#f4f1ff,#fff0f7);color:#1b1725;padding:3rem'>"
+            "<div style='max-width:420px;background:#fff;border:1px solid rgba(24,18,40,.10);"
+            "border-radius:20px;padding:28px 30px;box-shadow:0 18px 48px rgba(60,40,110,.14)'>"
+            "<h2 style='margin:0 0 8px'>Spotify yanıtı alındı 💜</h2>"
+            "<p style='margin:0;color:#6a6380'>Bu sekmeyi kapatabilirsin. "
+            "Nora sonucu doğrulayacak.</p></div></body>"
         ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

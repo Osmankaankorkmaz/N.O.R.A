@@ -16,12 +16,34 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from PyQt5.QtCore import QEvent, QPoint, Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
+from PyQt5.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    pyqtSignal,
+)
+from PyQt5.QtGui import (
+    QColor,
+    QGuiApplication,
+    QIcon,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRegion,
+)
 from PyQt5.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -47,11 +69,14 @@ from .nora_files import NoraFiles
 from .nora_avatar import DEFAULT_HAIR
 from .nora_sprite import SpriteCharacter
 from .nora_glass import (
-    AvatarDot,
+    PetLogoButton,
     FrostedPanel,
+    GradientWindowButton,
+    NavButton,
+    SuggestionCard,
     GlassBubble,
     TypingIndicator,
-    _shadow_effect,
+    brand_icon_pixmap,
     glass_style,
 )
 from .nora_hotkeys import DEFAULT_PTT_KEY, PushToTalkHotkey
@@ -79,6 +104,16 @@ from .nora_tools import NoraTools
 from .nora_voice import NoraVoice
 
 logger = logging.getLogger(__name__)
+
+
+def _brand_icon() -> QIcon:
+    """The process-wide app icon: the white N on transparent (no character art)."""
+    from .nora_brand import logo_pixmap
+
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256, 512):
+        icon.addPixmap(logo_pixmap(size, spark=size >= 64))
+    return icon
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -222,6 +257,113 @@ class ChatBubble(GlassBubble):
         self.setStyleSheet("background: transparent;")
 
 
+class CornerGrip(QWidget):
+    """The resize handle a frameless window has to grow for itself.
+
+    Only the bottom-right corner: it is the one the user reaches for, and it
+    keeps the rest of the frame free of invisible grab zones that would steal
+    clicks from the input field.
+    """
+
+    SIZE = 18
+
+    def __init__(self, window: QWidget) -> None:
+        super().__init__(window)
+        self.window_ref = window
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setCursor(Qt.SizeFDiagCursor)
+        self.setToolTip("Boyutlandırmak için sürükle")
+        self._origin: QPoint | None = None
+        self._start = None
+
+    def _place(self) -> None:
+        self.move(
+            self.window_ref.width() - self.SIZE, self.window_ref.height() - self.SIZE
+        )
+        self.raise_()
+
+
+def _rounded_window_mask(window: QWidget) -> None:
+    """Give a frameless window a genuinely rounded silhouette.
+
+    Painting rounded corners is not enough: a translucent top-level window has
+    its background composited behind every child, so the square corners survive
+    as a pale ghost.  A window mask is what actually shapes the surface.
+    """
+    from .nora_brand import CARD_RADIUS
+
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(window.rect()), CARD_RADIUS, CARD_RADIUS)
+    polygon = path.toFillPolygon().toPolygon()
+    window.setMask(QRegion(polygon))
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        # Three short strokes, the usual OS affordance, in ink not black.
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(27, 23, 37, 90), 1.4))
+        for offset in (5, 10, 15):
+            painter.drawLine(
+                self.SIZE - offset, self.SIZE - 3, self.SIZE - 3, self.SIZE - offset
+            )
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.LeftButton:
+            self._origin = event.globalPos()
+            self._start = self.window_ref.size()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if self._origin is None or self._start is None:
+            return
+        delta = event.globalPos() - self._origin
+        self.window_ref.resize(
+            max(self.window_ref.minimumWidth(), self._start.width() + delta.x()),
+            max(self.window_ref.minimumHeight(), self._start.height() + delta.y()),
+        )
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._origin = None
+        self._start = None
+
+
+class WhitePage(QWidget):
+    """The window's own background: the same white the splash card used.
+
+    It paints with :func:`nora.nora_brand.splash_gradient`, so the hand-over
+    from the loading card to the app has no colour jump at all — the card
+    dissolves and the same white blooms underneath.
+
+    Qt fills a translucent top-level window's background *before* the widget
+    paints, so a page that only paints a rounded gradient still shows square,
+    opaque corners.  This widget therefore declares no system background and
+    does the rounding itself, in one pass: erase to fully transparent, then
+    fill the rounded rect.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        from .nora_brand import CARD_RADIUS, splash_gradient
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        # Erase first: the composer may hand us a stale or filled buffer.
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+        # Then fill exactly the launch card's rounded rect: the page *is* the
+        # card grown to window size, not a rectangle behind a rounded panel.
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), CARD_RADIUS, CARD_RADIUS)
+        painter.setClipPath(path)
+        splash_gradient(painter, QRectF(self.rect()))
+
+
 def _tint_hair(image: QImage, colour: QColor) -> QImage:
     """Recolour the brown hair in an illustrated portrait.
 
@@ -260,10 +402,15 @@ class NoraApp(QWidget):
         super().__init__(parent)
         self.options = options or NoraOptions()
         self.setWindowTitle("Nora")
+        self.setWindowIcon(_brand_icon())
         self.setWindowFlags(Qt.Tool)
         self.setFixedSize(0, 0)
         self.hide()
         self._closing = False
+        #: Whether this instance may terminate the whole QApplication.  False
+        #: until ``main()`` marks the one real app: a second instance (tests,
+        #: or a quick relaunch) must never quit the shared event loop.
+        self._owns_quit = False
         self._busy = False
         self._listening = False
         self._wake_followup = False
@@ -279,6 +426,10 @@ class NoraApp(QWidget):
         self._cancel_supported = False
         self._workers: set[QThread] = set()
         self._message_rows: list[QWidget] = []
+        #: Which rail destination is lit; the rail itself is built later.
+        self._active_nav = "chat"
+        #: Whether the rail is folded to glyphs (restored from preferences).
+        self._rail_collapsed = False
         self._chat_user_moved = False
         self._chat_drag_offset: QPoint | None = None
         self._notified_errors: set[str] = set()
@@ -374,7 +525,8 @@ class NoraApp(QWidget):
         self.wake_action.setChecked(bool(wake))
         self.proactive_action.setChecked(proactive_enabled)
         self._apply_mode_appearance()
-        if wake:
+        # Microphone is off by design: no wake-word listener, no push-to-talk.
+        if wake and self.MICROPHONE_ENABLED:
             self.voice.start_wake_word_listener()
         if proactive_enabled:
             self.proactive.start()
@@ -397,21 +549,305 @@ class NoraApp(QWidget):
 
     # ------------------------------------------------------------------ build UI
     @staticmethod
-    def _emoji_font(point_size: int = 10) -> QFont:
-        font = QFont("Segoe UI", point_size)
+    def _dpr() -> float:
+        """The screen's device pixel ratio, for sharp hand-drawn icons."""
+        screen = QGuiApplication.primaryScreen()
         try:
-            font.setFamilies(
-                [
-                    "Segoe UI Emoji",
-                    "Noto Color Emoji",
-                    "Apple Color Emoji",
-                    "Segoe UI Symbol",
-                    "Segoe UI",
-                ]
-            )
-        except AttributeError:
-            pass
-        return font
+            return float(screen.devicePixelRatio()) if screen is not None else 1.0
+        except AttributeError:  # very old Qt
+            return 1.0
+
+    #: The suggestion cards under the greeting: glyph, title, one-line promise,
+    #: and the action it runs.  This is the shape a modern assistant app greets
+    #: with — the user should be able to start by pointing, before typing.
+    HERO_SUGGESTIONS = (
+        (
+            "screen",
+            "Ekranımı özetle",
+            "Şu an neyle uğraştığını görüp anlatayım.",
+            "_analyze_screen",
+        ),
+        (
+            "clock",
+            "Bugün ne var?",
+            "Saat, hava ve planın — tek bakışta.",
+            "_quick_weather",
+        ),
+        (
+            "notes",
+            "Notlarımı göster",
+            "Aklında tuttuklarımı buraya dökeyim.",
+            "_show_notes",
+        ),
+        (
+            "spark",
+            "Sistem bilgisi",
+            "Makinen nasıl çalışıyor, birlikte bakalım.",
+            "_show_system_info",
+        ),
+    )
+
+    def _build_hero(self) -> QWidget:
+        """The first-run page: a greeting and a grid of ways in.
+
+        Open, not carded: a big greeting on the white page reads calmer than a
+        bordered box floating in the middle, and the suggestion cards below give
+        the empty state structure.  Each card names the action *and* what it
+        will do, so the greeting teaches the product instead of just welcoming.
+        """
+        hero = QWidget()
+        hero.setObjectName("hero")
+        outer = QVBoxLayout(hero)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addStretch(1)
+
+        column = QWidget()
+        # A maximum, not a fixed width: the greeting must shrink on a small
+        # window instead of overflowing its page.
+        column.setMaximumWidth(700)
+        inner = QVBoxLayout(column)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setSpacing(0)
+
+        from .nora_brand import logo_pixmap
+
+        mark = QLabel()
+        mark.setAlignment(Qt.AlignCenter)
+        mark.setPixmap(logo_pixmap(64, spark=True))
+        mark.setFixedSize(64, 64)
+        mark.setScaledContents(False)
+        inner.addWidget(mark, 0, Qt.AlignHCenter)
+        inner.addSpacing(18)
+
+        title = QLabel("Merhaba, ben Nora.")  # noqa: RUF001 - Turkish text
+        title.setObjectName("heroTitle")
+        title.setAlignment(Qt.AlignCenter)
+        inner.addWidget(title)
+        inner.addSpacing(10)
+
+        body = QLabel(
+            "Masaüstünde yaşayan Türkçe asistanın. Ekranına bakabilir, "
+            "notlarını tutabilir, gününü planlayabilirim."
+        )
+        body.setObjectName("heroBody")
+        body.setAlignment(Qt.AlignCenter)
+        body.setWordWrap(True)
+        inner.addWidget(body)
+        inner.addSpacing(26)
+
+        caption = QLabel("Bunlardan birini dene")
+        caption.setObjectName("heroCaption")
+        inner.addWidget(caption)
+        inner.addSpacing(10)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+        self.hero_chips: list[QPushButton] = []
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        for index, (glyph, name, blurb, slot_name) in enumerate(self.HERO_SUGGESTIONS):
+            card = SuggestionCard(glyph, name, blurb)
+            card.clicked.connect(getattr(self, slot_name))
+            grid.addWidget(card, index // 2, index % 2)
+            self.hero_chips.append(card)
+        inner.addLayout(grid)
+
+        # AlignHCenter alone lets the layout text-align the block: a fixed
+        # width plus a stretch item on each side is what actually centres it.
+        outer.addWidget(column, 0, Qt.AlignHCenter | Qt.AlignTop)
+        outer.addStretch(1)
+        return hero
+
+    def _update_hero(self) -> None:
+        """Show exactly one of the two: the welcome page, or the conversation.
+
+        Both are stretch items, so keeping the (empty) message list visible
+        would split the window between them and squeeze the hero until its
+        mark was clipped.
+        """
+        hero = getattr(self, "hero", None)
+        if hero is None:
+            return
+        empty = not self._message_rows
+        hero.setVisible(empty)
+        scroll = getattr(self, "scroll", None)
+        if scroll is not None:
+            scroll.setVisible(not empty)
+
+    #: Width of the labelled rail.  Wide enough for "Kişisel panel" on one
+    #: line, narrow enough to leave the conversation the rest of the window.
+    RAIL_WIDTH = 208
+    #: The collapsed rail: wide enough for one 42 px glyph plus its insets, so
+    #: the icons keep their rhythm and nothing re-flows except the captions.
+    RAIL_WIDTH_COMPACT = 68
+
+    def _build_sidebar(self) -> QWidget:
+        """The rail: her mark, four named destinations, settings at the bottom.
+
+        The destinations are **named**, not just iconified: a rail of five bare
+        glyphs makes the user learn the icons, and the app has room for the
+        words.  The mark stays at the top as the way to call her onto the
+        desktop, and the whole column is one surface with a hairline edge.
+        """
+        rail = QWidget()
+        rail.setObjectName("sidebar")
+        rail.setFixedWidth(self.RAIL_WIDTH)
+        column = QVBoxLayout(rail)
+        column.setContentsMargins(14, 16, 14, 14)
+        column.setSpacing(0)
+
+        self.logo_button = PetLogoButton(size=44)
+        self.logo_button.clicked.connect(self.toggle_pet)
+        self.logo_button.setToolTip("Nora'yı masaüstüne çıkar / içeri al")
+        mark_row = QHBoxLayout()
+        mark_row.setContentsMargins(0, 0, 0, 0)
+        mark_row.setSpacing(10)
+        mark_row.addWidget(self.logo_button)
+        self.wordmark = QLabel("Nora")
+        self.wordmark.setObjectName("wordmark")
+        mark_row.addWidget(self.wordmark)
+        mark_row.addStretch(1)
+        column.addLayout(mark_row)
+
+        # The collapse control sits in its own row under the mark: in the
+        # header row it squeezed the wordmark against the mark when the rail
+        # shrank, and the rail has vertical room to spare.
+        self.rail_toggle = NavButton("collapse", rail, with_label=False, size=32)
+        self.rail_toggle.setObjectName("railToggle")
+        self.rail_toggle.setToolTip("Rayı daralt")
+        self.rail_toggle.setAccessibleName("Rayı daralt")
+        self.rail_toggle.clicked.connect(self.toggle_rail)
+        toggle_row = QHBoxLayout()
+        toggle_row.setContentsMargins(0, 12, 0, 0)
+        toggle_row.addWidget(self.rail_toggle)
+        toggle_row.addStretch(1)
+        column.addLayout(toggle_row)
+
+        column.addSpacing(18)
+
+        # A quiet section caption, the way a real sidebar names its group.
+        self.rail_caption = QLabel("ÇALIŞMA ALANI")
+        self.rail_caption.setObjectName("railCaption")
+        column.addWidget(self.rail_caption)
+        column.addSpacing(8)
+
+        self.nav_buttons: dict[str, QPushButton] = {}
+        for key, glyph, tip, slot in (
+            ("chat", "chat", "Sohbet", self._show_chat_page),
+            ("notes", "notes", "Notlar", self._show_notes),
+            ("tools", "tools", "Araçlar", self._open_tools),
+            ("profile", "profile", "Kişisel panel", self._show_personal),
+        ):
+            button = NavButton(glyph, rail, with_label=True)
+            button.setToolTip(tip)
+            button.setAccessibleName(tip)
+            button.clicked.connect(slot)
+            column.addWidget(button)
+            self.nav_buttons[key] = button
+        self._set_active_nav("chat")
+
+        column.addStretch(1)
+
+        divider = QFrame()
+        divider.setObjectName("railDivider")
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFixedHeight(1)
+        column.addWidget(divider)
+        column.addSpacing(10)
+
+        self.settings_button = NavButton("settings", rail, with_label=True)
+        self.settings_button.setToolTip("Ayarlar")
+        self.settings_button.setAccessibleName("Ayarlar")
+        self.settings_button.clicked.connect(self._show_settings)
+        column.addWidget(self.settings_button)
+        return rail
+
+    # ------------------------------------------------------------------ nav
+    #: Header title and subtitle for each destination in the rail.  One place,
+    #: so the rail and the page title can never disagree.
+    #: Title and subtitle per destination.  The subtitle says what the page is
+    #: *for*, not what it is called: "Nora ile konuş" described the rail item we
+    #: already labelled "Sohbet", and repeated it instead of adding anything.
+    NAV_PAGES: dict[str, tuple[str, str]] = {
+        "chat": ("Sohbet", "Ne yapacağız, Nora?"),
+        "notes": ("Notlar", "Aklında tutmamı istediklerin"),
+        "tools": ("Araçlar", "Ekranına bak, sistemini oku, modelini seç"),
+        "profile": ("Kişisel panel", "Seni tanıdığım kadarı"),
+    }
+
+    def _set_active_nav(self, key: str) -> None:
+        self._active_nav = key
+        for name, button in getattr(self, "nav_buttons", {}).items():
+            button.setActive(name == key)
+        title, subtitle = self.NAV_PAGES.get(key, self.NAV_PAGES["chat"])
+        if getattr(self, "chat_title", None) is not None:
+            self.chat_title.setText(title)
+        if getattr(self, "chat_subtitle", None) is not None:
+            self.chat_subtitle.setText(subtitle)
+
+    # ------------------------------------------------------------------ rail
+    def toggle_rail(self, collapsed: bool | None = None) -> None:
+        """Collapse the rail to glyphs, or open it again.
+
+        A 208 px rail is right when the user is learning the app and wrong once
+        they are reading a long answer: folding it to 68 px gives the
+        conversation 140 px of width back.  The choice is remembered, because a
+        sidebar that re-opens on every start is a sidebar the user has to fight.
+        """
+        if collapsed is None:
+            collapsed = not getattr(self, "_rail_collapsed", False)
+        collapsed = bool(collapsed)
+        if collapsed == getattr(self, "_rail_collapsed", None):
+            return
+        self._rail_collapsed = collapsed
+
+        target = self.RAIL_WIDTH_COMPACT if collapsed else self.RAIL_WIDTH
+        self._rail_animation = QPropertyAnimation(self.sidebar, b"minimumWidth")
+        self._rail_animation.setDuration(160)
+        self._rail_animation.setStartValue(self.sidebar.width())
+        self._rail_animation.setEndValue(target)
+        self._rail_animation.setEasingCurve(QEasingCurve.OutCubic)
+        # maximumWidth too, or setFixedWidth would pin the old value back on.
+        self.sidebar.setMaximumWidth(target)
+        self._rail_animation.finished.connect(
+            lambda: self.sidebar.setFixedWidth(target)
+        )
+        self._rail_animation.start()
+
+        for button in (*self.nav_buttons.values(), self.settings_button):
+            button.with_label = not collapsed
+            button.update()
+        self.wordmark.setVisible(not collapsed)
+        self.rail_caption.setVisible(not collapsed)
+        self.rail_toggle.setToolTip("Rayı aç" if collapsed else "Rayı daralt")
+        self.rail_toggle.setAccessibleName(self.rail_toggle.toolTip())
+        self.rail_toggle.collapsed = collapsed
+        self.rail_toggle.update()
+        try:
+            self.store.set_preference("rail_collapsed", collapsed)
+        except Exception:  # storage is best-effort; never block the UI on it
+            logger.debug("ray tercihi yazılamadı", exc_info=True)
+
+    def _show_chat_page(self) -> None:
+        self._set_active_nav("chat")
+
+    def _open_tools(self) -> None:
+        """The tool menu the rail promises, opened next to its own button.
+
+        The menu is a popup, not a page: when it closes the rail goes back to
+        whatever page is actually on screen instead of leaving "tools" lit.
+        """
+        previous = self._active_nav
+        self._set_active_nav("tools")
+        button = self.nav_buttons["tools"]
+        self._chat_more_menu(button.mapToGlobal(button.rect().bottomRight()))
+        self._set_active_nav(previous)
+
+    def _show_personal(self) -> None:
+        self._set_active_nav("profile")
+        self.show_personal_panel()
 
     def _build_chat(self) -> None:
         """Frosted-glass chat panel (ChatGPT-desktop-like), unified NoraApp shell.
@@ -424,96 +860,140 @@ class NoraApp(QWidget):
         # resizing) instead of a frameless tool pinned next to the pet.  The
         # user decides whether to keep it open, so it must behave like every
         # other desktop app.
+        # Frameless: the operating system's own title bar (icon, minimise,
+        # maximise, close) is deliberately *gone*.  The card below is the whole
+        # window, so nothing sits above it, and the header row drags it.
         self.chat_window = QWidget(None)
-        self.chat_window.setWindowFlags(
-            Qt.Window
-            | Qt.CustomizeWindowHint
-            | Qt.WindowTitleHint
-            | Qt.WindowSystemMenuHint
-            | Qt.WindowMinMaxButtonsHint
-            | Qt.WindowCloseButtonHint
-        )
+        self.chat_window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.chat_window.setAttribute(Qt.WA_TranslucentBackground)
         self.chat_window.setWindowTitle("Nora")
+        self.chat_window.setWindowIcon(_brand_icon())
         self.chat_window.setMinimumSize(820, 620)
         self.chat_window.setStyleSheet(glass_style())
 
+        # A plain white page under the glass card: the window background is the
+        # same white the splash card used, so the hand-over has no colour jump.
+        # It is the window's own child, so it fills the frame edge to edge.
+        self.white_page = WhitePage(self.chat_window)
+        self.white_page.setGeometry(self.chat_window.rect())
+        self.white_page.lower()
+        self.resize_grip = CornerGrip(self.chat_window)
+
         root = QVBoxLayout(self.chat_window)
-        root.setContentsMargins(18, 18, 18, 18)
+        # No margin at all: the glass card is the window, edge to edge, so its
+        # rounded corners are the window's rounded corners.
+        root.setContentsMargins(0, 0, 0, 0)
         self.glass_panel = FrostedPanel(self.chat_window)
         self.glass_panel.setObjectName("glassCard")
-        shadow = _shadow_effect(self.glass_panel)
-        if shadow is not None:
-            self.glass_panel.setGraphicsEffect(shadow)
+        # No drop shadow: the card *is* the window now, so a shadow would only
+        # smear the corners it is supposed to share with the launch card.  The
+        # desktop already separates the window from what is behind it.
         root.addWidget(self.glass_panel)
 
-        layout = QVBoxLayout(self.glass_panel)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(9)
+        # ---- shell -------------------------------------------------------
+        # Two columns, like every modern chat app: a quiet rail for identity and
+        # navigation, and a wide stage for the conversation itself.
+        shell = QHBoxLayout(self.glass_panel)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+
+        self.sidebar = self._build_sidebar()
+        # Restore the rail's folded state without animating it: the window is
+        # not on screen yet, so a 160 ms slide would just delay the first paint.
+        try:
+            if self.store.preference("rail_collapsed", False):
+                self.sidebar.setFixedWidth(self.RAIL_WIDTH_COMPACT)
+                self.toggle_rail(True)
+        except Exception:
+            logger.debug("ray tercihi okunamadı", exc_info=True)
+        shell.addWidget(self.sidebar)
+
+        stage = QWidget()
+        stage.setObjectName("stage")
+        shell.addWidget(stage, 1)
+        layout = QVBoxLayout(stage)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        content_wrap = QWidget()
+        content_wrap.setObjectName("stageBody")
+        layout.addWidget(content_wrap, 1)
+        layout = QVBoxLayout(content_wrap)
+        layout.setContentsMargins(28, 8, 28, 0)
+        layout.setSpacing(10)
 
         # ---- header -----------------------------------------------------
+        # A quiet title row, not a toolbar.  The system title bar is gone, so
+        # this row is also what the user drags the window by.
         header = QWidget()
-        header.setFixedHeight(46)
+        header.setFixedHeight(66)
+        header.setObjectName("chatHeader")
         self.chat_header = header
         header_outer = QHBoxLayout(header)
-        header_outer.setContentsMargins(2, 0, 0, 0)
-        header_outer.setSpacing(9)
+        header_outer.setContentsMargins(22, 0, 18, 0)
+        header_outer.setSpacing(12)
 
-        self.chat_avatar = AvatarDot()
-        self.chat_avatar.setFixedSize(38, 38)
-        self.chat_avatar.set_appearance(self.store.preferences)
-        header_outer.addWidget(self.chat_avatar)
-
-        titles = QVBoxLayout()
+        # The mark lives in the rail now (see _build_sidebar); the header is a
+        # page title and the window controls, nothing else.
+        header.setToolTip("Pencereyi sürüklemek için tut · araçlar için sağ tık")
+        # A widget, not a bare nested layout: a layout handed the full 66 px
+        # header height has to distribute the leftover between its labels, so
+        # the title and the subtitle drift apart.  A widget's size hint is the
+        # sum of its labels, and AlignVCenter puts that block on the centreline.
+        title_box = QWidget()
+        titles = QVBoxLayout(title_box)
         titles.setContentsMargins(0, 0, 0, 0)
-        titles.setSpacing(0)
-        title = QLabel("Nora")
+        titles.setSpacing(1)
+        title = QLabel(self.NAV_PAGES["chat"][0])
         title.setObjectName("title")
-        titles.addWidget(title)
-        self.chat_subtitle = QLabel("companion")
+        self.chat_title = title
+        titles.addWidget(title, 0, Qt.AlignLeft)
+        # The initial text must match NAV_PAGES: the rail is built before the
+        # header, so _set_active_nav("chat") runs while these labels do not yet
+        # exist and cannot fill them in.
+        self.chat_subtitle = QLabel(self.NAV_PAGES["chat"][1])
         self.chat_subtitle.setObjectName("subtitle")
-        titles.addWidget(self.chat_subtitle)
-        header_outer.addLayout(titles)
+        titles.addWidget(self.chat_subtitle, 0, Qt.AlignLeft)
+        header_outer.addWidget(title_box, 0, Qt.AlignVCenter)
         header_outer.addStretch(1)
 
-        self.mic_indicator = QLabel("🎙️")
-        self.mic_indicator.setFont(self._emoji_font(9))
-        self.mic_indicator.setToolTip("Mikrofon durumu")
-        header_outer.addWidget(self.mic_indicator)
-        self.speaker_indicator = QLabel("🔊")
-        self.speaker_indicator.setFont(self._emoji_font(9))
-        self.speaker_indicator.setToolTip("Sesli yanıt durumu")
-        header_outer.addWidget(self.speaker_indicator)
+        # ---- window controls, top right ---------------------------------
+        # The OS title bar is gone, so these are the only window controls.
+        # They wear the brand gradient: with no system chrome to match, the
+        # product can style them like itself.
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
+        self.minimize_button = GradientWindowButton("minimize", header, size=30)
+        self.minimize_button.setToolTip("Küçült")
+        self.minimize_button.setAccessibleName("Küçült")
+        self.minimize_button.clicked.connect(self.chat_window.showMinimized)
 
-        for text, tip, slot, attr in (
-            ("🎤", "Sesli komut ver", lambda: self._start_listening(), "mic_button"),
-            ("⚙", "Ayarlar", self._show_settings, "settings_button"),
-            ("⋯", "Ekran, kamera ve sistem araçları", None, "more_button"),
-            ("─", "Sohbeti küçült", self.chat_window.hide, "minimize_button"),
-            (
-                "✕",
-                "Sohbeti gizle (Nora çalışmaya devam eder)",
-                self.chat_window.hide,
-                "close_button",
-            ),
-        ):
-            button = QPushButton(text)
-            button.setToolTip(tip)
-            button.setAccessibleName(tip)
-            button.setFont(self._emoji_font(10))
-            button.setFixedSize(32, 32)
-            if slot is not None:
-                button.clicked.connect(slot)
-            header_outer.addWidget(button)
-            setattr(self, attr, button)
+        self.maximize_button = GradientWindowButton("maximize", header, size=30)
+        self.maximize_button.setToolTip("Büyüt")
+        self.maximize_button.setAccessibleName("Büyüt")
+        self.maximize_button.clicked.connect(self.toggle_maximize)
 
-        # Screen/camera/system tools live in a compact overflow menu so the
-        # header keeps room for the title on narrow windows.
-        self.more_button.clicked.connect(self._chat_more_menu)
-        self.screen_button = self.more_button
-        self.camera_button = self.more_button
-        self.system_button = self.more_button
+        self.close_button = GradientWindowButton("close", header, size=30, danger=True)
+        self.close_button.setToolTip("Gizle (Nora çalışmaya devam eder)")
+        self.close_button.setAccessibleName("Gizle")
+        self.close_button.clicked.connect(self.chat_window.hide)
+
+        for button in (self.minimize_button, self.maximize_button, self.close_button):
+            controls.addWidget(button)
+        header_outer.addLayout(controls)
         layout.addWidget(header)
+
+        # Mouse-drag on the header moves the frameless window.  Children keep
+        # their own behaviour: only presses that land on the header or its
+        # labels start a drag, so the logo button still clicks.
+        self._chat_drag_origin: QPoint | None = None
+        header.installEventFilter(self)
+        title.installEventFilter(self)
+        self.chat_subtitle.installEventFilter(self)
+        header.setCursor(Qt.OpenHandCursor)
+        title.setCursor(Qt.OpenHandCursor)
+        self.chat_subtitle.setCursor(Qt.OpenHandCursor)
 
         # ---- message list ----------------------------------------------
         self.scroll = QScrollArea()
@@ -525,11 +1005,18 @@ class NoraApp(QWidget):
         content = QWidget()
         content.setStyleSheet("background: transparent;")
         self.message_layout = QVBoxLayout(content)
-        self.message_layout.setContentsMargins(2, 8, 2, 8)
-        self.message_layout.setSpacing(9)
+        self.message_layout.setContentsMargins(6, 10, 6, 10)
+        self.message_layout.setSpacing(14)
         self.message_layout.addStretch(1)
         self.scroll.setWidget(content)
         layout.addWidget(self.scroll, 1)
+
+        # ---- empty state ------------------------------------------------
+        # A blank white page is not a welcome.  Until the first message there
+        # is a hero: the mark, her name, and three things to try.
+        self.hero = self._build_hero()
+        layout.addWidget(self.hero, 1)
+        self._update_hero()
 
         self.typing_indicator = TypingIndicator()
         self.typing_indicator.hide()
@@ -541,58 +1028,93 @@ class NoraApp(QWidget):
         layout.addWidget(self.status_label)
 
         # ---- composer ---------------------------------------------------
+        # One floating card holds everything: the field, the send button and the
+        # shortcuts.  Separate rows of grey boxes looked like a settings panel;
+        # a single card reads as "this is where you talk to her".
+        self.composer = QWidget()
+        self.composer.setObjectName("composerCard")
+        composer_outer = QVBoxLayout(self.composer)
+        composer_outer.setContentsMargins(14, 10, 10, 10)
+        composer_outer.setSpacing(8)
+
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Nora'ya bir şey yaz…  (Enter ile gönder)")
+        self.input.setPlaceholderText("Nora'ya bir şey yaz…")
         self.input.setMaxLength(4000)
-        self.input.setMinimumHeight(38)
+        self.input.setMinimumHeight(34)
         self.input.returnPressed.connect(self._send_from_input)
         input_row.addWidget(self.input, 1)
-        self.cancel_button = QPushButton("⏹")
-        self.cancel_button.setFixedSize(40, 40)
+
+        self.cancel_button = QPushButton("Durdur")
+        self.cancel_button.setObjectName("cancelButton")
+        self.cancel_button.setFixedHeight(40)
+        self.cancel_button.setMinimumWidth(72)
+        self.cancel_button.setCursor(Qt.PointingHandCursor)
         self.cancel_button.setToolTip(
-            "İsteği iptal et. Yerel üretim tokenlar arasında durur; bulut isteği ağda sürebilir ama yanıtı kullanılmaz."
+            "İsteği iptal et. Yerel üretim tokenlar arasında durur; "
+            "bulut isteği ağda sürebilir ama yanıtı kullanılmaz."
         )
-        self.cancel_button.setFont(self._emoji_font(11))
         self.cancel_button.clicked.connect(self._cancel_current_request)
         self.cancel_button.hide()
         input_row.addWidget(self.cancel_button)
-        self.send_button = QPushButton("➤")
-        self.send_button.setObjectName("sendButton")
-        self.send_button.setFixedSize(52, 40)
+
+        # A flat glyph, not a filled pink disc: the disc was the loudest thing
+        # in the composer and it competed with the message bubbles.  The icon
+        # carries the brand gradient instead and the button keeps its footprint.
+        self.send_button = QPushButton()
+        self.send_button.setObjectName("sendGlyph")
+        self.send_button.setFixedSize(42, 42)
+        self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.setToolTip("Gönder (Enter)")
+        self.send_button.setIcon(QIcon(brand_icon_pixmap("send", 26, dpr=self._dpr())))
+        self.send_button.setIconSize(QSize(26, 26))
         self.send_button.clicked.connect(self._send_from_input)
         input_row.addWidget(self.send_button)
-        layout.addLayout(input_row)
+        composer_outer.addLayout(input_row)
 
+        # Shortcuts live inside the card, as quiet pills.
         quick_row = QHBoxLayout()
         quick_row.setSpacing(6)
         self.quick_buttons: list[QPushButton] = []
         for text, slot in (
-            ("🔍 Ara", self._quick_search),
-            ("⏰ Saat", self._quick_time),
-            ("📝 Notlar", self._show_notes),
-            ("🌤️ Hava", self._quick_weather),
+            ("Ara", self._quick_search),
+            ("Saat", self._quick_time),
+            ("Notlar", self._show_notes),
+            ("Hava", self._quick_weather),
             (
-                "🎮 Oyun",
+                "Oyun",
                 lambda: self._execute_command({"command": "game", "action": "start"}),
             ),
         ):
             button = QPushButton(text)
-            button.setFont(self._emoji_font(9))
-            button.setStyleSheet("font-size: 11px; padding: 4px 6px;")
+            button.setObjectName("chip")
+            button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(slot)
             quick_row.addWidget(button)
             self.quick_buttons.append(button)
-        layout.addLayout(quick_row)
+        quick_row.addStretch(1)
+        composer_outer.addLayout(quick_row)
+
+        composer_row = QHBoxLayout()
+        composer_row.setContentsMargins(0, 0, 0, 0)
+        composer_row.addWidget(self.composer)
+        layout.addSpacing(6)
+        layout.addLayout(composer_row)
+        # The stage has no bottom margin of its own, so the card needs its own
+        # breathing room here or its rounded corners are cut by the window edge.
+        layout.addSpacing(16)
+
         self.chat_window.installEventFilter(self)
+        # The white page is a plain child, not a layout item: keep it filling
+        # the frame when the window is resized or maximised.
+        self.white_page.resize(self.chat_window.size())
         self._glass_blur_timer = QTimer(self)
         self._glass_blur_timer.setSingleShot(True)
         self._glass_blur_timer.setInterval(200)
         self._glass_blur_timer.timeout.connect(self._refresh_glass_backdrop)
 
-    def _chat_more_menu(self) -> None:
+    def _chat_more_menu(self, at: QPoint | None = None) -> None:
         menu = QMenu(self.chat_window)
         menu.setStyleSheet(self._menu_style())
         menu.addAction("📸 Ekranı analiz et", self._analyze_screen)
@@ -603,7 +1125,15 @@ class NoraApp(QWidget):
         )
         menu.addAction("🩺 Groq bağlantısı", self._check_groq)
         menu.addAction("🔑 Groq anahtarı gir", self._groq_setup_dialog)
-        button = self.more_button
+        if at is not None:
+            menu.exec_(at)
+            return
+        button = getattr(self, "more_button", None)
+        if button is None:
+            # No button to anchor to: open under the title row, right aligned.
+            origin = self.chat_window.mapToGlobal(self.chat_window.rect().topRight())
+            menu.exec_(origin)
+            return
         menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
 
     def _refresh_glass_backdrop(self) -> None:
@@ -612,6 +1142,20 @@ class NoraApp(QWidget):
         self.glass_panel.refresh_backdrop()
 
     def _tray_icon(self) -> QIcon:
+        """The system tray icon: Nora's brand mark.
+
+        The tray is the *app*, so it carries the app's logo.  The character has
+        her own window with her own art; two different faces in the tray made it
+        unclear which one was Nora.
+        """
+        from .nora_brand import logo_pixmap
+
+        icon = QIcon()
+        for size in (16, 24, 32, 48, 64, 128, 256):
+            icon.addPixmap(logo_pixmap(size, spark=size >= 64))
+        return icon
+
+    def _legacy_tray_icon(self) -> QIcon:
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -1043,13 +1587,16 @@ class NoraApp(QWidget):
 
     @staticmethod
     def _menu_style() -> str:
-        return """QMenu { background: #2a193c; color: white; border: 1px solid #ff6b9d; padding: 5px; }
-                  QMenu::item { padding: 6px 22px; border-radius: 5px; }
-                  QMenu::item:selected { background: #ff6b9d; }
-                  QMenu::separator { height: 1px; background: #6a3d7e; margin: 4px 8px; }"""
+        # White menus, ink type, the brand gradient only on the selected row.
+        return """QMenu { background: #ffffff; color: #1b1725; border: 1px solid rgba(24,18,40,34); padding: 6px; }
+                  QMenu::item { padding: 6px 22px; border-radius: 6px; }
+                  QMenu::item:selected { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #7b5cff, stop:1 #ff4d94); color: white; }
+                  QMenu::item:disabled { color: rgba(27,23,37,110); }
+                  QMenu::separator { height: 1px; background: rgba(24,18,40,28); margin: 4px 8px; }"""
 
     def _connect_signals(self) -> None:
-        self.pet.clicked.connect(self.toggle_chat)
+        # Single click = tickle (she giggles); double click = personal panel.
+        self.pet.clicked.connect(self._on_pet_tickle)
         self.pet.double_clicked.connect(self._on_double_click)
         self.pet.right_clicked.connect(self._pet_menu)
         self.pet.position_changed.connect(self._on_pet_moved)
@@ -1076,11 +1623,207 @@ class NoraApp(QWidget):
         self.ptt_hotkey.error.connect(self._on_ptt_error)
         app = QApplication.instance()
         if app:
-            app.aboutToQuit.connect(self.shutdown)
+            app.aboutToQuit.connect(self._on_about_to_quit)
 
-    def start(self) -> None:
+    def _on_about_to_quit(self) -> None:
+        """The loop is already going away; clean up without asking it to quit."""
+        self._owns_quit = False
+        self.shutdown()
+
+    #: The microphone is intentionally disabled.  The user talks to Nora by
+    #: typing; Nora answers out loud.  Turning this on would need a microphone
+    #: permission prompt that the product deliberately does not ask for.
+    MICROPHONE_ENABLED = False
+
+    def _microphone_blocked(self) -> bool:
+        if self.MICROPHONE_ENABLED:
+            return False
+        self.status_label.setText(
+            "Mikrofon kapalı — Nora'yı yazarak konuş, o sesli cevap verir."
+        )
+        self.add_message(
+            "Mikrofon bu sürümde kapalı. Sen yazarak konuşuyorsun, ben sesli "
+            "cevap veriyorum. 🐾",
+            "system",
+        )
+        return True
+
+    def start(self, splash: bool = False) -> None:
+        """Open like a normal desktop app: the chat window first.
+
+        Nora is *inside* the app until the user clicks the logo in the header;
+        only then does she climb out onto the desktop.  That is the behaviour
+        the reference app has, and it keeps the desktop tidy on launch.
+
+        ``splash=True`` hands the first paint to the branded launch card (see
+        :mod:`nora.nora_splash`); the real entry point uses it, tests do not
+        need the extra window.
+        """
+        self._pet_released = False
+        if splash:
+            self._start_with_splash()
+            return
+        self.show_chat()
+
+    # ------------------------------------------------------------- splash flow
+    def _start_with_splash(self) -> None:
+        """Show the branded card, let Qt paint it, then finish the real warm-up."""
+        from .nora_splash import SplashScreen
+
+        self.splash = SplashScreen()
+        self.splash.finished.connect(self._splash_done)
+        self._splash_step = 0
+        self._splash_started = time.monotonic()
+        self.splash.set_step(0)
+        self.splash.start()
+        # A real timer owned by this app, not QTimer.singleShot: a pending
+        # single-shot is destroyed when another app instance is torn down, which
+        # silently froze the splash in exactly that situation.
+        if not hasattr(self, "_splash_timer"):
+            self._splash_timer = QTimer(self)
+            self._splash_timer.timeout.connect(self._advance_splash)
+        self._splash_timer.start(0)
+
+    def _advance_splash(self) -> None:
+        """One timer tick = one honest step of the real start-up work."""
+        from .nora_splash import HOLD_MAX_SECONDS, HOLD_SECONDS, STEPS
+
+        splash = getattr(self, "splash", None)
+        if splash is None:
+            return
+        if self._splash_step > len(STEPS):
+            splash.finish()
+            return
+        if self._splash_step == len(STEPS):
+            # Hold the card for the rest of its five seconds, then hand over.
+            # Waiting is honest: the work is done, the entrance is not.
+            splash.set_step(len(STEPS) - 1)
+            splash.set_status("Hazır")
+            splash.set_progress(1.0)
+            elapsed = time.monotonic() - self._splash_started
+            remaining = min(
+                max(0.0, HOLD_SECONDS - elapsed), max(0.0, HOLD_MAX_SECONDS - elapsed)
+            )
+            self._splash_step += 1
+            self._splash_timer.start(int(remaining * 1000) if remaining else 60)
+            return
+        try:
+            if self._splash_step == 0:
+                # settings + data dir are already loaded in __init__; this step
+                # is the reminder scheduler actually starting.
+                self.reminders.start()
+            elif self._splash_step == 1:
+                self._refresh_personal_context()
+            elif self._splash_step == 2:
+                self._sync_voice_modes()
+            self.splash.set_step(self._splash_step)
+        except Exception as exc:  # never swallow: the card says what broke
+            logger.exception("Açılış adımı başarısız: %s", exc)
+            splash.fail(f"Açılış tamamlanamadı: {exc}")
+            self._splash_step = len(STEPS) + 1
+            self._splash_timer.start(1800)
+            return
+        self._splash_step += 1
+        self._splash_timer.start(190)
+
+    def _splash_done(self) -> None:
+        """Hand the launch card over to the app with no colour jump.
+
+        The card sits where the chat window will sit, so the window is placed
+        and shown *first*, then the card fades out on top of it.  Same geometry,
+        same white — the card simply dissolves and the page is already there.
+        """
+        timer = getattr(self, "_splash_timer", None)
+        if timer is not None:
+            timer.stop()
+        splash = getattr(self, "splash", None)
+        self.splash = None
+        self._position_chat()
+        self.chat_window.show()
+        self.chat_window.raise_()
+        self.input.setFocus()
+        self._chat_user_moved = False
+        if getattr(self, "_pet_released", False):
+            self.pet.show()
+        if splash is None:
+            return
+
+        def _fade(step: int = 0) -> None:
+            step += 1
+            opacity = max(0.0, 1.0 - step / 6.0)
+            if opacity <= 0.0:
+                splash.hide()
+                splash.deleteLater()
+                return
+            splash.setWindowOpacity(opacity)
+            # Both are top-level windows: keep the card above the page it is
+            # dissolving into, or the fade would be invisible.
+            splash.raise_()
+            QTimer.singleShot(28, lambda: _fade(step))
+
+        _fade()
+
+    def release_pet(self) -> None:
+        """Let the character climb out of the logo and onto the desktop."""
+        if getattr(self, "_pet_released", False):
+            return
+        self._pet_released = True
         self.pet.show()
         self.pet.raise_()
+        self._animate_out_of_logo()
+        if self.logo_button is not None:
+            self.logo_button.setToolTip("Nora masada — yine basarsa içeri girer")
+            self.logo_button.set_released(True)
+
+    def tuck_pet(self) -> None:
+        """Send her back into the logo (the pet window hides, app stays)."""
+        if not getattr(self, "_pet_released", False):
+            return
+        self._pet_released = False
+        self.pet.hide()
+        if self.logo_button is not None:
+            self.logo_button.setToolTip("Nora'yı masaüstüne indir")
+            self.logo_button.set_released(False)
+
+    def _animate_out_of_logo(self) -> None:
+        """Grow her out of the header logo, then let her fall to the desktop.
+
+        The **character** is the thing that grows: her window is fixed-size by
+        design, so the mark-to-girl expansion happens inside ``paintEvent``.
+        A short hop afterwards is a real jump, so she lands with physics rather
+        than teleporting onto the floor.
+        """
+        button = getattr(self, "logo_button", None)
+        pet = self.pet
+        if button is None or not button.isVisible():
+            pet.show_speech("Dışarı çıktım! 🐾", 2200)
+            return
+        try:
+            # Touch the geometry so a logo that is being destroyed cannot crash
+            # the animation half a second later.
+            button.mapToGlobal(QPoint(0, 0))
+        except RuntimeError:
+            pet.show_speech("Dışarı çıktım! 🐾", 2200)
+            return
+
+        # The pet window is fixed-size, so animating its geometry can never
+        # work; the character itself grows out of the mark while the window
+        # frames it.  The hop afterwards is the *real* physics jump.
+        target_x, target_y = pet.default_position()
+        pet.move(int(target_x), int(target_y + 26))
+        pet.play_emerge()
+        QTimer.singleShot(360, lambda: self._start_launch_hop(pet, target_x, target_y))
+
+    def _start_launch_hop(self, pet, x: int, y: int) -> None:
+        """The real (physics) little jump that puts her on the floor."""
+        pet.jump_to(int(x), int(y))
+        pet.show_speech("Dışarı çıktım! 🐾", 2200)
+
+    def toggle_pet(self) -> None:
+        if getattr(self, "_pet_released", False):
+            self.tuck_pet()
+        else:
+            self.release_pet()
 
     # ------------------------------------------------------------------- helpers
     def _next_request(self) -> int:
@@ -1167,14 +1910,18 @@ class NoraApp(QWidget):
         self._ptt_active = True
         self._pause_wake_for_audio()
         self._set_busy(True, "Bas-konuş 🎙️ konuş, bırakınca cevaplayayım…")
-        self.mic_button.setStyleSheet("background: #e53950; border-color: #ff8fa3;")
+        if self._mic_widget() is not None:
+            self._mic_widget().setStyleSheet(
+                "background: #e53950; border-color: #ff8fa3;"
+            )
         self.pet.set_listening(True)
         self.pet.show_speech("Bas-konuş 🎙️", 2000)
         request_id = self._next_request()
         if not self.voice.start_push_to_talk(request_id):
             self._ptt_active = False
             self._listening = False
-            self.mic_button.setStyleSheet("")
+            if self._mic_widget() is not None:
+                self._mic_widget().setStyleSheet("")
             self.pet.set_listening(False)
             self._set_busy(False)
             self._resume_wake_after_audio_capture()
@@ -1344,14 +2091,7 @@ class NoraApp(QWidget):
         if hasattr(self, "cancel_button"):
             self.cancel_button.setVisible(bool(busy and cancellable))
             self.cancel_button.setEnabled(bool(busy and cancellable))
-        for button in (
-            self.send_button,
-            self.screen_button,
-            self.camera_button,
-            self.mic_button,
-            self.system_button,
-            *self.quick_buttons,
-        ):
+        for button in (self.send_button, *self.quick_buttons):
             button.setEnabled(not busy)
         self._sync_pause()
         if not busy:
@@ -1382,6 +2122,7 @@ class NoraApp(QWidget):
             old = self._message_rows.pop(0)
             self.message_layout.removeWidget(old)
             old.deleteLater()
+        self._update_hero()
         QTimer.singleShot(0, self._scroll_to_bottom)
         if sender == "bot" and speak:
             self._say(original)
@@ -1402,16 +2143,21 @@ class NoraApp(QWidget):
         return self.voice.speak(str(text))
 
     def _update_tts_indicator(self) -> None:
-        if not hasattr(self, "speaker_indicator"):
-            return
+        """Report the speech state on the tray icon.
+
+        The header used to own a speaker chip; with the quiet title row the
+        tray tooltip is the only place this can honestly live.
+        """
         enabled = bool(self.voice.tts_enabled)
         volume = self.store.preference("speech_volume")
         mode = self.modes.current
         if enabled and volume > 0:
-            self.speaker_indicator.setText("🔊")
+            if hasattr(self, "speaker_indicator"):
+                self.speaker_indicator.setText("🔊")
             tip = "Sesli yanıt açık."
         else:
-            self.speaker_indicator.setText("🔇")
+            if hasattr(self, "speaker_indicator"):
+                self.speaker_indicator.setText("🔇")
             reasons = []
             if not enabled:
                 reasons.append(
@@ -1428,9 +2174,12 @@ class NoraApp(QWidget):
                 " · ".join(reasons)
                 + ". 'sesli yanıtı aç' diyebilir veya tepsi menüsünden açabilirsin."
             )
-        self.speaker_indicator.setToolTip(tip)
-        if hasattr(self, "tray"):
-            self.tray.setToolTip(f"Nora 💕 · {tip}")
+        if hasattr(self, "speaker_indicator"):
+            self.speaker_indicator.setToolTip(tip)
+        # The tray tooltip is shared with the microphone report; the two must
+        # not overwrite each other, so each writes its own half.
+        self._tts_tip = tip
+        self._refresh_tray_tooltip()
 
     def _test_speech(self) -> None:
         self.show_chat()
@@ -1458,17 +2207,39 @@ class NoraApp(QWidget):
             self.message_layout.removeWidget(row)
             row.deleteLater()
         self._message_rows.clear()
+        # Clearing the history brings the welcome page back.
+        self._update_hero()
 
     def show_chat(self) -> None:
         if self._closing:
             return
         self.proactive.user_interacted()
-        self.pet.show()
+        # Opening the chat must *not* release the character: she only leaves
+        # the logo when the user asks for it, so the desktop stays tidy.
+        if getattr(self, "_pet_released", False):
+            self.pet.show()
         self._chat_user_moved = False
         self._position_chat()
         self.chat_window.show()
         self.chat_window.raise_()
         self.input.setFocus()
+
+    def toggle_maximize(self) -> None:
+        """Maximise the frameless window, or put it back where it was."""
+        window = self.chat_window
+        if window.isMaximized():
+            window.showNormal()
+            self.maximize_button.glyph = "maximize"
+            self.maximize_button.setToolTip("Büyüt")
+            self.maximize_button.setAccessibleName("Büyüt")
+        else:
+            window.showMaximized()
+            # Restoring is not "minimise": the glyph changes so the button says
+            # what it will do next, exactly like a real title bar.
+            self.maximize_button.glyph = "restore"
+            self.maximize_button.setToolTip("Eski boyuta döndür")
+            self.maximize_button.setAccessibleName("Eski boyuta döndür")
+        self.maximize_button.update()
 
     def toggle_chat(self) -> None:
         if self.chat_window.isVisible():
@@ -1525,10 +2296,62 @@ class NoraApp(QWidget):
                 # the next show does not re-centre or re-anchor it.
                 if window.isVisible():
                     self._chat_user_moved = True
+                page = getattr(self, "white_page", None)
+                if page is not None:
+                    page.resize(window.size())
+                    page.lower()
+                grip = getattr(self, "resize_grip", None)
+                if grip is not None:
+                    grip._place()
+                if event.type() == QEvent.Resize:
+                    _rounded_window_mask(window)
             if event.type() == QEvent.Close:
                 # Closing hides the panel; Nora keeps living in the tray.
                 event.ignore()
                 window.hide()
+                return True
+
+        # Frameless window: Esc is the close button the OS title bar used to
+        # provide.  It only hides the panel — Nora keeps running in the tray.
+        if (
+            window is not None
+            and obj is window
+            and event.type() == QEvent.KeyPress
+            and event.key() == Qt.Key_Escape
+        ):
+            window.hide()
+            return True
+
+        # Frameless window: the header row is the title bar.
+        if obj in (getattr(self, "chat_header", None),) or (
+            getattr(self, "chat_header", None) is not None
+            and obj is not None
+            and obj.parent() is self.chat_header
+        ):
+            if event.type() == QEvent.MouseButtonPress:
+                if event.button() == Qt.LeftButton:
+                    self._chat_drag_origin = (
+                        event.globalPos() - self.chat_window.frameGeometry().topLeft()
+                    )
+                    self.chat_header.setCursor(Qt.ClosedHandCursor)
+                    return True
+            elif event.type() == QEvent.MouseMove:
+                if (
+                    self._chat_drag_origin is not None
+                    and event.buttons() & Qt.LeftButton
+                ):
+                    self.chat_window.move(event.globalPos() - self._chat_drag_origin)
+                    return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                self._chat_drag_origin = None
+                self.chat_header.setCursor(Qt.OpenHandCursor)
+            elif (
+                event.type() == QEvent.MouseButtonPress
+                and event.button() == Qt.RightButton
+            ):
+                # Frameless: the old "⋯" button is gone, so the same tools live
+                # on a right-click on the title row.
+                self._chat_more_menu(event.globalPos())
                 return True
         return super().eventFilter(obj, event)
 
@@ -1573,26 +2396,49 @@ class NoraApp(QWidget):
         menu.exec_(point)
 
     def _update_mic_indicator(self) -> None:
+        """Report the microphone state on the tray icon.
+
+        The header is deliberately a quiet title row, so there is no widget to
+        recolour; the tooltip is the honest place for this.
+        """
         active = self.voice.wake_word_active
-        self.mic_indicator.setText("🎙️" if active else "🔇")
         backend = (
             "Whisper · yerel komut STT"
             if self.voice.stt_backend == "local"
             else "Google · komut STT internet kullanır"
         )
-        self.mic_indicator.setToolTip(
+        tip = (
             (
-                (
-                    "Yerel 'Hey Nora' bekçisi AÇIK · konuşurken sözünü kesmeyi dinliyor. "
-                    if self.store.preference("voice_barge_in")
-                    and self.voice.is_speaking
-                    else "Yerel 'Hey Nora' bekçisi AÇIK · şu an komut dinlemiyor. "
-                )
-                if active
-                else "Hey Nora bekçisi kapalı · yalnızca 🎤 ile dinlenir. "
+                "Yerel 'Hey Nora' bekçisi AÇIK · konuşurken sözünü kesmeyi dinliyor. "
+                if self.store.preference("voice_barge_in") and self.voice.is_speaking
+                else "Yerel 'Hey Nora' bekçisi AÇIK · şu an komut dinlemiyor. "
             )
-            + backend
-        )
+            if active
+            else "Hey Nora bekçisi kapalı · mikrofon yalnızca istendiğinde açılır. "
+        ) + backend
+        self._mic_tip = tip
+        self._refresh_tray_tooltip()
+
+    def _mic_widget(self):
+        """The header used to own a mic chip; keep callers safe and honest."""
+        return getattr(self, "mic_button", None)
+
+    def _refresh_tray_tooltip(self) -> None:
+        """One place writes the tray tooltip, so the two reports never fight.
+
+        Both the microphone and the speech state are worth telling the user;
+        each keeps its half in an attribute and this joins them.
+        """
+        tray = getattr(self, "tray", None)
+        if tray is None:
+            return
+        parts = [
+            part
+            for part in (getattr(self, "_mic_tip", ""), getattr(self, "_tts_tip", ""))
+            if part
+        ]
+        icon = "🎙️ " if self.voice.wake_word_active else ""
+        tray.setToolTip(f"Nora 💕 · {icon}" + " · ".join(parts) if parts else "Nora 💕")
 
     def _toggle_tts(self, enabled: bool) -> None:
         self.voice.set_tts_enabled(enabled)
@@ -1608,7 +2454,7 @@ class NoraApp(QWidget):
             self.store.set_preference("wake_word", bool(enabled))
         except ValueError as exc:
             self.status_label.setText(str(exc)[:70])
-        if enabled:
+        if enabled and self.MICROPHONE_ENABLED:
             self.voice.start_wake_word_listener()
         else:
             self.voice.stop_wake_word_listener()
@@ -1635,7 +2481,9 @@ class NoraApp(QWidget):
         box.button(QMessageBox.Yes).setText("Evet")
         box.button(QMessageBox.No).setText("Hayır")
         box.setStyleSheet(
-            "QMessageBox { background: #2a193c; } QLabel { color: white; } QPushButton { color: white; background: #7c4dff; padding: 6px 14px; border-radius: 6px; }"
+            "QMessageBox { background: #ffffff; } QLabel { color: #1b1725; } "
+            "QPushButton { color: white; padding: 6px 16px; border-radius: 8px; "
+            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #7b5cff, stop:1 #ff4d94); }"
         )
         return box.exec_() == QMessageBox.Yes
 
@@ -3310,14 +4158,99 @@ class NoraApp(QWidget):
             result = str(exc)
         self._report(result)
 
+    def _on_pet_tickle(self) -> None:
+        """A single click plays with her — she squirms and giggles."""
+        if self._closing:
+            return
+        self.proactive.user_interacted()
+        self.pet.tickle()
+
     def _on_double_click(self) -> None:
+        """A double click opens her personal panel (mood, memories, style)."""
+        if self._closing:
+            return
         action = self.store.preference("double_click_action")
         if action == "game":
             self._execute_command({"command": "game", "action": "start"})
-        elif action == "pet" and self.store.preference("pet_reactions"):
-            self._report(self.pet.perform_action("pet"))
-        else:
-            self.show_chat()
+            return
+        self.show_personal_panel()
+
+    def show_personal_panel(self) -> None:
+        """Open the glass panel with her moods, memories and preferences."""
+        from .nora_personal import PersonalPanel
+
+        if getattr(self, "personal_panel", None) is None:
+            self.personal_panel = PersonalPanel(None)
+            self.personal_panel.mood_chosen.connect(self._on_mood_chosen)
+            self.personal_panel.preference_changed.connect(self._on_personal_preference)
+            self.personal_panel.memory_deleted.connect(self._on_memory_deleted)
+        panel = self.personal_panel
+        panel.show_for(self.pet.emotion, self.store.preferences)
+        panel.set_memories(self._memory_rows())
+        self._position_personal_panel(panel)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _position_personal_panel(self, panel) -> None:
+        """Sit the panel next to the character, or centre it if she is hidden."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        if getattr(self, "_pet_released", False):
+            x = self.pet.x() + self.pet.width() + 12
+            if x + panel.width() > area.right():
+                x = self.pet.x() - panel.width() - 12
+            y = self.pet.y() + self.pet.height() - panel.height()
+            panel.move(
+                max(area.left() + 8, x),
+                max(area.top() + 8, min(y, area.bottom() - panel.height() - 8)),
+            )
+            return
+        panel.move(
+            area.center().x() - panel.width() // 2,
+            area.center().y() - panel.height() // 2,
+        )
+
+    def _on_mood_chosen(self, mood: str) -> None:
+        """The user pinned a mood from the panel."""
+        self.pet.set_emotion(mood)
+        self.add_message(
+            f"Ruh hâlimi «{mood}» olarak ayarladın. Böyle kalacağım! 💜", "bot"
+        )
+        self.store.add_audit("mood", {"source": "panel", "mood": mood})
+
+    def _on_personal_preference(self, key: str, value) -> None:
+        try:
+            self.store.set_preference(key, value)
+        except ValueError:
+            self.add_message(f"«{value}» bu ayar için geçerli değil.", "system")
+            return
+        self._report(f"Kaydedildi: {key} → {value}")
+
+    def _on_memory_deleted(self, key: str) -> None:
+        self._memory_command({"command": "memory", "action": "forget", "key": key})
+        if getattr(self, "personal_panel", None) is not None:
+            self.personal_panel.set_memories(self._memory_rows())
+
+    def _memory_rows(self) -> list[tuple[str, str, str]]:
+        """Read the stored memories for the panel, newest first."""
+        try:
+            items = self.store.memories() if hasattr(self.store, "memories") else []
+        except Exception:
+            items = []
+        rows: list[tuple[str, str, str]] = []
+        for index, item in enumerate(items):
+            if isinstance(item, dict):
+                text = str(item.get("text") or item.get("value") or "")
+                when = str(item.get("created") or item.get("when") or "")
+                key = str(item.get("key") or index)
+            else:
+                text, when, key = str(item), "", str(index)
+            if text:
+                rows.append((key, text, when))
+        return rows
 
     def _forget_all_memories(self) -> None:
         self._memory_command({"command": "memory", "action": "clear"})
@@ -3437,12 +4370,17 @@ class NoraApp(QWidget):
     def _start_listening(self, *, recognition_test: bool = False) -> None:
         if self._closing or self._busy or self._listening:
             return
+        if self._microphone_blocked():
+            return
         self.show_chat()
         self.proactive.user_interacted()
         self._listening = True
         self._pause_wake_for_audio()
         self._set_busy(True, "Mikrofon açılıyor…")
-        self.mic_button.setStyleSheet("background: #e53950; border-color: #ff8fa3;")
+        if self._mic_widget() is not None:
+            self._mic_widget().setStyleSheet(
+                "background: #e53950; border-color: #ff8fa3;"
+            )
         self.pet.set_listening(True)
         request_id = self._next_request()
         self._stt_test_request = request_id if recognition_test else 0
@@ -3451,7 +4389,8 @@ class NoraApp(QWidget):
         if not self.voice.listen_async(request_id):
             self._stt_test_request = 0
             self._listening = False
-            self.mic_button.setStyleSheet("")
+            if self._mic_widget() is not None:
+                self._mic_widget().setStyleSheet("")
             self.pet.set_listening(False)
             self._set_busy(False)
             self._resume_wake_after_audio_capture()
@@ -3465,7 +4404,8 @@ class NoraApp(QWidget):
             return
         self._listening = False
         self._ptt_active = False
-        self.mic_button.setStyleSheet("")
+        if self._mic_widget() is not None:
+            self._mic_widget().setStyleSheet("")
         self.pet.set_listening(False)
         self._set_busy(False)
         self.proactive.user_interacted()
@@ -3539,7 +4479,8 @@ class NoraApp(QWidget):
         if request_id > 0:
             self.status_label.setText("Dinliyorum senpai… konuşabilirsin 🎙️")
         else:
-            self.mic_indicator.setToolTip("Nora şu an mikrofondan dinliyor 🎙️")
+            if hasattr(self, "mic_indicator"):
+                self.mic_indicator.setToolTip("Nora şu an mikrofondan dinliyor 🎙️")
 
     def _on_listening_stopped(self, request_id: int) -> None:
         if self._closing:
@@ -3696,7 +4637,6 @@ class NoraApp(QWidget):
     def _on_voice_error(self, message: str) -> None:
         if self._closing:
             return
-        self.mic_indicator.setToolTip(message)
         if hasattr(self, "speaker_indicator"):
             self.speaker_indicator.setToolTip(message)
         if message not in self._notified_errors:
@@ -3781,6 +4721,9 @@ class NoraApp(QWidget):
     def _show_notes(self) -> None:
         self.show_chat()
         self.add_message(self.tools.list_notes(), "bot")
+        # After the message, not before: adding content is the page switch, and
+        # a nav set first would be overwritten by whatever that switch decided.
+        self._set_active_nav("notes")
         self.proactive.user_interacted()
 
     def _show_system_info(self) -> None:
@@ -3823,6 +4766,19 @@ class NoraApp(QWidget):
         self._pending_commands.clear()
         if self.settings_dialog is not None:
             self.settings_dialog.close()
+        # The personal panel is a separate top-level window: leaving it open
+        # would outlive the app (and keep painting her portrait after the
+        # character itself is gone).
+        splash = getattr(self, "splash", None)
+        if splash is not None:
+            splash.hide()
+            splash.deleteLater()
+            self.splash = None
+        panel = getattr(self, "personal_panel", None)
+        if panel is not None:
+            panel.hide()
+            panel.deleteLater()
+            self.personal_panel = None
         self.proactive.stop()
         self.clipboard_history.stop()
         self.clipboard_history.clear()
@@ -3844,9 +4800,13 @@ class NoraApp(QWidget):
         self.chat_window.hide()
         self.tray.hide()
         self.hide()
+        # ``shutdown`` is also called by ``aboutToQuit`` and by tests.  Calling
+        # ``app.quit()`` unconditionally killed the *whole* QApplication — and
+        # with it every timer of every other Nora instance — which is how a
+        # freshly started splash could freeze when another app was torn down.
         if not self._workers:
             app = QApplication.instance()
-            if app:
+            if app is not None and self._owns_quit:
                 app.quit()
         else:
             logger.info("Arka plan işlemi bitince Nora kapanacak.")

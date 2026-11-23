@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -14,6 +15,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -36,17 +38,39 @@ class NoraSettingsDialog(QDialog):
         self.on_apply = on_apply
         self.fields: dict[str, QWidget] = {}
         self.setWindowTitle("Nora · Ayarlar")
-        self.setMinimumSize(460, 560)
+        self.setMinimumSize(560, 580)
         self.setStyleSheet(
-            "QDialog { background: #24182f; } QLabel { color: #f7ecff; } QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit { background: #392447; color: white; padding: 5px; border: 1px solid #8655a0; border-radius: 5px; } QCheckBox { color: #f7ecff; } QPushButton { padding: 7px 15px; background: #7c4dff; color: white; border-radius: 6px; }"
+            "QDialog { background: #ffffff; } "
+            "QLabel { color: #1b1725; } "
+            "QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit { "
+            "  background: #ffffff; color: #1b1725; padding: 5px 7px;"
+            "  border: 1px solid rgba(24,18,40,44); border-radius: 7px; }"
+            "QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {"
+            "  border: 1px solid #7b5cff; }"
+            "QComboBox QAbstractItemView { background: #ffffff; color: #1b1725;"
+            "  selection-background-color: #7b5cff; selection-color: white; }"
+            "QCheckBox { color: #1b1725; }"
+            "QPushButton { padding: 7px 16px; color: white; border-radius: 8px;"
+            "  background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #7b5cff, stop:1 #ff4d94); }"
+            "QPushButton:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "  stop:0 #8b6dff, stop:1 #ff6ba6); }"
         )
         root = QVBoxLayout(self)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
         content = QWidget()
+        content.setObjectName("settingsBody")
+        content.setStyleSheet("QWidget#settingsBody { background: transparent; }")
         form = QFormLayout(content)
-        form.setContentsMargins(12, 12, 12, 12)
-        form.setSpacing(10)
+        form.setContentsMargins(22, 20, 22, 20)
+        form.setSpacing(12)
+        # Labels keep their natural width; the field column takes the rest, so
+        # long Turkish labels never squeeze the controls into a sliver.
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setRowWrapPolicy(QFormLayout.DontWrapRows)
         prefs = store.preferences
         self._combo(
             form,
@@ -290,6 +314,7 @@ class NoraSettingsDialog(QDialog):
         scroll.setWidget(content)
         root.addWidget(scroll)
         buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
+        buttons.setContentsMargins(18, 8, 18, 14)
         buttons.button(QDialogButtonBox.Apply).setText("Uygula")
         buttons.button(QDialogButtonBox.Cancel).setText("Vazgeç")
         buttons.button(QDialogButtonBox.Apply).clicked.connect(self.apply)
@@ -307,6 +332,12 @@ class NoraSettingsDialog(QDialog):
             widget.addItem(title, value)
         index = widget.findData(prefs[key])
         widget.setCurrentIndex(max(0, index))
+        # Without this the combo sizes itself to its longest entry and pushes
+        # the whole form wider than the dialog.  Fixed policy + elide instead:
+        # the text is never clipped mid-glyph, it ends in an ellipsis.
+        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        widget.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        widget.setMinimumContentsLength(12)
         self._add(form, key, label, widget)
 
     def _groq_key(self, form: QFormLayout) -> None:
@@ -332,9 +363,15 @@ class NoraSettingsDialog(QDialog):
         self._add(form, key, label, widget)
 
     def _check(self, form, key, label, prefs) -> None:
-        widget = QCheckBox()
+        # The label rides on the checkbox itself.  A separate label column
+        # would be as wide as the longest Turkish sentence and blow the form
+        # out past the dialog edge.
+        widget = QCheckBox(label)
         widget.setChecked(bool(prefs[key]))
-        self._add(form, key, label, widget)
+        widget.setCursor(Qt.PointingHandCursor)
+        widget.setAccessibleName(label)
+        self.fields[key] = widget
+        form.addRow(widget)
 
     def _spin(self, form, key, label, low, high, prefs) -> None:
         widget = QSpinBox()

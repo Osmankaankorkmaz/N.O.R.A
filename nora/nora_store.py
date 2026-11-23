@@ -24,6 +24,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 1
 DEFAULT_PREFERENCES: dict[str, Any] = {
+    #: The rail's folded state.  Remembered so a sidebar the user closed stays
+    #: closed on the next start instead of fighting them every launch.
+    "rail_collapsed": False,
     "address": "senpai",
     "tone": "tsundere",
     "speech_rate": 180,
@@ -61,9 +64,12 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "hydration_minutes": 0,
     "break_minutes": 0,
     "outfit": "cream",
-    "hair_color": "#7d5a44",
+    "nickname": "",
+    "relationship_tone": "close",
+    "speech_style": "doğal",
+    "hair_color": "#a9743f",
     "eye_color": "yesil",
-    "character_style": "sprite",
+    "character_style": "pixel",
     "appearance_version": 3,
     "accessory": "none",
     "animations": True,
@@ -75,7 +81,8 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 }
 _MODES = {"normal", "focus", "game", "quiet"}
 _OUTFITS = {"classic", "casual", "night"}
-_CHARACTER_STYLES = {"sprite", "body", "realistic", "pixel"}
+_TONE_STYLES = {"friend", "close", "playful", "formal"}
+_CHARACTER_STYLES = {"pixel", "sprite", "body", "realistic"}
 _EYE_COLORS = {"yesil", "hazel", "kahve", "mavi", "gri"}
 _ACCESSORIES = {"none", "headphones", "glasses", "ribbon"}
 
@@ -234,7 +241,8 @@ class NoraStore:
                 "character_style": _CHARACTER_STYLES,
                 "eye_color": _EYE_COLORS,
                 "accessory": _ACCESSORIES,
-                "double_click_action": {"chat", "game", "pet"},
+                "double_click_action": {"chat", "game", "pet", "personal"},
+                "relationship_tone": _TONE_STYLES,
                 "mode": _MODES,
                 "chat_backend": {"groq", "local"},
                 "tts_backend": {"system", "piper"},

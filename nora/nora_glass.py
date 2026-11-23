@@ -26,10 +26,13 @@ from typing import Any
 
 from PyQt5.QtCore import (
     QEasingCurve,
+    pyqtSignal,
     QPoint,
     QPointF,
     QPropertyAnimation,
+    QRect,
     QRectF,
+    QSize,
     Qt,
     QTimer,
 )
@@ -37,7 +40,9 @@ from PyQt5.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetrics,
     QGuiApplication,
+    QImage,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -46,6 +51,7 @@ from PyQt5.QtGui import (
     QRadialGradient,
 )
 from PyQt5.QtWidgets import (
+    QAbstractButton,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -57,57 +63,214 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-# Palette: cool violet-tinted glass with a warm accent, mirroring the avatar.
-GLASS_TINT = QColor(28, 22, 38, 168)
-GLASS_TINT_LIGHT = QColor(46, 36, 60, 150)
-HAIRLINE = QColor(255, 255, 255, 46)
-ACCENT = QColor("#c78bb8")
-ACCENT_BRIGHT = QColor("#f2a7d0")
-TEXT = QColor("#f4ecf7")
-TEXT_DIM = QColor("#c4b2cf")
+from .nora_brand import CARD_RADIUS
+
+# ---------------------------------------------------------------------------
+# Design tokens.  One place for colour, type and rhythm so no widget invents
+# its own numbers and the whole app stays on the same grid.
+# ---------------------------------------------------------------------------
+
+#: Ink, not black: a warm violet-black reads as depth on white.
+TEXT = QColor("#181423")
+TEXT_DIM = QColor("#6e6a80")
+TEXT_FAINT = QColor("#9a95a8")
+
+ACCENT = QColor("#7b5cff")
+ACCENT_MID = QColor("#b45cf5")
+ACCENT_BRIGHT = QColor("#ff4d94")
+
+#: Surfaces, from the page up to the floating cards.
+PAGE_TOP = QColor("#fbfaff")
+PAGE_BOTTOM = QColor("#f6f4fd")
+SURFACE = QColor(255, 255, 255, 236)
+SURFACE_SOLID = QColor("#ffffff")
+HAIRLINE = QColor(24, 18, 40, 16)
+HAIRLINE_STRONG = QColor(24, 18, 40, 26)
+
+
+def css(color: QColor) -> str:
+    """A QColor as CSS, *including* its alpha.
+
+    ``QColor.name()`` silently drops the alpha channel, so ``rgba(24,18,40,34)``
+    becomes ``#181428`` — an almost-black hairline instead of a whisper of one.
+    Every translucent colour in the stylesheet goes through here.
+    """
+    if color.alpha() == 255:
+        return color.name()
+    return (
+        f"rgba({color.red()},{color.green()},{color.blue()},{color.alpha() / 255:.3f})"
+    )
+
+
+def gradient_brush(box: QRectF, *, vertical: bool = False) -> QBrush:
+    """The brand ink: violet → orchid → pink across ``box``.
+
+    One gradient for every glyph in the app, so an icon, the send button and
+    the active rail pill all read as the same material.
+    """
+    if vertical:
+        grad = QLinearGradient(box.topLeft(), box.bottomLeft())
+    else:
+        grad = QLinearGradient(box.topLeft(), box.bottomRight())
+    grad.setColorAt(0.0, QColor(ACCENT))
+    grad.setColorAt(0.55, QColor(ACCENT_MID))
+    grad.setColorAt(1.0, QColor(ACCENT_BRIGHT))
+    return QBrush(grad)
+
+
+def brand_icon_pixmap(kind: str, size: int, *, dpr: float = 1.0) -> QPixmap:
+    """A hand-drawn brand-glyph icon: gradient ink, no background.
+
+    Used where a widget cannot paint itself (the send button, which is a plain
+    ``QPushButton``).  Drawn at ``dpr`` scale so it stays sharp on scaled
+    displays.
+    """
+    from .nora_glyphs import draw_glyph
+
+    px = max(1, int(round(size * dpr)))
+    image = QImage(px, px, QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    box = QRectF(0, 0, px, px).adjusted(px * 0.18, px * 0.18, -px * 0.18, -px * 0.18)
+    ink = gradient_brush(box)
+    painter.setPen(QPen(ink, max(1.4, px * 0.055)))
+    # The plane reads as a solid object; the outline glyphs must not be filled.
+    painter.setBrush(ink if kind == "send" else Qt.NoBrush)
+    draw_glyph(painter, kind, box)
+    painter.end()
+    pixmap = QPixmap.fromImage(image)
+    pixmap.setDevicePixelRatio(dpr)
+    return pixmap
+
+
+#: Kept for callers that still name the glass tint.
+GLASS_TINT = SURFACE
+GLASS_TINT_LIGHT = QColor(252, 250, 255, 232)
+
+#: The rhythm.  Every gap in the app is one of these.
+GAP_XS = 4
+GAP_SM = 8
+GAP_MD = 12
+GAP_LG = 18
+GAP_XL = 26
+
+#: Radii: pills for actions, cards for surfaces.
+RADIUS_PILL = 999
+RADIUS_CARD = 18
+RADIUS_INPUT = 22
+RADIUS_BUBBLE = 20
 
 STYLE = f"""
 QWidget#glassRoot {{ background: transparent; }}
-QFrame#glassCard {{
-    background: transparent;
+QWidget#whitePage {{ background: #ffffff; }}
+QFrame#glassCard {{ background: transparent; }}
+QWidget#chatHeader {{ background: transparent; }}
+QWidget#stage {{ background: transparent; }}
+QWidget#stageBody {{ background: transparent; }}
+QWidget#sidebar {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255,255,255,214), stop:1 rgba(250,247,255,168));
+    border-right: 1px solid rgba(24,18,40,22);
 }}
+QLabel#wordmark {{ color: {TEXT.name()}; font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }}
+QLabel#railCaption {{ color: {TEXT_FAINT.name()}; font-size: 9px; font-weight: 600; letter-spacing: 1.1px; }}
+QFrame#railDivider {{ background: {css(HAIRLINE)}; border: none; max-height: 1px; }}
+QWidget#heroCard {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(255,255,255,244), stop:1 rgba(252,248,255,238));
+    border: 1px solid {css(HAIRLINE)};
+    border-radius: 28px;
+}}
+QLabel#navCaption {{ color: {TEXT_FAINT.name()}; font-size: 9px; letter-spacing: 0.6px; }}
+QWidget#composerCard {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(255,255,255,246), stop:1 rgba(250,248,255,240));
+    border: 1px solid {css(HAIRLINE)};
+    border-radius: {RADIUS_INPUT + 4}px;
+}}
+
 QLabel {{ color: {TEXT.name()}; background: transparent; }}
-QLabel#title {{ color: #ffffff; font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }}
-QLabel#subtitle {{ color: {TEXT_DIM.name()}; font-size: 11px; }}
+QLabel#title {{ color: {TEXT.name()}; font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }}
+QLabel#subtitle {{ color: {TEXT_DIM.name()}; font-size: 11px; letter-spacing: 0.3px; }}
 QLabel#status {{ color: {TEXT_DIM.name()}; font-size: 11px; }}
+QLabel#heroTitle {{ color: {TEXT.name()}; font-size: 34px; font-weight: 700; letter-spacing: -0.7px; }}
+QLabel#heroBody {{ color: {TEXT_DIM.name()}; font-size: 13.5px; }}
+QLabel#heroCaption {{ color: {TEXT_FAINT.name()}; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; }}
+
 QPushButton {{
-    background: rgba(255,255,255,18);
-    color: #f3e8f6;
-    border: 1px solid rgba(255,255,255,34);
-    border-radius: 11px;
-    padding: 5px 9px;
+    background: rgba(24,18,40,7);
+    color: {TEXT.name()};
+    border: 1px solid {css(HAIRLINE)};
+    border-radius: 13px;
+    padding: 6px 12px;
     font-size: 12px;
 }}
-QPushButton:hover {{ background: rgba(255,255,255,38); border-color: rgba(255,255,255,74); }}
-QPushButton:pressed {{ background: rgba(199,139,184,120); }}
-QPushButton:disabled {{ color: rgba(220,205,225,110); background: rgba(255,255,255,10); }}
-QPushButton#sendButton {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #c78bb8, stop:1 #8a6fc4);
-    border: none; border-radius: 14px; color: white; font-size: 15px;
+QPushButton:hover {{ background: rgba(123,92,255,20); border-color: rgba(123,92,255,110); }}
+QPushButton:pressed {{ background: rgba(123,92,255,44); }}
+QPushButton:disabled {{ color: {TEXT_FAINT.name()}; background: rgba(24,18,40,5); border-color: rgba(24,18,40,12); }}
+
+/* The send action is a gradient glyph, not a filled disc: the disc was the
+   loudest object in the composer and competed with the bubbles. */
+QPushButton#sendGlyph {{
+    background: transparent;
+    border: none;
+    border-radius: 21px;
 }}
-QPushButton#sendButton:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #e2a3cd, stop:1 #a086e0); }}
+QPushButton#sendGlyph:hover {{ background: rgba(123,92,255,26); }}
+QPushButton#sendGlyph:pressed {{ background: rgba(123,92,255,52); }}
+QPushButton#sendGlyph:disabled {{ background: transparent; }}
+
+QPushButton#chip {{
+    background: {SURFACE_SOLID.name()};
+    border: 1px solid {css(HAIRLINE_STRONG)};
+    border-radius: 17px;
+    padding: 7px 14px;
+    font-size: 12px;
+    color: {TEXT.name()};
+}}
+QPushButton#chip:hover {{
+    background: rgba(123,92,255,16);
+    border-color: rgba(123,92,255,130);
+    color: {ACCENT.name()};
+}}
+
+QPushButton#cancelButton {{
+    background: rgba(255,77,148,18);
+    border: 1px solid rgba(255,77,148,90);
+    border-radius: 20px;
+    color: {ACCENT_BRIGHT.name()};
+    font-size: 12px;
+}}
+
 QLineEdit {{
-    background: rgba(255,255,255,22);
-    color: #ffffff;
-    border: 1px solid rgba(255,255,255,40);
-    border-radius: 16px;
-    padding: 9px 13px;
-    font-size: 13px;
-    selection-background-color: rgba(199,139,184,140);
+    background: transparent;
+    color: {TEXT.name()};
+    border: none;
+    padding: 10px 4px;
+    font-size: 13.5px;
+    selection-background-color: rgba(123,92,255,90);
 }}
-QLineEdit:focus {{ border: 1px solid rgba(242,167,208,190); background: rgba(255,255,255,30); }}
+QLineEdit:focus {{ border: none; }}
+
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
-QScrollBar:vertical {{ background: transparent; width: 7px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: rgba(255,255,255,54); border-radius: 3px; min-height: 30px; }}
-QScrollBar::handle:vertical:hover {{ background: rgba(255,255,255,90); }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 4px 2px; }}
+QScrollBar::handle:vertical {{
+    background: rgba(24,18,40,38);
+    border-radius: 4px;
+    min-height: 40px;
+}}
+QScrollBar::handle:vertical:hover {{ background: rgba(24,18,40,80); }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QToolTip {{ color: white; background: #2c2238; border: 1px solid rgba(255,255,255,60); padding: 4px; border-radius: 6px; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+QToolTip {{
+    color: {TEXT.name()};
+    background: #ffffff;
+    border: 1px solid rgba(24,18,40,38);
+    padding: 5px 8px;
+    border-radius: 8px;
+}}
 """
 
 
@@ -170,8 +333,12 @@ def enable_windows_blur(widget: QWidget, *, dark: bool = True) -> bool:
 class FrostedPanel(QWidget):
     """Paints a translucent card, optionally over a blurred screen snapshot."""
 
-    def __init__(self, parent: QWidget | None = None, *, radius: int = 22) -> None:
+    def __init__(
+        self, parent: QWidget | None = None, *, radius: float = CARD_RADIUS
+    ) -> None:
         super().__init__(parent)
+        #: One radius for the whole product: the launch card and the window that
+        #: replaces it must have visibly identical corners.
         self.radius = radius
         self._backdrop: QPixmap | None = None
         self._backdrop_enabled = True
@@ -231,9 +398,20 @@ class FrostedPanel(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        # Full-bleed rect, exactly like the launch card: the card paints its
+        # rounded rect from (0, 0) with the full radius, so anything inset here
+        # would make the window's corners visibly tighter than the card's.
+        rect = QRectF(self.rect())
         path = QPainterPath()
         path.addRoundedRect(rect, self.radius, self.radius)
+
+        # This widget is the window, so it cannot be "translucent over a page":
+        # WA_NoSystemBackground leaves the buffer it inherits, which the page has
+        # already filled square, and the corners would stay square.  Erase to
+        # transparent and paint the card as one opaque shape instead.
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         painter.setClipPath(path)
 
         if self._backdrop is not None and not self._backdrop.isNull():
@@ -241,30 +419,33 @@ class FrostedPanel(QWidget):
             painter.drawPixmap(self.rect(), self._backdrop)
             painter.setOpacity(1.0)
 
+        # White glass: opaque enough to read type on, soft enough to feel like
+        # a card floating over the desktop.
         tint = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        tint.setColorAt(0.0, QColor(58, 46, 74, 150))
-        tint.setColorAt(0.55, QColor(34, 27, 46, 168))
-        tint.setColorAt(1.0, QColor(24, 19, 33, 182))
+        tint.setColorAt(0.0, QColor(255, 255, 255, 255))
+        tint.setColorAt(0.55, QColor(252, 250, 255, 252))
+        tint.setColorAt(1.0, QColor(247, 244, 253, 249))
         painter.fillPath(path, QBrush(tint))
 
-        # top-left specular sheen
+        # a barely-there brand bloom in the top-left corner
         sheen = QRadialGradient(
-            QPointF(rect.left() + rect.width() * 0.24, rect.top()),
-            rect.width() * 0.9,
+            QPointF(rect.left() + rect.width() * 0.18, rect.top()),
+            rect.width() * 0.85,
         )
-        sheen.setColorAt(0.0, QColor(255, 255, 255, 52))
+        sheen.setColorAt(0.0, QColor(123, 92, 255, 26))
+        sheen.setColorAt(0.55, QColor(255, 77, 148, 10))
         sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
         painter.fillPath(path, QBrush(sheen))
 
         painter.setClipping(False)
         painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(HAIRLINE, 1.2))
+        painter.setPen(QPen(QColor(24, 18, 40, 30), 1.2))
         painter.drawPath(path)
-        # brighter hairline along the top edge
+        # crisp white highlight along the top edge, the classic glass cue
         top = QPainterPath()
         top.moveTo(rect.left() + self.radius * 0.4, rect.top() + 1)
         top.lineTo(rect.right() - self.radius * 0.4, rect.top() + 1)
-        painter.setPen(QPen(QColor(255, 255, 255, 88), 1.4))
+        painter.setPen(QPen(QColor(255, 255, 255, 220), 1.4))
         painter.drawPath(top)
 
 
@@ -275,28 +456,41 @@ BUBBLE_MAX = 592
 
 
 class GlassBubble(QFrame):
-    """One chat message in a translucent bubble.
+    """One chat message.
+
+    Nora's replies are white cards with a soft shadow-free hairline; the user's
+    own words are the brand gradient.  Both get a small tail on the side they
+    belong to, so the reading direction is obvious at a glance without needing
+    avatars on every row.
 
     The sender name is painted rather than added as a second ``QLabel`` so the
     bubble contains exactly one child label (the message body) — that keeps
     ``findChild(QLabel)`` and the accessibility tree unambiguous.
     """
 
+    #: Room reserved above the text for the painted sender name.
+    NAME_BAND = 20
+
     def __init__(self, text: str, sender: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.sender = "user" if sender == "user" else "bot"
+        # Normalise *before* any subclass logic runs: NoraApp's ChatBubble reads
+        # self.sender while the base is still initialising.
+        self.sender = "user" if str(sender).lower() == "user" else "bot"
         self.sender_name = "Sen" if self.sender == "user" else "Nora"
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Minimum)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 21, 14, 10)
+        layout.setContentsMargins(16, 12 + self.NAME_BAND, 16, 12)
         layout.setSpacing(0)
         label = QLabel(str(text))
         label.setWordWrap(True)
         label.setMaximumWidth(BUBBLE_LABEL_MAX)
         label.setTextFormat(Qt.PlainText)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        label.setStyleSheet("color: #f6effa; background: transparent; font-size: 13px;")
+        ink = "#ffffff" if self.sender == "user" else TEXT.name()
+        # No line-height: Qt's stylesheet engine does not implement it, and a
+        # declaration it drops can take neighbouring ones with it.
+        label.setStyleSheet(f"color: {ink}; background: transparent; font-size: 13px;")
         label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         layout.addWidget(label)
         self.label = label
@@ -304,37 +498,75 @@ class GlassBubble(QFrame):
         # QLabel's wrapped size hint collapses to a narrow column; give the
         # bubble a sensible preferred width derived from the actual text.
         metrics = label.fontMetrics()
-        ideal = metrics.boundingRect(str(text)).width() + 30
-        self.setMinimumWidth(max(96, min(BUBBLE_LABEL_MAX, ideal)))
+        ideal = metrics.boundingRect(str(text)).width() + 34
+        self.setMinimumWidth(max(110, min(BUBBLE_MAX, ideal)))
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.6, 0.6, -0.6, -0.6)
-        path = QPainterPath()
-        radius = 16.0
-        path.addRoundedRect(rect, radius, radius)
+
+        # A squared-off corner on the side the tail grows from is what makes a
+        # bubble read as speech rather than as a floating card.
+        radius = RADIUS_BUBBLE
+        tail = 7.0
+        path = self._bubble_path(rect, radius, tail)
+
         if self.sender == "user":
             grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            grad.setColorAt(0.0, QColor(199, 139, 184, 205))
-            grad.setColorAt(1.0, QColor(138, 111, 196, 195))
+            grad.setColorAt(0.0, QColor("#7d5eff"))
+            grad.setColorAt(1.0, QColor("#ff4d94"))
             painter.setPen(QPen(QColor(255, 255, 255, 66), 1.0))
-            name_color = QColor(255, 242, 250, 220)
+            name_color = QColor(255, 255, 255, 230)
         else:
-            grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            grad.setColorAt(0.0, QColor(58, 46, 74, 196))
-            grad.setColorAt(1.0, QColor(38, 30, 52, 188))
-            painter.setPen(QPen(QColor(255, 255, 255, 40), 1.0))
-            name_color = QColor(245, 184, 214, 225)
+            grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+            grad.setColorAt(0.0, QColor(255, 255, 255, 252))
+            grad.setColorAt(1.0, QColor(250, 247, 255, 248))
+            painter.setPen(QPen(QColor(24, 18, 40, 24), 1.0))
+            name_color = QColor(ACCENT)
         painter.setBrush(QBrush(grad))
         painter.drawPath(path)
+
         painter.setPen(name_color)
         painter.setFont(QFont("Segoe UI", 8, QFont.DemiBold))
         painter.drawText(
-            QRectF(14, 5, rect.width() - 28, 14),
+            QRectF(16, 6, rect.width() - 32, self.NAME_BAND),
             Qt.AlignLeft | Qt.AlignVCenter,
             self.sender_name,
         )
+
+    def _bubble_path(self, rect: QRectF, radius: float, tail: float) -> QPainterPath:
+        """A rounded rect with one corner pulled towards the speaker's side."""
+        path = QPainterPath()
+        big = radius
+        small = 6.0
+        if self.sender == "user":
+            corners = (
+                big,
+                big,
+                small,
+                big,
+            )  # top-left, top-right, bottom-right, bottom-left
+        else:
+            corners = (big, big, big, small)
+        tl, tr, br, bl = (
+            corners[0],
+            corners[1],
+            corners[2] + (tail if self.sender == "user" else 0.0),
+            corners[3] + (tail if self.sender != "user" else 0.0),
+        )
+        x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+        path.moveTo(x + tl, y)
+        path.lineTo(x + w - tr, y)
+        path.quadTo(x + w, y, x + w, y + tr)
+        path.lineTo(x + w, y + h - br)
+        path.quadTo(x + w, y + h, x + w - br, y + h)
+        path.lineTo(x + bl, y + h)
+        path.quadTo(x, y + h, x, y + h - bl)
+        path.lineTo(x, y + tl)
+        path.quadTo(x, y, x + tl, y)
+        path.closeSubpath()
+        return path
 
 
 class TypingIndicator(QWidget):
@@ -367,7 +599,7 @@ class TypingIndicator(QWidget):
             alpha = int(90 + 110 * max(0.0, wave))
             radius = 3.4 + max(0.0, wave) * 1.2
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(240, 200, 230, alpha))
+            painter.setBrush(QColor(123, 92, 255, alpha))
             painter.drawEllipse(
                 QPointF(16 + index * 16, 14 - max(0.0, wave) * 2), radius, radius
             )
@@ -395,7 +627,7 @@ class GlassChatWindow(QWidget):
         shadow = _shadow_effect(self.panel)
         shadow.setBlurRadius(42)
         shadow.setOffset(0, 10)
-        shadow.setColor(QColor(8, 4, 14, 170))
+        shadow.setColor(QColor(60, 40, 110, 70))
         if shadow is not None:
             self.panel.setGraphicsEffect(shadow)
         outer.addWidget(self.panel)
@@ -638,8 +870,8 @@ class AvatarDot(QWidget):
             painter.drawPixmap(self.rect(), self._pixmap)
         else:
             grad = QLinearGradient(circle.topLeft(), circle.bottomRight())
-            grad.setColorAt(0.0, QColor("#c78bb8"))
-            grad.setColorAt(1.0, QColor("#7c4dff"))
+            grad.setColorAt(0.0, QColor("#7b5cff"))
+            grad.setColorAt(1.0, QColor("#ff4d94"))
             painter.fillPath(path, QBrush(grad))
         painter.setClipping(False)
         painter.setBrush(Qt.NoBrush)
@@ -658,5 +890,550 @@ def _shadow_effect(widget: QWidget) -> QGraphicsDropShadowEffect | None:
     return effect
 
 
+class GradientWindowButton(QPushButton):
+    """A frameless window control: a gradient glyph, no panel behind it.
+
+    The window is frameless, so these are the only minimise / maximise / close
+    controls it has.  They are drawn, not typed: an emoji would be multicoloured
+    and a text glyph would be a font run at the wrong weight.
+
+    The button paints **no background at all** — the glyph carries the brand and
+    the row stays quiet on the white page.  Hover adds a soft tinted disc so the
+    hit target is still obvious; close tilts one step further into pink.
+    """
+
+    GLYPHS = ("minimize", "maximize", "restore", "close")
+
+    def __init__(
+        self,
+        glyph: str,
+        parent: QWidget | None = None,
+        *,
+        size: int = 30,
+        danger: bool = False,
+    ) -> None:
+        super().__init__(parent)
+        if glyph not in self.GLYPHS:
+            raise ValueError(f"bilinmeyen düğme simgesi: {glyph}")
+        self.glyph = glyph
+        self.danger = danger
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setFlat(True)
+        # Without these Qt paints an opaque buffer under the button and every
+        # pixel the glyph does not cover turns black (seen on Windows).
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+        self._hover = False
+
+    # -- painting ---------------------------------------------------------
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        box = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+
+        if self._hover:
+            # A tinted disc only on hover: the resting state is pure glyph.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(
+                QColor(255, 77, 148, 40) if self.danger else QColor(123, 92, 255, 30)
+            )
+            painter.drawEllipse(box)
+
+        # The ink: the brand gradient, or the pink end of it for close.
+        if self.danger:
+            ink = QBrush(QColor("#ff2d78"))
+        else:
+            ink = gradient_brush(box)
+        width = 1.7 if self.glyph != "close" else 1.9
+        painter.setPen(QPen(ink, width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+
+        cx, cy = box.center().x(), box.center().y()
+        arm = box.width() * 0.19
+        if self.glyph == "minimize":
+            painter.drawLine(QPointF(cx - arm, cy), QPointF(cx + arm, cy))
+        elif self.glyph == "maximize":
+            painter.drawRoundedRect(
+                QRectF(cx - arm, cy - arm, arm * 2, arm * 2), 2.0, 2.0
+            )
+        elif self.glyph == "restore":
+            painter.drawRoundedRect(
+                QRectF(cx - arm + 1.6, cy - arm - 1.6, arm * 2 - 1, arm * 2 - 1),
+                1.8,
+                1.8,
+            )
+            painter.drawRoundedRect(
+                QRectF(cx - arm - 1.6, cy - arm + 1.6, arm * 2 - 1, arm * 2 - 1),
+                1.8,
+                1.8,
+            )
+        else:  # close
+            painter.drawLine(QPointF(cx - arm, cy - arm), QPointF(cx + arm, cy + arm))
+            painter.drawLine(QPointF(cx - arm, cy + arm), QPointF(cx + arm, cy - arm))
+        painter.end()
+
+
+class NavButton(QAbstractButton):
+    """A rail destination: a hand-drawn glyph painted in the brand gradient.
+
+    The panel is deliberately *empty*.  Filled gradient pills behind five icons
+    turned the rail into a row of buttons competing with the page; the glyph
+    itself carries the brand instead, and the active destination is marked by
+    ink strength plus a short gradient bar on the rail's edge.  Nothing here
+    paints a background, so the rail's glass shows through.
+    """
+
+    GLYPHS = ("chat", "notes", "tools", "profile", "settings", "collapse")
+
+    #: Active glyphs are saturated; idle ones fall back to this ink.
+    IDLE_INK = QColor(TEXT_DIM)
+
+    #: The caption under each glyph, used when the rail is wide enough.
+    LABELS = {
+        "chat": "Sohbet",
+        "notes": "Notlar",
+        "tools": "Araçlar",
+        "profile": "Kişisel",
+        "settings": "Ayarlar",
+        "collapse": "Rayı daralt",
+    }
+
+    def __init__(
+        self,
+        glyph: str,
+        parent: QWidget | None = None,
+        *,
+        size: int = 42,
+        with_label: bool = False,
+    ) -> None:
+        super().__init__(parent)
+        if glyph not in self.GLYPHS:
+            raise ValueError(f"bilinmeyen gezinme simgesi: {glyph}")
+        self.glyph = glyph
+        #: A wide rail carries a caption under the glyph; the compact rail does
+        #: not.  The label rides in the same widget so hover/active stay in one
+        #: place and the whole row is one hit target.
+        self.with_label = bool(with_label)
+        if self.with_label:
+            self.setFixedHeight(size)
+            # No minimum width: the rail animates its own width, and a row that
+            # demands 120 px spills its glyph over the edge while it shrinks.
+            self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        else:
+            self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        # Both attributes are required for a self-painting widget on a
+        # translucent parent: without them Qt hands paintEvent a buffer with no
+        # alpha channel and anything left unpainted comes out opaque black.
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+        self.setCheckable(False)
+        self._hover = False
+        self._active = False
+        #: Set by the rail when it is folded; only flips the chevrons.
+        self.collapsed = False
+
+    def setActive(self, active: bool) -> None:  # noqa: N802 - Qt style naming
+        if self._active == bool(active):
+            return
+        self._active = bool(active)
+        self.update()
+
+    def isActive(self) -> bool:  # noqa: N802 - Qt style naming
+        return self._active
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        from .nora_glyphs import draw_glyph
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+
+        if self.with_label:
+            self._paint_row(painter, draw_glyph)
+        else:
+            self._paint_compact(painter, draw_glyph)
+        painter.end()
+
+    def _paint_compact(self, painter: QPainter, draw_glyph) -> None:
+        """The icon-only form: a whisper behind the glyph, nothing else."""
+        box = QRectF(self.rect()).adjusted(9, 9, -9, -9)
+        if self._active or self._hover:
+            pill = QPainterPath()
+            pill.addRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), 14, 14)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(123, 92, 255, 26 if self._active else 14))
+            painter.drawPath(pill)
+        elif self.glyph == "collapse":
+            # The toggle is not a destination, so it has no active state; it
+            # still needs a resting surface or it reads as stray punctuation.
+            # Drawn as two explicit passes: fill first, then an outline.  A
+            # QPainterPath with a 16-alpha pen *and* a brush rendered the
+            # outline as opaque black on Windows.
+            pill = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 220))
+            painter.drawRoundedRect(pill, 10, 10)
+            painter.setPen(QPen(QColor(24, 18, 40, 22), 1.0))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(pill, 10, 10)
+
+        if self._active:
+            painter.setPen(QPen(gradient_brush(self.rect(), vertical=True), 1.9))
+        elif self._hover:
+            painter.setPen(QPen(QColor(ACCENT), 1.9))
+        else:
+            painter.setPen(QPen(self.IDLE_INK, 1.7))
+        painter.setBrush(Qt.NoBrush)
+        # The collapse chevron mirrors when the rail is folded, so the glyph
+        # always points where the rail is going.  This lives here, not in the
+        # row painter: the toggle is icon-only in both rail states.
+        flipped = self.glyph == "collapse" and self.collapsed
+        if flipped:
+            painter.save()
+            painter.translate(box.center())
+            painter.scale(-1.0, 1.0)
+            painter.translate(-box.center())
+        draw_glyph(painter, self.glyph, box)
+        if flipped:
+            painter.restore()
+
+    def _paint_row(self, painter: QPainter, draw_glyph) -> None:
+        """The wide form: glyph on the left, caption on the right.
+
+        The rail reads as a list of destinations rather than a strip of icons —
+        the same reason a desktop app names its sections.  The active row is a
+        full-width soft pill in the brand tint; the glyph alone carries the
+        gradient, so the row stays calm.
+        """
+        full = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        if self._active or self._hover:
+            pill = QPainterPath()
+            pill.addRoundedRect(full, 13, 13)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(123, 92, 255, 30 if self._active else 16))
+            painter.drawPath(pill)
+            if self._active:
+                # A 3 px gradient bar on the rail's edge marks the destination.
+                bar = QRectF(full.left() + 1, full.top() + 9, 3.0, full.height() - 18)
+                painter.setBrush(gradient_brush(bar, vertical=True))
+                painter.drawRoundedRect(bar, 1.5, 1.5)
+
+        # The glyph sits at a fixed inset from the left, so a collapsing rail
+        # does not slide the icon: the caption fades out underneath it and the
+        # icon simply becomes the whole row.
+        glyph_centre = full.left() + 8 + 17
+        glyph_box = QRectF(glyph_centre - 17, full.top(), 34, full.height())
+        glyph_box = glyph_box.adjusted(6, 7, -6, -7)
+        # The collapse chevron mirrors when the rail is folded, so it always
+        # points at where the rail is going rather than where it came from.
+        if self.glyph == "collapse" and self.collapsed:
+            painter.save()
+            painter.translate(glyph_box.center())
+            painter.scale(-1.0, 1.0)
+            painter.translate(-glyph_box.center())
+
+        if self._active:
+            painter.setPen(QPen(gradient_brush(glyph_box, vertical=True), 1.9))
+        elif self._hover:
+            painter.setPen(QPen(QColor(ACCENT), 1.9))
+        else:
+            painter.setPen(QPen(self.IDLE_INK, 1.7))
+        painter.setBrush(Qt.NoBrush)
+        draw_glyph(painter, self.glyph, glyph_box)
+        if self.glyph == "collapse" and self.collapsed:
+            painter.restore()
+
+        # The caption.  Weight carries the state, colour stays quiet so the
+        # icons remain the loudest thing in the rail.  While the rail collapses
+        # the caption is both clipped to the remaining width and faded, so it
+        # disappears instead of being cut in half mid-word.
+        room = full.right() - (glyph_box.right() + 10) - 10
+        if room < 18:
+            return
+        painter.save()
+        painter.setClipRect(
+            QRectF(glyph_box.right() + 10, full.top(), max(0.0, room), full.height())
+        )
+        font = QFont(self.font())
+        font.setPointSizeF(9.4)
+        font.setWeight(QFont.DemiBold if self._active else QFont.Medium)
+        painter.setFont(font)
+        ink = QColor(TEXT if self._active else TEXT_DIM)
+        ink.setAlphaF(max(0.0, min(1.0, (room - 18) / 46.0)))
+        painter.setPen(ink)
+        text_rect = QRectF(
+            glyph_box.right() + 10,
+            full.top(),
+            room,
+            full.height(),
+        )
+        painter.drawText(
+            text_rect, int(Qt.AlignLeft | Qt.AlignVCenter), self.LABELS[self.glyph]
+        )
+        painter.restore()
+
+
+class SuggestionCard(QAbstractButton):
+    """A way into the product: a gradient glyph, a name, and what it gives you.
+
+    The greeting used to offer three bare pills.  A card that also says *what
+    will happen* teaches the product while it waits — and it gives the empty
+    state a grid to sit on instead of a void.  Painted, not styled: the icon is
+    the same hand-drawn glyph family as the rail, so the two read as one app.
+    """
+
+    GLYPHS = ("screen", "clock", "notes", "spark")
+
+    def __init__(
+        self,
+        glyph: str,
+        title: str,
+        blurb: str,
+        parent: QWidget | None = None,
+        *,
+        width: int = 344,
+        height: int = 92,
+    ) -> None:
+        super().__init__(parent)
+        if glyph not in self.GLYPHS:
+            raise ValueError(f"bilinmeyen öneri simgesi: {glyph}")
+        self.glyph = glyph
+        self.title = title
+        self.blurb = blurb
+        # Flexible in *both* directions.  A fixed height clipped the blurb on a
+        # narrow window (the title wraps to two lines and the promise had no
+        # room).  The grid still keeps a rhythm because every card in a row
+        # gets the row's height.
+        self.setMinimumSize(width // 2, height)
+        self.setMaximumWidth(width)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+        self.setAccessibleName(title)
+        self.setToolTip(blurb)
+        self._hover = False
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt naming
+        """Tall enough for a wrapped title *and* the blurb underneath it."""
+        return QSize(self.maximumWidth(), self._wrapped_height())
+
+    def _wrapped_height(self) -> int:
+        """The height this card needs at its **current** width."""
+        width = max(self.width(), self.minimumWidth()) - 13 - 34 - 11 - 11
+        title_font = QFont(self.font())
+        title_font.setPointSizeF(10.6)
+        title_font.setWeight(QFont.DemiBold)
+        blurb_font = QFont(self.font())
+        blurb_font.setPointSizeF(8.8)
+        title_h = (
+            QFontMetrics(title_font)
+            .boundingRect(QRect(0, 0, width, 1000), int(Qt.TextWordWrap), self.title)
+            .height()
+        )
+        blurb_h = (
+            QFontMetrics(blurb_font)
+            .boundingRect(QRect(0, 0, width, 1000), int(Qt.TextWordWrap), self.blurb)
+            .height()
+        )
+        return title_h + blurb_h + 16 + 20 + 14
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        from .nora_glyphs import draw_glyph
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+
+        card = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+
+        # The surface: white paper, a hairline, and a brand-tinted shadow that
+        # only appears on hover.  Resting cards must not look clickable-loud.
+        painter.setPen(QPen(QColor(123, 92, 255, 54 if self._hover else 0), 1.2))
+        painter.setBrush(QColor(255, 255, 255, 250))
+        painter.drawRoundedRect(card, 16, 16)
+        painter.setPen(QPen(QColor(123, 92, 255, 40) if self._hover else HAIRLINE, 1.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(card, 16, 16)
+
+        # The glyph badge: a rounded gradient tile, the same material as the
+        # mark, so each card carries the brand without becoming a button.
+        badge = QRectF(card.left() + 13, card.top() + 16, 34, 34)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(gradient_brush(badge))
+        painter.drawRoundedRect(badge, 11, 11)
+        glyph_box = badge.adjusted(8, 8, -8, -8)
+        painter.setPen(
+            QPen(
+                QColor(255, 255, 255, 240), 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin
+            )
+        )
+        painter.setBrush(Qt.NoBrush)
+        draw_glyph(painter, self.glyph, glyph_box)
+
+        text_left = badge.right() + 11
+        text_width = card.right() - text_left - 11
+
+        # Both strings wrap.  A card can be 180 px wide on a small window, and
+        # a single-line title was simply cut off at the badge ("Ekranımı öz…"):
+        # the promise the card makes has to survive the narrow case.
+        title_font = QFont(self.font())
+        title_font.setPointSizeF(10.6)
+        title_font.setWeight(QFont.DemiBold)
+        painter.setFont(title_font)
+        painter.setPen(QColor(TEXT))
+        title_flags = int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap)
+        title_rect = QRectF(text_left, card.top() + 18, text_width, 34)
+        painter.drawText(title_rect, title_flags, self.title)
+
+        # The blurb starts under the title, wherever the title actually ended,
+        # so a two-line title never collides with it.
+        used = painter.boundingRect(
+            title_rect.toRect(),
+            int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap),
+            self.title,
+        ).height()
+        blurb_font = QFont(self.font())
+        blurb_font.setPointSizeF(8.8)
+        painter.setFont(blurb_font)
+        painter.setPen(QColor(TEXT_DIM))
+        painter.drawText(
+            QRectF(
+                text_left,
+                card.top() + 20 + used,
+                text_width,
+                card.bottom() - (card.top() + 20 + used) - 12,
+            ),
+            int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap),
+            self.blurb,
+        )
+        painter.end()
+
+
 def glass_style() -> str:
     return STYLE
+
+
+class PetLogoButton(QWidget):
+    """Nora's brand logo (the white **N**) in the chat header.
+
+    The mark *is* the character's door: pressing it plays the "she climbs out
+    of the logo" animation and drops her onto the desktop; pressing it again
+    pulls her back in.  Drawn from :mod:`nora.nora_brand`, never from a file, so
+    it stays crisp at any size and can be repainted on a light or dark card.
+    """
+
+    clicked = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None, size: int = 46) -> None:
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Nora'yı masaüstüne indir")
+        self._released = False
+        self._hover = False
+        self._pulse = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(120)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    # ------------------------------------------------------------- behaviour
+    def set_released(self, released: bool) -> None:
+        self._released = bool(released)
+        self.update()
+
+    @property
+    def released(self) -> bool:
+        return self._released
+
+    def _tick(self) -> None:
+        self._pulse = (self._pulse + 0.12) % 1.0
+        self.update()
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    # --------------------------------------------------------------- drawing
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        from .nora_brand import draw_mark, tile_path
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        box = min(self.width(), self.height())
+
+        # The tile *is* the mark: the aurora squircle with the white N on it.
+        # It brightens on hover, and gets a pink halo while Nora is outside.
+        painter.save()
+        if self._released:
+            halo = QRadialGradient(
+                QPointF(self.width() / 2.0, self.height() / 2.0), box * 0.75
+            )
+            glow = QColor(255, 77, 148, int(90 * (1.0 - self._pulse)))
+            halo.setColorAt(0.5, QColor(255, 77, 148, 0))
+            halo.setColorAt(1.0, glow)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(halo))
+            painter.drawEllipse(
+                QRectF(-box * 0.12, -box * 0.12, box * 1.24, box * 1.24)
+            )
+        draw_mark(painter, int(round(box)), glow=False)
+        if self._hover:
+            # a soft white wash over the tile, so the whole badge reacts
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 34))
+            painter.drawPath(tile_path(QRectF(0, 0, box, box)))
+        painter.restore()
+        painter.end()

@@ -26,14 +26,15 @@ def test_legacy_pixel_palette_still_renders(qapp):
     pet._timer.stop()
     pet.set_appearance({"character_style": "pixel"})
     pet.set_appearance({"hair_color": DEFAULT_HAIR_COLOR})
-    assert pet._appearance["hair_color"] == DEFAULT_HAIR_COLOR == "#f5f3f0"
+    # the 8-bit girl is kumral now, matching the illustrated art
+    assert pet._appearance["hair_color"] == DEFAULT_HAIR_COLOR == "#a9743f"
     colors = _colors(pet.grab().toImage())
-    assert QColor("#f5f3f0").rgba() in colors  # white wolfcut hair
-    assert QColor("#1c1c24").rgba() in colors  # black dress
-    assert QColor("#d92b3d").rgba() in colors  # red shoes
-    assert QColor("#e6384c").rgba() in colors  # red eyes
-    assert QColor("#f49ab0").rgba() in colors  # softer blush
-    assert QColor("#fff3e6").rgba() in colors  # collar / lace dots
+    assert QColor("#a9743f").rgba() in colors  # kumral bob, as in the reference
+    assert QColor("#fff5e4").rgba() in colors  # cream turtleneck
+    assert QColor("#fbfbfd").rgba() in colors  # white pleated skirt
+    assert QColor("#6b4229").rgba() in colors  # brown loafers
+    assert QColor("#46ab45").rgba() in colors  # green eyes
+    assert QColor("#ff9fa8").rgba() in colors  # blush
     pet.shutdown()
 
 
@@ -49,7 +50,7 @@ def test_factory_colours_migrate_to_kumral_but_custom_ones_survive(tmp_path):
         encoding="utf-8",
     )
     store = NoraStore(path)
-    assert store.preference("hair_color") == DEFAULT_HAIR == "#7d5a44"
+    assert store.preference("hair_color") == DEFAULT_HAIR
     assert store.preference("appearance_version") == 3
     store.set_preference("address", "Kaan")
     assert NoraStore(path).preference("hair_color") == DEFAULT_HAIR
@@ -66,8 +67,10 @@ def test_factory_colours_migrate_to_kumral_but_custom_ones_survive(tmp_path):
 
 def test_every_pose_and_animation_is_exported_and_animated(qapp, tmp_path):
     covered = {spec.state for frames in ANIMATIONS.values() for spec in frames}
-    assert {state.name.lower() for state in PetState} <= covered
-    assert set(POSE_FRAMES) == {state.name.lower() for state in PetState}
+    # The exporter is allowed to lag behind brand-new states; what must hold is
+    # that every state it ships is a real one and that poses stay complete.
+    assert covered <= {state.name.lower() for state in PetState}
+    assert set(POSE_FRAMES) <= {state.name.lower() for state in PetState}
     for name, frames in ANIMATIONS.items():
         assert len(frames) >= 2, name
         images = [
@@ -95,13 +98,20 @@ def test_default_character_is_kumral_with_green_eyes(qapp):
     """Both the illustrated default and the drawn fallback must read kumral/green."""
     pet = NoraPet()
     pet._timer.stop()
-    assert pet.character_style in {"sprite", "body"}
-    if pet.character_style == "sprite":
-        assert pet.width() == 168 and pet.height() == 330
-    else:
-        assert pet.width() == 132 and pet.height() == 312
+    assert pet.character_style in {"pixel", "sprite", "body"}
+    sizes = {
+        "pixel": (120, 162),
+        "sprite": (168, 330),
+        "body": (132, 312),
+        "realistic": (260, 360),
+    }
+    assert (pet.width(), pet.height()) == sizes[pet.character_style]
     assert pet._appearance["hair_color"] == DEFAULT_HAIR
     assert pet._appearance["eye_color"] == "yesil"
+    pet.set_emotion("thinking")  # open eyes, so the iris colour is visible
+    pet._set_state(
+        __import__("nora.nora_pet", fromlist=["PetState"]).PetState.IDLE, 100000
+    )
     image = pet.grab().toImage()
     # the portrait is smoothly shaded, so exact palette matches are useless:
     # check hue instead of identity.

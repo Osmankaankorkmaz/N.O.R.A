@@ -83,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName("Nora")
     app.setOrganizationName("Nora")
     app.setQuitOnLastWindowClosed(False)
+    # The brand mark is the app icon everywhere: taskbar, alt-tab, tray.
+    from .nora_brand import logo_pixmap
+    from PyQt5.QtGui import QIcon
+
+    brand = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256, 512):
+        brand.addPixmap(logo_pixmap(size, spark=size >= 64))
+    app.setWindowIcon(brand)
     options = NoraOptions(
         wake_word=False if args.no_wake_word else None,
         tts=False if args.no_tts else None,
@@ -91,7 +99,9 @@ def main(argv: list[str] | None = None) -> int:
         data_dir=args.data_dir,
     )
     nora = NoraApp(options)
-    nora.start()
+    # The real, only app instance is the one allowed to end the event loop.
+    nora._owns_quit = True
+    nora.start(splash=True)
     signal.signal(signal.SIGINT, lambda *_: nora.shutdown())
     # Let Python deliver SIGINT while the Qt event loop is running.
     heartbeat = QTimer()

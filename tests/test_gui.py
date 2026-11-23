@@ -36,7 +36,12 @@ def test_pet_size_states_and_render(qapp):
     pet = NoraPet()
     pet._timer.stop()
     # The default is the illustrated sheet when it ships, else the drawn body.
-    expected = (168, 330) if pet.character_style == "sprite" else (132, 312)
+    expected = {
+        "pixel": (120, 162),
+        "sprite": (168, 330),
+        "body": (132, 312),
+        "realistic": (260, 360),
+    }[pet.character_style]
     assert (pet.width(), pet.height()) == expected
     assert pet.testAttribute(Qt.WA_TranslucentBackground)
     pet.set_emotion("love")
@@ -90,6 +95,8 @@ def test_app_offline_chat_and_command_flow(qapp, monkeypatch):
     )
     app.start()
     qapp.processEvents()
+    # The character lives inside the app until the logo is pressed.
+    app.release_pet()
     assert app.pet.isVisible()
     app.show_chat()
     assert app.chat_window.isVisible()
@@ -393,24 +400,35 @@ def test_chat_and_tool_replies_are_spoken_without_length_cap(qapp, monkeypatch):
     app.shutdown()
 
 
-def test_tts_indicator_and_mode_restore_are_visible(qapp, monkeypatch):
+def test_tts_state_and_mode_restore_are_visible(qapp, monkeypatch):
+    """The header carries no indicator chips any more, so state is checked
+    where it now lives: the voice itself, the stored preference and the tray
+    tooltip that reports it."""
     app = NoraApp(NoraOptions(wake_word=False, tts=True, proactive=False, offline=True))
     monkeypatch.setattr(app.voice, "speak", lambda *a, **k: True)
-    assert app.speaker_indicator.text() == "🔊"
+    app._update_tts_indicator()
+    assert "Sesli yanıt açık" in app.tray.toolTip()
     app._toggle_tts(False)
-    assert app.speaker_indicator.text() == "🔇"
+    assert "kapalı" in app.tray.toolTip()
     assert app.store.preference("tts") is False
     app._toggle_tts(True)
     app._activate_mode("focus")
     assert app.voice.tts_enabled is False
-    assert app.speaker_indicator.text() == "🔇"
+    assert "kapalı" in app.tray.toolTip()
     app._activate_mode("normal")
     assert app.voice.tts_enabled is True
-    assert app.speaker_indicator.text() == "🔊"
+    assert "Sesli yanıt açık" in app.tray.toolTip()
     app.shutdown()
 
 
-def test_tray_icon_refreshes_with_pixel_appearance(qapp, tmp_path):
+def test_tray_icon_is_the_brand_mark_not_the_character(qapp, tmp_path):
+    """The tray belongs to the app, so it carries the app logo.
+
+    The character has her own window with her own art; the tray used to show a
+    second, different face, which made it unclear which one was Nora.
+    """
+    from nora.nora_brand import logo_image
+
     app = NoraApp(
         NoraOptions(
             wake_word=False, tts=False, proactive=False, offline=True, data_dir=tmp_path
@@ -419,7 +437,22 @@ def test_tray_icon_refreshes_with_pixel_appearance(qapp, tmp_path):
     before = app.tray.icon().pixmap(64, 64).toImage()
     app._apply_settings({"hair_color": "#202b52", "outfit": "casual"})
     after = app.tray.icon().pixmap(64, 64).toImage()
-    assert not after.isNull() and after != before
+    assert not after.isNull()
+    # hair colour no longer touches the brand mark
+    assert after == before
+    # and the mark really is the white N: some pixels are near-white
+    whites = sum(
+        1
+        for x in range(after.width())
+        for y in range(after.height())
+        if after.pixelColor(x, y).alpha() > 200
+        and after.pixelColor(x, y).lightness() > 240
+    )
+    reference = logo_image(64, spark=True)
+    assert whites > 0
+    assert reference.size() == after.size()
+    # the old character icon path must not be what we ship
+    assert app._tray_icon().isNull() is False
     app.shutdown()
 
 
@@ -496,14 +529,16 @@ def test_continuous_conversation_followup_and_stop_command(qapp, tmp_path, monke
         app.voice, "listen_async", lambda rid: started.append(rid) or True
     )
     app._conversation_followup()
-    assert started and app._listening
-    app._on_listen_done(started[0], "", "sessiz")
-    app._on_listen_done(app._next_request(), "", "sessiz")
-    assert not app._conversation_active
-    app._send_message("sürekli konuşma modu")
-    assert app.store.preference("continuous_conversation")
+    # Microphone is disabled by design: the follow-up must not reopen the mic.
+    assert app.MICROPHONE_ENABLED is False
+    assert started == []
+    # With the microphone disabled the follow-up never opens, so continuous
+    # mode must be ended by the explicit stop command instead.
+    assert started == []
     app._send_message("dinlemeyi bırak")
     assert not app.store.preference("continuous_conversation")
+    app._send_message("sürekli konuşma modu")
+    assert app.store.preference("continuous_conversation")
     app.shutdown()
 
 

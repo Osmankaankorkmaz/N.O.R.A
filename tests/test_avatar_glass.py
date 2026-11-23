@@ -108,8 +108,10 @@ def test_default_style_is_the_illustrated_character_and_all_styles_work(qapp):
     pet._timer.stop()
     # Default: the AI-illustrated sheets when they ship with the app, otherwise
     # the drawn full-body character (honest fallback, never a broken window).
-    assert pet.character_style in {"sprite", "body"}
-    if pet.character_style == "sprite":
+    assert pet.character_style in {"pixel", "sprite", "body"}
+    if pet.character_style == "pixel":
+        assert (pet.width(), pet.height()) == (120, 162)
+    elif pet.character_style == "sprite":
         assert (pet.width(), pet.height()) == (168, 330)
     else:
         assert (pet.width(), pet.height()) == (132, 312)
@@ -117,7 +119,7 @@ def test_default_style_is_the_illustrated_character_and_all_styles_work(qapp):
 
     pet.set_appearance({"character_style": "pixel"})
     assert pet.character_style == "pixel"
-    assert (pet.width(), pet.height()) == (120, 150)
+    assert (pet.width(), pet.height()) == (120, 162)
 
     pet.set_appearance({"character_style": "realistic"})
     assert pet.character_style == "realistic"
@@ -131,11 +133,11 @@ def test_default_style_is_the_illustrated_character_and_all_styles_work(qapp):
 def test_character_style_preference_and_env(monkeypatch):
     assert _character_style({"character_style": "pixel"}) == "pixel"
     assert _character_style({"character_style": "sprite"}) == "sprite"
-    assert _character_style({"character_style": "nonsense"}) == "sprite"
+    assert _character_style({"character_style": "nonsense"}) == "pixel"
     monkeypatch.setenv("NORA_CHARACTER", "pixel")
     assert _character_style({}) == "pixel"
     monkeypatch.setenv("NORA_CHARACTER", "unknown")
-    assert _character_style({}) == "sprite"
+    assert _character_style({}) == "pixel"
     assert "8-bit" in _tooltip_for("pixel")
     assert "8-bit" not in _tooltip_for("realistic")
 
@@ -144,7 +146,7 @@ def test_store_validates_and_migrates_appearance(qapp, tmp_path):
     from nora.nora_store import NoraStore
 
     store = NoraStore(tmp_path / "state.json")
-    assert store.preference("character_style") == "sprite"
+    assert store.preference("character_style") == "pixel"
     assert store.preference("hair_color") == DEFAULT_HAIR
     assert store.preference("appearance_version") == 3
     with pytest.raises(ValueError):

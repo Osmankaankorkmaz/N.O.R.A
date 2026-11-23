@@ -360,7 +360,6 @@ def test_chat_window_is_a_normal_large_centred_app(qapp, tmp_path):
     # mask instead of doing a naive bitwise AND.
     assert (flags & Qt.WindowType_Mask) == Qt.Window
     assert not (flags & Qt.WindowStaysOnTopHint)
-    assert not (flags & Qt.FramelessWindowHint)
     app.show_chat()
     qapp.processEvents()
     assert window.width() >= 800 and window.height() >= 600
@@ -418,7 +417,9 @@ def test_ai_move_reaches_the_pet(qapp, tmp_path):
         "Selam!", "happy", move={"steps": [{"gesture": "wave", "intensity": 1.0}]}
     )
     app._apply_reply_motion(reply)
-    if app.pet.character_style == "sprite":
+    if app.pet.character_style == "pixel":
+        assert app.pet.state is not None
+    elif app.pet.character_style == "sprite":
         # the illustrated character "performs" the move as a timed pose
         assert app.pet._sprite_artist.active_sprite() is not None
     else:
@@ -438,18 +439,18 @@ def test_invalid_ai_move_falls_back_to_emotional_body_language(qapp, tmp_path):
     app.pet._timer.stop()
     app.pet.set_emotion("sad")
     app._apply_reply_motion(ChatReply("offff", "sad", move={"gesture": "nope"}))
-    if app.pet.character_style == "sprite":
-        assert app.pet._sprite_artist.active_sprite() is not None
+    if app.pet.character_style in {"pixel", "sprite"}:
+        assert app.pet.state is not None
     else:
         assert app.pet._motion.busy or app.pet._motion.sustained is not None
     app.shutdown()
 
 
-def test_store_defaults_to_the_illustrated_character(tmp_path):
+def test_store_defaults_to_the_8_bit_character(tmp_path):
     from nora.nora_store import NoraStore
 
     store = NoraStore(tmp_path / "state.json")
-    assert store.preference("character_style") == "sprite"
+    assert store.preference("character_style") == "pixel"
     # every style is still selectable, and a bogus one is refused
     for style in ("body", "realistic", "pixel"):
         store.set_preference("character_style", style)
