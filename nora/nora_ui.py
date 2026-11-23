@@ -41,6 +41,7 @@ from PyQt5.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -70,6 +71,7 @@ from .nora_glass import (
     FrostedPanel,
     GradientWindowButton,
     NavButton,
+    SuggestionCard,
     GlassBubble,
     TypingIndicator,
     brand_icon_pixmap,
@@ -551,14 +553,43 @@ class NoraApp(QWidget):
         except AttributeError:  # very old Qt
             return 1.0
 
-    def _build_hero(self) -> QWidget:
-        """The first-run page: the mark, her name, and a way in.
+    #: The suggestion cards under the greeting: glyph, title, one-line promise,
+    #: and the action it runs.  This is the shape a modern assistant app greets
+    #: with — the user should be able to start by pointing, before typing.
+    HERO_SUGGESTIONS = (
+        (
+            "screen",
+            "Ekranımı özetle",
+            "Şu an neyle uğraştığını görüp anlatayım.",
+            "_analyze_screen",
+        ),
+        (
+            "clock",
+            "Bugün ne var?",
+            "Saat, hava ve planın — tek bakışta.",
+            "_quick_weather",
+        ),
+        (
+            "notes",
+            "Notlarımı göster",
+            "Aklında tuttuklarımı buraya dökeyim.",
+            "_show_notes",
+        ),
+        (
+            "spark",
+            "Sistem bilgisi",
+            "Makinen nasıl çalışıyor, birlikte bakalım.",
+            "_show_system_info",
+        ),
+    )
 
-        Composed as one card rather than loose text on the page: the mark sits
-        on a soft brand glow, the name and the line about her are centred under
-        it, and the three ways in are the last row of the card.  A single
-        surface gives the empty state a shape — loose text in a large window
-        just floats.
+    def _build_hero(self) -> QWidget:
+        """The first-run page: a greeting and a grid of ways in.
+
+        Open, not carded: a big greeting on the white page reads calmer than a
+        bordered box floating in the middle, and the suggestion cards below give
+        the empty state structure.  Each card names the action *and* what it
+        will do, so the greeting teaches the product instead of just welcoming.
         """
         hero = QWidget()
         hero.setObjectName("hero")
@@ -567,62 +598,61 @@ class NoraApp(QWidget):
         outer.setSpacing(0)
         outer.addStretch(1)
 
-        card = QWidget()
-        card.setObjectName("heroCard")
-        card.setMaximumWidth(560)
-        inner = QVBoxLayout(card)
-        inner.setContentsMargins(40, 34, 40, 30)
+        column = QWidget()
+        # A maximum, not a fixed width: the greeting must shrink on a small
+        # window instead of overflowing its page.
+        column.setMaximumWidth(700)
+        inner = QVBoxLayout(column)
+        inner.setContentsMargins(0, 0, 0, 0)
         inner.setSpacing(0)
 
         from .nora_brand import logo_pixmap
 
         mark = QLabel()
         mark.setAlignment(Qt.AlignCenter)
-        mark.setPixmap(logo_pixmap(76, spark=True))
-        # The pixmap is square and the label must not squash it: a QLabel keeps
-        # its size hint from the pixmap, so no fixed height here.
-        # A fixed size, not a minimum: inside a layout with stretches Qt will
-        # otherwise shrink the label below its pixmap and clip the mark.
-        mark.setFixedSize(76, 76)
+        mark.setPixmap(logo_pixmap(64, spark=True))
+        mark.setFixedSize(64, 64)
         mark.setScaledContents(False)
         inner.addWidget(mark, 0, Qt.AlignHCenter)
-        inner.addSpacing(20)
+        inner.addSpacing(18)
 
         title = QLabel("Merhaba, ben Nora.")  # noqa: RUF001 - Turkish text
         title.setObjectName("heroTitle")
         title.setAlignment(Qt.AlignCenter)
         inner.addWidget(title)
+        inner.addSpacing(10)
 
         body = QLabel(
-            "Masaüstünde yaşayan Türkçe asistanın.\n"
-            "Ekranına bakabilir, notlarını tutabilir, gününü planlayabilirim."
+            "Masaüstünde yaşayan Türkçe asistanın. Ekranına bakabilir, "
+            "notlarını tutabilir, gününü planlayabilirim."
         )
         body.setObjectName("heroBody")
         body.setAlignment(Qt.AlignCenter)
         body.setWordWrap(True)
-        inner.addSpacing(9)
         inner.addWidget(body)
-        inner.addSpacing(22)
+        inner.addSpacing(26)
 
-        chips = QHBoxLayout()
-        chips.setSpacing(8)
-        chips.addStretch(1)
+        caption = QLabel("Bunlardan birini dene")
+        caption.setObjectName("heroCaption")
+        inner.addWidget(caption)
+        inner.addSpacing(10)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
         self.hero_chips: list[QPushButton] = []
-        for text, slot in (
-            ("Ekranımı özetle", self._analyze_screen),
-            ("Bugün ne var?", self._quick_weather),
-            ("Sistem bilgisi", self._show_system_info),
-        ):
-            chip = QPushButton(text)
-            chip.setObjectName("chip")
-            chip.setCursor(Qt.PointingHandCursor)
-            chip.clicked.connect(slot)
-            chips.addWidget(chip)
-            self.hero_chips.append(chip)
-        chips.addStretch(1)
-        inner.addLayout(chips)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        for index, (glyph, name, blurb, slot_name) in enumerate(self.HERO_SUGGESTIONS):
+            card = SuggestionCard(glyph, name, blurb)
+            card.clicked.connect(getattr(self, slot_name))
+            grid.addWidget(card, index // 2, index % 2)
+            self.hero_chips.append(card)
+        inner.addLayout(grid)
 
-        outer.addWidget(card, 0, Qt.AlignHCenter)
+        # AlignHCenter alone lets the layout text-align the block: a fixed
+        # width plus a stretch item on each side is what actually centres it.
+        outer.addWidget(column, 0, Qt.AlignHCenter | Qt.AlignTop)
         outer.addStretch(1)
         return hero
 
@@ -642,35 +672,45 @@ class NoraApp(QWidget):
         if scroll is not None:
             scroll.setVisible(not empty)
 
-    def _build_sidebar(self) -> QWidget:
-        """The rail: her mark, four destinations, settings at the bottom.
+    #: Width of the labelled rail.  Wide enough for "Kişisel panel" on one
+    #: line, narrow enough to leave the conversation the rest of the window.
+    RAIL_WIDTH = 208
 
-        This is where the identity lives now.  The mark is bigger, it is the
-        first thing the eye lands on, and pressing it still pulls Nora out of
-        the logo and onto the desktop.
+    def _build_sidebar(self) -> QWidget:
+        """The rail: her mark, four named destinations, settings at the bottom.
+
+        The destinations are **named**, not just iconified: a rail of five bare
+        glyphs makes the user learn the icons, and the app has room for the
+        words.  The mark stays at the top as the way to call her onto the
+        desktop, and the whole column is one surface with a hairline edge.
         """
         rail = QWidget()
         rail.setObjectName("sidebar")
-        rail.setFixedWidth(96)
+        rail.setFixedWidth(self.RAIL_WIDTH)
         column = QVBoxLayout(rail)
-        column.setContentsMargins(0, 16, 0, 14)
+        column.setContentsMargins(14, 16, 14, 14)
         column.setSpacing(0)
 
-        self.logo_button = PetLogoButton(size=46)
+        self.logo_button = PetLogoButton(size=44)
         self.logo_button.clicked.connect(self.toggle_pet)
         self.logo_button.setToolTip("Nora'yı masaüstüne çıkar / içeri al")
-        column.addWidget(self.logo_button, 0, Qt.AlignHCenter)
+        mark_row = QHBoxLayout()
+        mark_row.setContentsMargins(0, 0, 0, 0)
+        mark_row.setSpacing(10)
+        mark_row.addWidget(self.logo_button)
+        wordmark = QLabel("Nora")
+        wordmark.setObjectName("wordmark")
+        mark_row.addWidget(wordmark)
+        mark_row.addStretch(1)
+        column.addLayout(mark_row)
 
-        column.addSpacing(26)
+        column.addSpacing(24)
 
-        # The four destinations live on one surface, with a hairline border and
-        # a caption: loose icons in a tall empty rail read as unfinished, a
-        # bordered group reads as a menu.
-        group = QWidget()
-        group.setObjectName("navGroup")
-        group_layout = QVBoxLayout(group)
-        group_layout.setContentsMargins(8, 10, 8, 10)
-        group_layout.setSpacing(4)
+        # A quiet section caption, the way a real sidebar names its group.
+        caption = QLabel("ÇALIŞMA ALANI")
+        caption.setObjectName("railCaption")
+        column.addWidget(caption)
+        column.addSpacing(8)
 
         self.nav_buttons: dict[str, QPushButton] = {}
         for key, glyph, tip, slot in (
@@ -679,22 +719,28 @@ class NoraApp(QWidget):
             ("tools", "tools", "Araçlar", self._open_tools),
             ("profile", "profile", "Kişisel panel", self._show_personal),
         ):
-            button = NavButton(glyph, group)
+            button = NavButton(glyph, rail, with_label=True)
             button.setToolTip(tip)
             button.setAccessibleName(tip)
             button.clicked.connect(slot)
-            group_layout.addWidget(button, 0, Qt.AlignHCenter)
+            column.addWidget(button)
             self.nav_buttons[key] = button
         self._set_active_nav("chat")
-        column.addWidget(group)
 
         column.addStretch(1)
 
-        self.settings_button = NavButton("settings", rail)
+        divider = QFrame()
+        divider.setObjectName("railDivider")
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFixedHeight(1)
+        column.addWidget(divider)
+        column.addSpacing(10)
+
+        self.settings_button = NavButton("settings", rail, with_label=True)
         self.settings_button.setToolTip("Ayarlar")
         self.settings_button.setAccessibleName("Ayarlar")
         self.settings_button.clicked.connect(self._show_settings)
-        column.addWidget(self.settings_button, 0, Qt.AlignHCenter)
+        column.addWidget(self.settings_button)
         return rail
 
     # ------------------------------------------------------------------ nav

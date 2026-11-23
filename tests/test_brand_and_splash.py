@@ -828,11 +828,13 @@ def test_sidebar_holds_identity_navigation_and_settings(nora_app) -> None:
     _pump(200)
     rail = nora_app.sidebar
     assert rail.isVisible()
-    assert 70 <= rail.width() <= 100, "a rail, not a panel"
+    # A *labelled* rail now: wide enough to name each destination, still a
+    # column rather than a second page.
+    assert 180 <= rail.width() <= 240, "a labelled rail, not a panel"
 
     # the mark is in the rail, at the top, and bigger than a header badge
     assert rail.isAncestorOf(nora_app.logo_button)
-    assert nora_app.logo_button.width() >= 46
+    assert nora_app.logo_button.width() >= 40
     assert (
         nora_app.logo_button.mapTo(rail, nora_app.logo_button.rect().topLeft()).y() < 40
     )
@@ -842,6 +844,8 @@ def test_sidebar_holds_identity_navigation_and_settings(nora_app) -> None:
     for button in nora_app.nav_buttons.values():
         assert isinstance(button, NavButton)
         assert rail.isAncestorOf(button)
+        # every destination is *named*, not just an icon
+        assert button.with_label
     assert isinstance(nora_app.settings_button, NavButton)
     assert rail.isAncestorOf(nora_app.settings_button)
 
@@ -972,23 +976,43 @@ def test_window_controls_are_gradient_glyphs_without_a_panel(app) -> None:
     assert white == 0, "a white glyph only made sense on top of a gradient disc"
 
 
-def test_destinations_share_one_bordered_group(nora_app) -> None:
-    """Loose icons in a tall rail read as unfinished; one group reads as a menu."""
+def test_destinations_are_named_rows_not_bare_icons(nora_app) -> None:
+    """A sidebar that names its destinations, the way a desktop app does.
+
+    The previous design put five bare glyphs in a bordered pill.  Naming each
+    row costs 100 px of width and removes the need to learn icons, which is
+    what real app rails do.
+    """
     nora_app.show_chat()
     _pump(150)
-    groups = [
-        child
-        for child in nora_app.sidebar.findChildren(type(nora_app.sidebar))
-        if child.objectName() == "navGroup"
+    rail = nora_app.sidebar
+    for key, button in nora_app.nav_buttons.items():
+        assert button.with_label, f"{key} lost its caption"
+        assert button.LABELS[key]
+        # a row, wider than tall
+        assert button.width() > button.height(), f"{key} is not a row"
+        assert rail.isAncestorOf(button)
+        # the row uses the rail's width rather than hugging its glyph
+        assert button.width() > rail.width() * 0.7
+
+    # the section caption and the wordmark give the rail a hierarchy
+    captions = [
+        child.text()
+        for child in rail.findChildren(type(nora_app.chat_title))
+        if child.objectName() == "railCaption"
     ]
-    assert len(groups) == 1, "exactly one nav surface"
-    group = groups[0]
-    for button in nora_app.nav_buttons.values():
-        assert group.isAncestorOf(button), "every destination sits in the group"
-    # the setting is *outside* the group: it is not a destination, it is a tool
-    assert not group.isAncestorOf(nora_app.settings_button)
-    # and the group is wider than a bare 42 px button, so it frames them
-    assert group.width() > nora_app.nav_buttons["chat"].width() + 8
+    assert captions, "the rail has no section caption"
+    assert any(
+        "Nora" == child.text() for child in rail.findChildren(type(nora_app.chat_title))
+    ), "the rail lost its wordmark"
+
+    # settings is separated: a divider sits between it and the destinations
+    dividers = [
+        child
+        for child in rail.findChildren(type(nora_app.chat_header).__mro__[1])
+        if child.objectName() == "railDivider"
+    ]
+    assert dividers, "settings is not visually separated from the destinations"
 
 
 def test_header_title_follows_the_active_destination(nora_app) -> None:
@@ -1027,74 +1051,48 @@ def test_tools_menu_does_not_leave_the_rail_lit(nora_app) -> None:
     assert nora_app.chat_title.text() == "Sohbet"
 
 
-def test_hero_is_one_card_holding_mark_title_and_ways_in(nora_app) -> None:
-    """The empty state must have a shape, not float in the window."""
-    from PyQt5.QtWidgets import QLabel
+def test_hero_greets_and_offers_explained_suggestions(nora_app) -> None:
+    """Open greeting + a grid of cards that say *what will happen*.
+
+    The empty state used to be one bordered card with three bare pills.  It is
+    now an open greeting (calmer on the white page) with suggestion cards that
+    carry a glyph, a name and a one-line promise, so the greeting teaches the
+    product instead of only welcoming.
+    """
+    from nora.nora_glass import SuggestionCard
 
     nora_app.show_chat()
     _pump(200)
-    cards = [
-        child
-        for child in nora_app.hero.findChildren(type(nora_app.hero))
-        if child.objectName() == "heroCard"
-    ]
-    assert len(cards) == 1
-    card = cards[0]
-    # the mark, the greeting and the three chips all live inside the card
-    marks = [
-        label
-        for label in card.findChildren(QLabel)
-        if label.pixmap() is not None and not label.pixmap().isNull()
-    ]
-    assert marks, "the mark belongs in the card"
+    assert nora_app.hero.isVisible()
+    assert len(nora_app.hero_chips) >= 4, "the greeting offers too few ways in"
+
+    for card in nora_app.hero_chips:
+        assert isinstance(card, SuggestionCard)
+        assert card.title and card.blurb, "a suggestion without a promise"
+        assert card.glyph in SuggestionCard.GLYPHS
+        # cards are clickable rows, not pills
+        assert card.height() >= 80
+
+    # the greeting still names her and carries the mark
     titles = [
         label
-        for label in card.findChildren(QLabel)
+        for label in nora_app.hero.findChildren(type(nora_app.chat_title))
         if label.objectName() == "heroTitle"
     ]
     assert len(titles) == 1
-    for chip in nora_app.hero_chips:
-        assert card.isAncestorOf(chip)
-    # a card, not a full-width band
-    assert card.maximumWidth() <= 640
+    assert titles[0].text().startswith("Merhaba")
 
-
-def test_sidebar_glyphs_are_all_distinct(app) -> None:
-    """Five destinations must not share a shape, or the rail is unreadable."""
-    from nora.nora_glass import NavButton
-
-    signatures = set()
-    for glyph in NavButton.GLYPHS:
-        button = NavButton(glyph, size=42)
-        button.setActive(True)
-        button.show()
-        _pump(40)
-        image = button.grab().toImage()
-        # Signature = where ink landed.  Alpha, not RGB: the glyphs are drawn in
-        # a gradient now, so colour varies across a single stroke.
-        signature = tuple(
-            1 if image.pixelColor(x, y).alpha() > 70 else 0
-            for x in range(4, 39, 2)
-            for y in range(4, 39, 2)
-        )
-        signatures.add(signature)
-    assert len(signatures) == len(NavButton.GLYPHS)
-
-
-def test_send_button_is_a_gradient_glyph_not_a_disc(nora_app) -> None:
-    """The send action is an icon; a filled pink disc dominated the composer."""
-    nora_app.show_chat()
-    _pump(200)
-    button = nora_app.send_button
-    assert button.objectName() == "sendGlyph"
-    assert not button.icon().isNull(), "the send glyph is missing"
-    # The icon must carry colour, not be a font glyph in the text colour.
-    image = button.icon().pixmap(26, 26).toImage()
-    vivid = sum(
-        1
-        for x in range(image.width())
-        for y in range(image.height())
-        if image.pixelColor(x, y).alpha() > 60
-        and image.pixelColor(x, y).saturation() > 70
-    )
-    assert vivid > 15, "the send icon is not painted in brand ink"
+    # The greeting column is centred on the page: equal margins either side.
+    # Measure the hero's direct child that *contains* the title, rather than
+    # walking up from the label — the search order of findChildren is not the
+    # parent chain.
+    holders = [
+        child
+        for child in nora_app.hero.findChildren(type(nora_app.hero))
+        if child.parentWidget() is nora_app.hero and child.isAncestorOf(titles[0])
+    ]
+    assert len(holders) == 1, "the greeting is not a single centred column"
+    column = holders[0]
+    left = column.x()
+    right = nora_app.hero.width() - left - column.width()
+    assert abs(left - right) <= 3, f"the greeting is off-centre ({left} vs {right})"

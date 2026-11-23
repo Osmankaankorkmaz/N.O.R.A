@@ -30,7 +30,9 @@ from PyQt5.QtCore import (
     QPoint,
     QPointF,
     QPropertyAnimation,
+    QRect,
     QRectF,
+    QSize,
     Qt,
     QTimer,
 )
@@ -38,6 +40,7 @@ from PyQt5.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetrics,
     QGuiApplication,
     QImage,
     QLinearGradient,
@@ -170,11 +173,9 @@ QWidget#sidebar {{
         stop:0 rgba(255,255,255,214), stop:1 rgba(250,247,255,168));
     border-right: 1px solid rgba(24,18,40,22);
 }}
-QWidget#navGroup {{
-    background: rgba(255,255,255,230);
-    border: 1px solid rgba(24,18,40,24);
-    border-radius: 26px;
-}}
+QLabel#wordmark {{ color: {TEXT.name()}; font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }}
+QLabel#railCaption {{ color: {TEXT_FAINT.name()}; font-size: 9px; font-weight: 600; letter-spacing: 1.1px; }}
+QFrame#railDivider {{ background: {css(HAIRLINE)}; border: none; max-height: 1px; }}
 QWidget#heroCard {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
         stop:0 rgba(255,255,255,244), stop:1 rgba(252,248,255,238));
@@ -193,8 +194,9 @@ QLabel {{ color: {TEXT.name()}; background: transparent; }}
 QLabel#title {{ color: {TEXT.name()}; font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }}
 QLabel#subtitle {{ color: {TEXT_DIM.name()}; font-size: 11px; letter-spacing: 0.3px; }}
 QLabel#status {{ color: {TEXT_DIM.name()}; font-size: 11px; }}
-QLabel#heroTitle {{ color: {TEXT.name()}; font-size: 30px; font-weight: 600; letter-spacing: -0.4px; }}
-QLabel#heroBody {{ color: {TEXT_DIM.name()}; font-size: 13px; }}
+QLabel#heroTitle {{ color: {TEXT.name()}; font-size: 34px; font-weight: 700; letter-spacing: -0.7px; }}
+QLabel#heroBody {{ color: {TEXT_DIM.name()}; font-size: 13.5px; }}
+QLabel#heroCaption {{ color: {TEXT_FAINT.name()}; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; }}
 
 QPushButton {{
     background: rgba(24,18,40,7);
@@ -999,14 +1001,36 @@ class NavButton(QAbstractButton):
     #: Active glyphs are saturated; idle ones fall back to this ink.
     IDLE_INK = QColor(TEXT_DIM)
 
+    #: The caption under each glyph, used when the rail is wide enough.
+    LABELS = {
+        "chat": "Sohbet",
+        "notes": "Notlar",
+        "tools": "Araçlar",
+        "profile": "Kişisel",
+        "settings": "Ayarlar",
+    }
+
     def __init__(
-        self, glyph: str, parent: QWidget | None = None, *, size: int = 42
+        self,
+        glyph: str,
+        parent: QWidget | None = None,
+        *,
+        size: int = 42,
+        with_label: bool = False,
     ) -> None:
         super().__init__(parent)
         if glyph not in self.GLYPHS:
             raise ValueError(f"bilinmeyen gezinme simgesi: {glyph}")
         self.glyph = glyph
-        self.setFixedSize(size, size)
+        #: A wide rail carries a caption under the glyph; the compact rail does
+        #: not.  The label rides in the same widget so hover/active stay in one
+        #: place and the whole row is one hit target.
+        self.with_label = bool(with_label)
+        if self.with_label:
+            self.setFixedHeight(size)
+            self.setMinimumWidth(120)
+        else:
+            self.setFixedSize(size, size)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         # Both attributes are required for a self-painting widget on a
@@ -1043,12 +1067,18 @@ class NavButton(QAbstractButton):
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
 
+        if self.with_label:
+            self._paint_row(painter, draw_glyph)
+        else:
+            self._paint_compact(painter, draw_glyph)
+        painter.end()
+
+    def _paint_compact(self, painter: QPainter, draw_glyph) -> None:
+        """The icon-only form: a whisper behind the glyph, nothing else."""
         box = QRectF(self.rect()).adjusted(9, 9, -9, -9)
-
         if self._active or self._hover:
-            # A whisper of the brand *behind* the ink, not a filled button:
-            # enough to say "here", not enough to shout.
             pill = QPainterPath()
             pill.addRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), 14, 14)
             painter.setPen(Qt.NoPen)
@@ -1063,6 +1093,204 @@ class NavButton(QAbstractButton):
             painter.setPen(QPen(self.IDLE_INK, 1.7))
         painter.setBrush(Qt.NoBrush)
         draw_glyph(painter, self.glyph, box)
+
+    def _paint_row(self, painter: QPainter, draw_glyph) -> None:
+        """The wide form: glyph on the left, caption on the right.
+
+        The rail reads as a list of destinations rather than a strip of icons —
+        the same reason a desktop app names its sections.  The active row is a
+        full-width soft pill in the brand tint; the glyph alone carries the
+        gradient, so the row stays calm.
+        """
+        full = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        if self._active or self._hover:
+            pill = QPainterPath()
+            pill.addRoundedRect(full, 13, 13)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(123, 92, 255, 30 if self._active else 16))
+            painter.drawPath(pill)
+            if self._active:
+                # A 3 px gradient bar on the rail's edge marks the destination.
+                bar = QRectF(full.left() + 1, full.top() + 9, 3.0, full.height() - 18)
+                painter.setBrush(gradient_brush(bar, vertical=True))
+                painter.drawRoundedRect(bar, 1.5, 1.5)
+
+        glyph_box = QRectF(full.left() + 8, full.top(), 34, full.height())
+        glyph_box = glyph_box.adjusted(6, 7, -6, -7)
+
+        if self._active:
+            painter.setPen(QPen(gradient_brush(glyph_box, vertical=True), 1.9))
+        elif self._hover:
+            painter.setPen(QPen(QColor(ACCENT), 1.9))
+        else:
+            painter.setPen(QPen(self.IDLE_INK, 1.7))
+        painter.setBrush(Qt.NoBrush)
+        draw_glyph(painter, self.glyph, glyph_box)
+
+        # The caption.  Weight carries the state, colour stays quiet so the
+        # icons remain the loudest thing in the rail.
+        font = QFont(self.font())
+        font.setPointSizeF(9.4)
+        font.setWeight(QFont.DemiBold if self._active else QFont.Medium)
+        painter.setFont(font)
+        painter.setPen(QColor(TEXT if self._active else TEXT_DIM))
+        text_rect = QRectF(
+            glyph_box.right() + 10,
+            full.top(),
+            full.width() - glyph_box.width() - 26,
+            full.height(),
+        )
+        painter.drawText(
+            text_rect, int(Qt.AlignLeft | Qt.AlignVCenter), self.LABELS[self.glyph]
+        )
+
+
+class SuggestionCard(QAbstractButton):
+    """A way into the product: a gradient glyph, a name, and what it gives you.
+
+    The greeting used to offer three bare pills.  A card that also says *what
+    will happen* teaches the product while it waits — and it gives the empty
+    state a grid to sit on instead of a void.  Painted, not styled: the icon is
+    the same hand-drawn glyph family as the rail, so the two read as one app.
+    """
+
+    GLYPHS = ("screen", "clock", "notes", "spark")
+
+    def __init__(
+        self,
+        glyph: str,
+        title: str,
+        blurb: str,
+        parent: QWidget | None = None,
+        *,
+        width: int = 344,
+        height: int = 92,
+    ) -> None:
+        super().__init__(parent)
+        if glyph not in self.GLYPHS:
+            raise ValueError(f"bilinmeyen öneri simgesi: {glyph}")
+        self.glyph = glyph
+        self.title = title
+        self.blurb = blurb
+        # Flexible in *both* directions.  A fixed height clipped the blurb on a
+        # narrow window (the title wraps to two lines and the promise had no
+        # room).  The grid still keeps a rhythm because every card in a row
+        # gets the row's height.
+        self.setMinimumSize(width // 2, height)
+        self.setMaximumWidth(width)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
+        self.setAccessibleName(title)
+        self.setToolTip(blurb)
+        self._hover = False
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt naming
+        """Tall enough for a wrapped title *and* the blurb underneath it."""
+        return QSize(self.maximumWidth(), self._wrapped_height())
+
+    def _wrapped_height(self) -> int:
+        """The height this card needs at its **current** width."""
+        width = max(self.width(), self.minimumWidth()) - 13 - 34 - 11 - 11
+        title_font = QFont(self.font())
+        title_font.setPointSizeF(10.6)
+        title_font.setWeight(QFont.DemiBold)
+        blurb_font = QFont(self.font())
+        blurb_font.setPointSizeF(8.8)
+        title_h = (
+            QFontMetrics(title_font)
+            .boundingRect(QRect(0, 0, width, 1000), int(Qt.TextWordWrap), self.title)
+            .height()
+        )
+        blurb_h = (
+            QFontMetrics(blurb_font)
+            .boundingRect(QRect(0, 0, width, 1000), int(Qt.TextWordWrap), self.blurb)
+            .height()
+        )
+        return title_h + blurb_h + 16 + 20 + 14
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        from .nora_glyphs import draw_glyph
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+
+        card = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+
+        # The surface: white paper, a hairline, and a brand-tinted shadow that
+        # only appears on hover.  Resting cards must not look clickable-loud.
+        painter.setPen(QPen(QColor(123, 92, 255, 54 if self._hover else 0), 1.2))
+        painter.setBrush(QColor(255, 255, 255, 250))
+        painter.drawRoundedRect(card, 16, 16)
+        painter.setPen(QPen(QColor(123, 92, 255, 40) if self._hover else HAIRLINE, 1.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(card, 16, 16)
+
+        # The glyph badge: a rounded gradient tile, the same material as the
+        # mark, so each card carries the brand without becoming a button.
+        badge = QRectF(card.left() + 13, card.top() + 16, 34, 34)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(gradient_brush(badge))
+        painter.drawRoundedRect(badge, 11, 11)
+        glyph_box = badge.adjusted(8, 8, -8, -8)
+        painter.setPen(
+            QPen(
+                QColor(255, 255, 255, 240), 1.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin
+            )
+        )
+        painter.setBrush(Qt.NoBrush)
+        draw_glyph(painter, self.glyph, glyph_box)
+
+        text_left = badge.right() + 11
+        text_width = card.right() - text_left - 11
+
+        # Both strings wrap.  A card can be 180 px wide on a small window, and
+        # a single-line title was simply cut off at the badge ("Ekranımı öz…"):
+        # the promise the card makes has to survive the narrow case.
+        title_font = QFont(self.font())
+        title_font.setPointSizeF(10.6)
+        title_font.setWeight(QFont.DemiBold)
+        painter.setFont(title_font)
+        painter.setPen(QColor(TEXT))
+        title_flags = int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap)
+        title_rect = QRectF(text_left, card.top() + 18, text_width, 34)
+        painter.drawText(title_rect, title_flags, self.title)
+
+        # The blurb starts under the title, wherever the title actually ended,
+        # so a two-line title never collides with it.
+        used = painter.boundingRect(
+            title_rect.toRect(),
+            int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap),
+            self.title,
+        ).height()
+        blurb_font = QFont(self.font())
+        blurb_font.setPointSizeF(8.8)
+        painter.setFont(blurb_font)
+        painter.setPen(QColor(TEXT_DIM))
+        painter.drawText(
+            QRectF(
+                text_left,
+                card.top() + 20 + used,
+                text_width,
+                card.bottom() - (card.top() + 20 + used) - 12,
+            ),
+            int(Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap),
+            self.blurb,
+        )
         painter.end()
 
 

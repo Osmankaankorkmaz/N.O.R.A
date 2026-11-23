@@ -73,6 +73,33 @@ def draw_glyph(painter: QPainter, kind: str, box: QRectF) -> None:
                 c.y() + math.sin(angle) * r * 1.12,
             )
             painter.drawLine(inner, outer)
+    elif kind == "screen":
+        # a monitor: frame, stand, base
+        frame = QRectF(c.x() - r * 1.15, c.y() - r * 0.95, r * 2.3, r * 1.6)
+        painter.drawRoundedRect(frame, r * 0.22, r * 0.22)
+        painter.drawLine(
+            QPointF(c.x(), frame.bottom()), QPointF(c.x(), frame.bottom() + r * 0.36)
+        )
+        painter.drawLine(
+            QPointF(c.x() - r * 0.5, frame.bottom() + r * 0.38),
+            QPointF(c.x() + r * 0.5, frame.bottom() + r * 0.38),
+        )
+    elif kind == "clock":
+        painter.drawEllipse(c, r * 1.08, r * 1.08)
+        # hands: to ten past ten, the readable angle
+        painter.drawLine(c, QPointF(c.x() + r * 0.06, c.y() - r * 0.62))
+        painter.drawLine(c, QPointF(c.x() + r * 0.55, c.y() + r * 0.2))
+    elif kind == "spark":
+        # the same four-point sparkle as the mark
+        size = r * 1.15
+        path = QPainterPath()
+        path.moveTo(c.x(), c.y() - size)
+        path.quadTo(c.x() + size * 0.2, c.y() - size * 0.2, c.x() + size, c.y())
+        path.quadTo(c.x() + size * 0.2, c.y() + size * 0.2, c.x(), c.y() + size)
+        path.quadTo(c.x() - size * 0.2, c.y() + size * 0.2, c.x() - size, c.y())
+        path.quadTo(c.x() - size * 0.2, c.y() - size * 0.2, c.x(), c.y() - size)
+        path.closeSubpath()
+        painter.drawPath(path)
     elif kind == "send":
         # A paper plane pointing right, filled.  Tip on the right, two swept
         # wings and a notch cut into the trailing edge — drawn rather than
