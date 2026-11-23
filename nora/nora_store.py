@@ -24,6 +24,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 1
 DEFAULT_PREFERENCES: dict[str, Any] = {
+    #: The rail's folded state.  Remembered so a sidebar the user closed stays
+    #: closed on the next start instead of fighting them every launch.
+    "rail_collapsed": False,
     "address": "senpai",
     "tone": "tsundere",
     "speech_rate": 180,

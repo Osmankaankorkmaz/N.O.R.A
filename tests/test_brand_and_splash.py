@@ -1096,3 +1096,122 @@ def test_hero_greets_and_offers_explained_suggestions(nora_app) -> None:
     left = column.x()
     right = nora_app.hero.width() - left - column.width()
     assert abs(left - right) <= 3, f"the greeting is off-centre ({left} vs {right})"
+
+
+def test_rail_can_be_folded_and_reopened(nora_app) -> None:
+    """The rail folds to glyphs and opens again, without losing its icons.
+
+    A 208 px rail is right while learning the app and wrong while reading a long
+    answer; folding it hands 140 px back to the conversation.
+    """
+    nora_app.show_chat()
+    _pump(150)
+    rail = nora_app.sidebar
+    wide = rail.width()
+    assert wide == nora_app.RAIL_WIDTH
+
+    nora_app.toggle_rail(True)
+    _pump(320)
+    assert rail.width() == nora_app.RAIL_WIDTH_COMPACT
+    assert rail.width() < wide
+    # the captions are gone, so the rows are glyphs only
+    for button in nora_app.nav_buttons.values():
+        assert not button.with_label
+    assert not nora_app.wordmark.isVisible()
+    assert not nora_app.rail_caption.isVisible()
+
+    # the glyph is still *inside* the folded rail: a row asking for more width
+    # than the rail has would spill its icon over the edge
+    for button in nora_app.nav_buttons.values():
+        assert rail.isAncestorOf(button)
+        assert button.width() <= rail.width()
+        left = button.mapTo(rail, button.rect().topLeft()).x()
+        assert left >= 0
+        assert left + button.width() <= rail.width()
+
+    nora_app.toggle_rail(False)
+    _pump(320)
+    assert rail.width() == wide
+    assert all(button.with_label for button in nora_app.nav_buttons.values())
+    assert nora_app.wordmark.isVisible()
+
+
+def test_rail_choice_is_remembered(nora_app) -> None:
+    """A sidebar that re-opens on every start is a sidebar the user fights."""
+    nora_app.show_chat()
+    _pump(150)
+    nora_app.toggle_rail(True)
+    _pump(250)
+    assert nora_app.store.preference("rail_collapsed", False) is True
+    nora_app.toggle_rail(False)
+    _pump(250)
+    assert nora_app.store.preference("rail_collapsed", True) is False
+
+
+def test_rail_toggle_glyph_flips_with_the_rail(nora_app) -> None:
+    """The chevron points where the rail is going, not where it came from."""
+    from nora.nora_glass import NavButton
+
+    nora_app.show_chat()
+    _pump(150)
+    toggle = nora_app.rail_toggle
+    assert toggle.glyph == "collapse"
+    assert nora_app._rail_collapsed is False
+    assert "daralt" in toggle.toolTip().lower()
+
+    nora_app.toggle_rail(True)
+    _pump(250)
+    assert toggle.collapsed is True
+    assert "aç" in toggle.toolTip().lower()
+
+    # The chevron must actually mirror.  Compare the *ink* only: the resting
+    # pill behind it is identical in both states and would otherwise dominate
+    # the comparison (which is how a broken flip slipped through once).
+    def ink_pixels(collapsed: bool) -> set[tuple[int, int]]:
+        button = NavButton("collapse", size=32, with_label=False)
+        button.collapsed = collapsed
+        button.update()
+        button.show()
+        _pump(80)
+        QApplication.processEvents()
+        image = button.grab().toImage()
+        # Only the *chevron*: skip the pill outline at the edge of the widget
+        # and the white fill it sits on.  The stroke is mid-grey/lavender, so
+        # require real alpha plus a colour clearly darker than the surface.
+        ink = set()
+        for x in range(3, image.width() - 3):
+            for y in range(3, image.height() - 3):
+                colour = image.pixelColor(x, y)
+                if colour.alpha() < 200:
+                    continue
+                if colour.lightness() > 160:
+                    continue
+                ink.add((x, y))
+        return ink
+
+    folded = ink_pixels(True)
+    opened = ink_pixels(False)
+    assert folded and opened, "the toggle drew no chevron"
+    # a mirrored chevron occupies different pixels, but the same count
+    assert folded != opened, "the chevron does not flip"
+    assert abs(len(folded) - len(opened)) <= 4, "the flip changed weight"
+    # and it really points the other way: the mirrored set is the x-flip
+    width = max(x for x, _ in opened) + min(x for x, _ in opened)
+    mirrored = {(width - x, y) for x, y in opened}
+    overlap = len(mirrored & folded) / max(1, len(folded))
+    assert overlap > 0.6, f"the folded chevron is not mirrored (overlap {overlap:.2f})"
+
+
+def test_chat_subtitle_says_something_new(nora_app) -> None:
+    """The subtitle must add information, not echo the rail label."""
+    nora_app.show_chat()
+    _pump(150)
+    title, subtitle = nora_app.NAV_PAGES["chat"]
+    assert nora_app.chat_title.text() == title
+    assert nora_app.chat_subtitle.text() == subtitle
+    # it must not restate the page name we already label in the rail
+    assert title.lower() not in subtitle.lower()
+    assert subtitle.strip().endswith("?") or len(subtitle) > 12
+    # every page has its own subtitle, no duplicates
+    subtitles = [sub for _, sub in nora_app.NAV_PAGES.values()]
+    assert len(set(subtitles)) == len(subtitles)

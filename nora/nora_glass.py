@@ -996,7 +996,7 @@ class NavButton(QAbstractButton):
     paints a background, so the rail's glass shows through.
     """
 
-    GLYPHS = ("chat", "notes", "tools", "profile", "settings")
+    GLYPHS = ("chat", "notes", "tools", "profile", "settings", "collapse")
 
     #: Active glyphs are saturated; idle ones fall back to this ink.
     IDLE_INK = QColor(TEXT_DIM)
@@ -1008,6 +1008,7 @@ class NavButton(QAbstractButton):
         "tools": "Araçlar",
         "profile": "Kişisel",
         "settings": "Ayarlar",
+        "collapse": "Rayı daralt",
     }
 
     def __init__(
@@ -1028,7 +1029,9 @@ class NavButton(QAbstractButton):
         self.with_label = bool(with_label)
         if self.with_label:
             self.setFixedHeight(size)
-            self.setMinimumWidth(120)
+            # No minimum width: the rail animates its own width, and a row that
+            # demands 120 px spills its glyph over the edge while it shrinks.
+            self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         else:
             self.setFixedSize(size, size)
         self.setCursor(Qt.PointingHandCursor)
@@ -1042,6 +1045,8 @@ class NavButton(QAbstractButton):
         self.setCheckable(False)
         self._hover = False
         self._active = False
+        #: Set by the rail when it is folded; only flips the chevrons.
+        self.collapsed = False
 
     def setActive(self, active: bool) -> None:  # noqa: N802 - Qt style naming
         if self._active == bool(active):
@@ -1084,6 +1089,19 @@ class NavButton(QAbstractButton):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(123, 92, 255, 26 if self._active else 14))
             painter.drawPath(pill)
+        elif self.glyph == "collapse":
+            # The toggle is not a destination, so it has no active state; it
+            # still needs a resting surface or it reads as stray punctuation.
+            # Drawn as two explicit passes: fill first, then an outline.  A
+            # QPainterPath with a 16-alpha pen *and* a brush rendered the
+            # outline as opaque black on Windows.
+            pill = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 220))
+            painter.drawRoundedRect(pill, 10, 10)
+            painter.setPen(QPen(QColor(24, 18, 40, 22), 1.0))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(pill, 10, 10)
 
         if self._active:
             painter.setPen(QPen(gradient_brush(self.rect(), vertical=True), 1.9))
@@ -1092,7 +1110,18 @@ class NavButton(QAbstractButton):
         else:
             painter.setPen(QPen(self.IDLE_INK, 1.7))
         painter.setBrush(Qt.NoBrush)
+        # The collapse chevron mirrors when the rail is folded, so the glyph
+        # always points where the rail is going.  This lives here, not in the
+        # row painter: the toggle is icon-only in both rail states.
+        flipped = self.glyph == "collapse" and self.collapsed
+        if flipped:
+            painter.save()
+            painter.translate(box.center())
+            painter.scale(-1.0, 1.0)
+            painter.translate(-box.center())
         draw_glyph(painter, self.glyph, box)
+        if flipped:
+            painter.restore()
 
     def _paint_row(self, painter: QPainter, draw_glyph) -> None:
         """The wide form: glyph on the left, caption on the right.
@@ -1115,8 +1144,19 @@ class NavButton(QAbstractButton):
                 painter.setBrush(gradient_brush(bar, vertical=True))
                 painter.drawRoundedRect(bar, 1.5, 1.5)
 
-        glyph_box = QRectF(full.left() + 8, full.top(), 34, full.height())
+        # The glyph sits at a fixed inset from the left, so a collapsing rail
+        # does not slide the icon: the caption fades out underneath it and the
+        # icon simply becomes the whole row.
+        glyph_centre = full.left() + 8 + 17
+        glyph_box = QRectF(glyph_centre - 17, full.top(), 34, full.height())
         glyph_box = glyph_box.adjusted(6, 7, -6, -7)
+        # The collapse chevron mirrors when the rail is folded, so it always
+        # points at where the rail is going rather than where it came from.
+        if self.glyph == "collapse" and self.collapsed:
+            painter.save()
+            painter.translate(glyph_box.center())
+            painter.scale(-1.0, 1.0)
+            painter.translate(-glyph_box.center())
 
         if self._active:
             painter.setPen(QPen(gradient_brush(glyph_box, vertical=True), 1.9))
@@ -1126,23 +1166,37 @@ class NavButton(QAbstractButton):
             painter.setPen(QPen(self.IDLE_INK, 1.7))
         painter.setBrush(Qt.NoBrush)
         draw_glyph(painter, self.glyph, glyph_box)
+        if self.glyph == "collapse" and self.collapsed:
+            painter.restore()
 
         # The caption.  Weight carries the state, colour stays quiet so the
-        # icons remain the loudest thing in the rail.
+        # icons remain the loudest thing in the rail.  While the rail collapses
+        # the caption is both clipped to the remaining width and faded, so it
+        # disappears instead of being cut in half mid-word.
+        room = full.right() - (glyph_box.right() + 10) - 10
+        if room < 18:
+            return
+        painter.save()
+        painter.setClipRect(
+            QRectF(glyph_box.right() + 10, full.top(), max(0.0, room), full.height())
+        )
         font = QFont(self.font())
         font.setPointSizeF(9.4)
         font.setWeight(QFont.DemiBold if self._active else QFont.Medium)
         painter.setFont(font)
-        painter.setPen(QColor(TEXT if self._active else TEXT_DIM))
+        ink = QColor(TEXT if self._active else TEXT_DIM)
+        ink.setAlphaF(max(0.0, min(1.0, (room - 18) / 46.0)))
+        painter.setPen(ink)
         text_rect = QRectF(
             glyph_box.right() + 10,
             full.top(),
-            full.width() - glyph_box.width() - 26,
+            room,
             full.height(),
         )
         painter.drawText(
             text_rect, int(Qt.AlignLeft | Qt.AlignVCenter), self.LABELS[self.glyph]
         )
+        painter.restore()
 
 
 class SuggestionCard(QAbstractButton):

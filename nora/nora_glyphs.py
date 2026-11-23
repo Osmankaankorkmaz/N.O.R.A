@@ -73,6 +73,17 @@ def draw_glyph(painter: QPainter, kind: str, box: QRectF) -> None:
                 c.y() + math.sin(angle) * r * 1.12,
             )
             painter.drawLine(inner, outer)
+    elif kind == "collapse":
+        # A chevron pointing left: "fold the rail away".  The button flips it
+        # once the rail is down, so the glyph always points where the rail is
+        # going.  Sized from the *box*, not from the shared ``r``: the toggle is
+        # a 32 px control, and r-based maths made a chevron two pixels wide.
+        span = w * 0.34
+        path = QPainterPath()
+        path.moveTo(c.x() + span * 0.55, c.y() - span)
+        path.lineTo(c.x() - span * 0.55, c.y())
+        path.lineTo(c.x() + span * 0.55, c.y() + span)
+        painter.drawPath(path)
     elif kind == "screen":
         # a monitor: frame, stand, base
         frame = QRectF(c.x() - r * 1.15, c.y() - r * 0.95, r * 2.3, r * 1.6)

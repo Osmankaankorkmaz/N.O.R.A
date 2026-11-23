@@ -17,8 +17,10 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from PyQt5.QtCore import (
+    QEasingCurve,
     QEvent,
     QPoint,
+    QPropertyAnimation,
     QRectF,
     QSize,
     Qt,
@@ -426,6 +428,8 @@ class NoraApp(QWidget):
         self._message_rows: list[QWidget] = []
         #: Which rail destination is lit; the rail itself is built later.
         self._active_nav = "chat"
+        #: Whether the rail is folded to glyphs (restored from preferences).
+        self._rail_collapsed = False
         self._chat_user_moved = False
         self._chat_drag_offset: QPoint | None = None
         self._notified_errors: set[str] = set()
@@ -675,6 +679,9 @@ class NoraApp(QWidget):
     #: Width of the labelled rail.  Wide enough for "Kişisel panel" on one
     #: line, narrow enough to leave the conversation the rest of the window.
     RAIL_WIDTH = 208
+    #: The collapsed rail: wide enough for one 42 px glyph plus its insets, so
+    #: the icons keep their rhythm and nothing re-flows except the captions.
+    RAIL_WIDTH_COMPACT = 68
 
     def _build_sidebar(self) -> QWidget:
         """The rail: her mark, four named destinations, settings at the bottom.
@@ -698,18 +705,32 @@ class NoraApp(QWidget):
         mark_row.setContentsMargins(0, 0, 0, 0)
         mark_row.setSpacing(10)
         mark_row.addWidget(self.logo_button)
-        wordmark = QLabel("Nora")
-        wordmark.setObjectName("wordmark")
-        mark_row.addWidget(wordmark)
+        self.wordmark = QLabel("Nora")
+        self.wordmark.setObjectName("wordmark")
+        mark_row.addWidget(self.wordmark)
         mark_row.addStretch(1)
         column.addLayout(mark_row)
 
-        column.addSpacing(24)
+        # The collapse control sits in its own row under the mark: in the
+        # header row it squeezed the wordmark against the mark when the rail
+        # shrank, and the rail has vertical room to spare.
+        self.rail_toggle = NavButton("collapse", rail, with_label=False, size=32)
+        self.rail_toggle.setObjectName("railToggle")
+        self.rail_toggle.setToolTip("Rayı daralt")
+        self.rail_toggle.setAccessibleName("Rayı daralt")
+        self.rail_toggle.clicked.connect(self.toggle_rail)
+        toggle_row = QHBoxLayout()
+        toggle_row.setContentsMargins(0, 12, 0, 0)
+        toggle_row.addWidget(self.rail_toggle)
+        toggle_row.addStretch(1)
+        column.addLayout(toggle_row)
+
+        column.addSpacing(18)
 
         # A quiet section caption, the way a real sidebar names its group.
-        caption = QLabel("ÇALIŞMA ALANI")
-        caption.setObjectName("railCaption")
-        column.addWidget(caption)
+        self.rail_caption = QLabel("ÇALIŞMA ALANI")
+        self.rail_caption.setObjectName("railCaption")
+        column.addWidget(self.rail_caption)
         column.addSpacing(8)
 
         self.nav_buttons: dict[str, QPushButton] = {}
@@ -746,10 +767,13 @@ class NoraApp(QWidget):
     # ------------------------------------------------------------------ nav
     #: Header title and subtitle for each destination in the rail.  One place,
     #: so the rail and the page title can never disagree.
+    #: Title and subtitle per destination.  The subtitle says what the page is
+    #: *for*, not what it is called: "Nora ile konuş" described the rail item we
+    #: already labelled "Sohbet", and repeated it instead of adding anything.
     NAV_PAGES: dict[str, tuple[str, str]] = {
-        "chat": ("Sohbet", "Nora ile konuş"),
+        "chat": ("Sohbet", "Ne yapacağız, Nora?"),
         "notes": ("Notlar", "Aklında tutmamı istediklerin"),
-        "tools": ("Araçlar", "Ekran, kamera, sistem, modeller"),
+        "tools": ("Araçlar", "Ekranına bak, sistemini oku, modelini seç"),
         "profile": ("Kişisel panel", "Seni tanıdığım kadarı"),
     }
 
@@ -762,6 +786,49 @@ class NoraApp(QWidget):
             self.chat_title.setText(title)
         if getattr(self, "chat_subtitle", None) is not None:
             self.chat_subtitle.setText(subtitle)
+
+    # ------------------------------------------------------------------ rail
+    def toggle_rail(self, collapsed: bool | None = None) -> None:
+        """Collapse the rail to glyphs, or open it again.
+
+        A 208 px rail is right when the user is learning the app and wrong once
+        they are reading a long answer: folding it to 68 px gives the
+        conversation 140 px of width back.  The choice is remembered, because a
+        sidebar that re-opens on every start is a sidebar the user has to fight.
+        """
+        if collapsed is None:
+            collapsed = not getattr(self, "_rail_collapsed", False)
+        collapsed = bool(collapsed)
+        if collapsed == getattr(self, "_rail_collapsed", None):
+            return
+        self._rail_collapsed = collapsed
+
+        target = self.RAIL_WIDTH_COMPACT if collapsed else self.RAIL_WIDTH
+        self._rail_animation = QPropertyAnimation(self.sidebar, b"minimumWidth")
+        self._rail_animation.setDuration(160)
+        self._rail_animation.setStartValue(self.sidebar.width())
+        self._rail_animation.setEndValue(target)
+        self._rail_animation.setEasingCurve(QEasingCurve.OutCubic)
+        # maximumWidth too, or setFixedWidth would pin the old value back on.
+        self.sidebar.setMaximumWidth(target)
+        self._rail_animation.finished.connect(
+            lambda: self.sidebar.setFixedWidth(target)
+        )
+        self._rail_animation.start()
+
+        for button in (*self.nav_buttons.values(), self.settings_button):
+            button.with_label = not collapsed
+            button.update()
+        self.wordmark.setVisible(not collapsed)
+        self.rail_caption.setVisible(not collapsed)
+        self.rail_toggle.setToolTip("Rayı aç" if collapsed else "Rayı daralt")
+        self.rail_toggle.setAccessibleName(self.rail_toggle.toolTip())
+        self.rail_toggle.collapsed = collapsed
+        self.rail_toggle.update()
+        try:
+            self.store.set_preference("rail_collapsed", collapsed)
+        except Exception:  # storage is best-effort; never block the UI on it
+            logger.debug("ray tercihi yazılamadı", exc_info=True)
 
     def _show_chat_page(self) -> None:
         self._set_active_nav("chat")
@@ -831,6 +898,14 @@ class NoraApp(QWidget):
         shell.setSpacing(0)
 
         self.sidebar = self._build_sidebar()
+        # Restore the rail's folded state without animating it: the window is
+        # not on screen yet, so a 160 ms slide would just delay the first paint.
+        try:
+            if self.store.preference("rail_collapsed", False):
+                self.sidebar.setFixedWidth(self.RAIL_WIDTH_COMPACT)
+                self.toggle_rail(True)
+        except Exception:
+            logger.debug("ray tercihi okunamadı", exc_info=True)
         shell.addWidget(self.sidebar)
 
         stage = QWidget()
@@ -869,11 +944,14 @@ class NoraApp(QWidget):
         titles = QVBoxLayout(title_box)
         titles.setContentsMargins(0, 0, 0, 0)
         titles.setSpacing(1)
-        title = QLabel("Sohbet")
+        title = QLabel(self.NAV_PAGES["chat"][0])
         title.setObjectName("title")
         self.chat_title = title
         titles.addWidget(title, 0, Qt.AlignLeft)
-        self.chat_subtitle = QLabel("Nora ile konuş")
+        # The initial text must match NAV_PAGES: the rail is built before the
+        # header, so _set_active_nav("chat") runs while these labels do not yet
+        # exist and cannot fill them in.
+        self.chat_subtitle = QLabel(self.NAV_PAGES["chat"][1])
         self.chat_subtitle.setObjectName("subtitle")
         titles.addWidget(self.chat_subtitle, 0, Qt.AlignLeft)
         header_outer.addWidget(title_box, 0, Qt.AlignVCenter)
